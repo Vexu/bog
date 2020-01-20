@@ -1,0 +1,78 @@
+root <- stmt*
+
+stmt <-
+    / if
+    / while
+    / for
+    / match
+    / let
+    / expr
+    / assign
+    / "return" expr
+    / "break"
+    / "continue"
+
+if <- "if" bool_expr block ("else" "if" bool_expr block)* ("else" block)?
+
+while <- "while" bool_expr block
+
+for <- "for" unwrap "in" bit_expr ("..." bit_expr) block
+
+block <- (INDENT stmt)+
+
+match <- "match" bool_expr (INDENT match_case)+
+
+match_case <-
+    / unwrap block
+    / (bool_expr ("..." bool_expr) ",")+ block
+
+let <- "let" unwrap "=" expr
+
+assign <- 
+    / IDENTIFIER "=" expr
+    / IDENTIFIER ("+=" / "-=" / "*=" / "/=" / "%=" / "<<=" / ">>=" / "&=" / "|=" / "^=") bit_expr
+
+unwrap <-
+    / IDENTIFIER
+    / "{" IDENTIFIER ("," IDENTIFIER)* "}"
+    / "(" IDENTIFIER ("," IDENTIFIER)* ")"
+    / "[" IDENTIFIER ("," IDENTIFIER)* "]"
+    / "error" IDENTIFIER
+
+expr <- (fn / import / bool_expr)
+
+fn <- "|" (unwrap ",")* "|" (block / bool_expr)
+
+import <- "import" STRING
+
+bool_expr <- bit_expr (("or" bit_expr)* / ("and" bit_expr)*)
+
+bit_expr <- equality_expr (("&" equality_expr)* / ("|" equality_expr)* / ("|" equality_expr)*)
+
+equality_expr <- comparision_expr (("==" / "!=") comparision_expr)*
+
+comparision_expr <- shift_expr (("<" / "<=" / ">" / ">=" / "in") shift_expr)*
+
+shift_expr <- add_expr (("<<" / ">>") add_expr)
+
+add_expr <- mul_expr (("-" / "+") mul_expr)*
+
+mul_expr <- prefix_expr (("*" / "/" / "%") prefix_expr)*
+
+prefix_expr <- ("-", "+", "not", "~") primary_expr suffix_expr*
+
+suffix_expr <-
+    / "[" expr "]"
+    / "(" (expr ",")* ")"
+    / "." IDENTIFIER
+
+primary_expr <-
+    / IDENTIFIER
+    / STRING
+    / NUMBER
+    / "true" / "false"
+    / "(" (expr ",")* ")"
+    / "{" ((IDENTIFIER / STRING) expr ",")* "}"
+    / "[" (expr ",")* "]"
+    / "error" primary_expr
+
