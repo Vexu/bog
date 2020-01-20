@@ -5,13 +5,13 @@ const unicode = std.unicode;
 
 pub const Parser = struct {
     it: unicode.Utf8Iterator,
-    indent_char: ?u32,
-    chars_per_indent: u8,
-    output_stream: var,
+    indent_char: ?u32 = null,
+    chars_per_indent: ?u8 = null,
 };
 
 fn isWhiteSpace(c: u32) bool {
     return switch (c) {
+        ' ', '\t',
         // NO-BREAK SPACE
         0x00A0,
         // OGHAM SPACE MARK
@@ -68,18 +68,27 @@ fn isIdentifier(c: u32) bool {
     };
 }
 
-fn getIndent(parser: *Parser) u8 {
+fn getIndent(parser: *Parser, err_stream: var) u8 {
     var count: u32 = 0;
-    while (parser.it.nextCodePoint()) |c| {
+    while (parser.it.nextCodepoint()) |c| {
         if (parser.indent_char) |some| {} else if (isWhiteSpace(c)) {
             parser.indent_char = c;
             count += 1;
         } else {
-            if (count % parser.chars_per_indent) {
-                try parser.err_stream.print("invalid indentation\n", .{});
-                return error.Invalid;
+            if (parser.chars_per_indent) |some| {
+                if (count % parser.chars_per_indent) {
+                    try err_stream.print("invalid indentation\n", .{});
+                    return error.Invalid;
+                } else {
+                    const levels = @divExact(count, parser.chars_per_indent);
+                    if (levels > 25) {
+                        try err_stream.print("indentation exceeds maximum of 25 levels\n", .{});
+                        return error.Invalid;
+                    }
+                    return levels;
+                }
             } else {
-                const levels = @divExact(count, parser.chars_per_indent);
+                parser.chars_per_indent = count;
             }
         }
     }
@@ -155,7 +164,7 @@ pub const Token = union(enum) {
 
     pub const Keyword = struct {
         bytes: []const u8,
-        id: Id,
+        id: Token,
     };
 
     pub const keywords = [_]Keyword{
@@ -179,9 +188,7 @@ pub const Token = union(enum) {
         .{ .bytes = "import", .id = .Keyword_import },
     };
 
-    pub const Id = enum {};
-
-    pub fn getKeyword(bytes: []const u8) ?Id {
+    pub fn getKeyword(bytes: []const u8) ?Token {
         for (keywords) |kw| {
             if (mem.eql(u8, kw.bytes, bytes)) {
                 return kw.id;
@@ -190,22 +197,20 @@ pub const Token = union(enum) {
         return null;
     }
 
-    pub fn next(parser: *Parser) !Token {
-        var start_index = parser.it.index;
-        var result = Token{
-            .id = .Eof,
-        };
+    pub fn next(it: *unicode.Utf8Iterator, err_stream: var) !Token {
+        var start_index = it.i;
         var state: enum {
             Start,
             Cr,
             BackSlash,
             BackSlashCr,
-            StringLiteral,
-            AfterStringLiteral,
+            String,
             EscapeSequence,
             CrEscape,
             HexEscape,
+            UnicodeStart,
             UnicodeEscape,
+            UnicodeEnd,
             Identifier,
             Equal,
             Bang,
@@ -235,24 +240,22 @@ pub const Token = union(enum) {
             FloatExponentDigits,
         } = .Start;
         var str_delimit: u32 = undefined;
-        var string = false;
         var counter: u32 = 0;
-        while (parser.it.nextCodePoint()) |c| {
+
+        while (it.nextCodepoint()) |c| {
             switch (state) {
                 .Start => switch (c) {
                     '#' => {
                         state = .LineComment;
                     },
                     '\n' => {
-                        result.id = .Nl;
-                        start_index = parser.it.index;
-                        break;
+                        return Token.Nl;
                     },
                     '\r' => {
                         state = .Cr;
                     },
                     '"', '\'' => {
-                        start_index = parser.it.index;
+                        start_index = it.i;
                         str_delimit = c;
                         state = .String;
                     },
@@ -266,20 +269,19 @@ pub const Token = union(enum) {
                         state = .Pipe;
                     },
                     '(' => {
-                        result.id = .LParen;
-                        break;
+                        return Token.LParen;
                     },
                     ')' => {
-                        result.id = .RParen;
-                        break;
+                        return Token.RParen;
                     },
                     '[' => {
-                        result.id = .LBracket;
-                        break;
+                        return Token.LBracket;
+                    },
+                    ']' => {
+                        return Token.RBracket;
                     },
                     ',' => {
-                        result.id = .Comma;
-                        break;
+                        return Token.Comma;
                     },
                     '%' => {
                         state = .Percent;
@@ -300,16 +302,13 @@ pub const Token = union(enum) {
                         state = .Caret;
                     },
                     '{' => {
-                        result.id = .LBrace;
-                        break;
+                        return Token.LBrace;
                     },
                     '}' => {
-                        result.id = .RBrace;
-                        break;
+                        return Token.RBrace;
                     },
                     '~' => {
-                        result.id = .Tilde;
-                        break;
+                        return Token.Tilde;
                     },
                     '.' => {
                         state = .Period;
@@ -334,23 +333,21 @@ pub const Token = union(enum) {
                     },
                     else => {
                         if (isWhiteSpace(c)) {
-                            start_index = parser.it.index;
+                            start_index = it.i;
                         } else if (isIdentifier(c)) {
                             state = .Identifier;
                         } else {
-                            try parser.err_stream.print("invalid character\n", .{});
+                            try err_stream.print("invalid character\n", .{});
                             return error.Invalid;
                         }
                     },
                 },
                 .Cr => switch (c) {
                     '\n' => {
-                        result.id = .Nl;
-                        start_index = parser.it.index;
-                        break;
+                        return Token.Nl;
                     },
                     else => {
-                        try parser.err_stream.print("invalid character\n", .{});
+                        try err_stream.print("invalid character\n", .{});
                         return error.Invalid;
                     },
                 },
@@ -362,16 +359,16 @@ pub const Token = union(enum) {
                         state = .BackSlashCr;
                     },
                     else => {
-                        try parser.err_stream.print("invalid character\n", .{});
+                        try err_stream.print("invalid character\n", .{});
                         return error.Invalid;
                     },
                 },
                 .BackSlashCr => switch (c) {
                     '\n' => {
-                        state = if (string) .AfterStringLiteral else .Start;
+                        state = .Start;
                     },
                     else => {
-                        try parser.err_stream.print("invalid character\n", .{});
+                        try err_stream.print("invalid character\n", .{});
                         return error.Invalid;
                     },
                 },
@@ -380,13 +377,12 @@ pub const Token = union(enum) {
                         state = .EscapeSequence;
                     },
                     '\n', '\r' => {
-                        try parser.err_stream.print("invalid character\n", .{});
+                        try err_stream.print("invalid character\n", .{});
                         return error.Invalid;
                     },
                     else => {
                         if (c == str_delimit) {
-                            result.id = .{ .String = parser.it.buffer[start_index..parser.it.index] };
-                            break;
+                            return Token{ .String = it.bytes[start_index..it.i] };
                         }
                     },
                 },
@@ -405,7 +401,7 @@ pub const Token = union(enum) {
                         state = .UnicodeStart;
                     },
                     else => {
-                        try parser.err_stream.print("invalid escape sequence\n", .{});
+                        try err_stream.print("invalid escape sequence\n", .{});
                         return error.Invalid;
                     },
                 },
@@ -414,7 +410,7 @@ pub const Token = union(enum) {
                         state = .String;
                     },
                     else => {
-                        try parser.err_stream.print("invalid character\n", .{});
+                        try err_stream.print("invalid character\n", .{});
                         return error.Invalid;
                     },
                 },
@@ -433,7 +429,7 @@ pub const Token = union(enum) {
                     counter = 0;
                     state = .UnicodeEscape;
                 } else {
-                    try parser.err_stream.print("invalid escape sequence\n", .{});
+                    try err_stream.print("invalid escape sequence\n", .{});
                     return error.Invalid;
                 },
                 .UnicodeEscape => switch (c) {
@@ -447,87 +443,77 @@ pub const Token = union(enum) {
                         state = .String;
                     },
                     else => {
-                        try parser.err_stream.print("invalid escape sequence\n", .{});
+                        try err_stream.print("invalid escape sequence\n", .{});
                         return error.Invalid;
                     },
                 },
                 .UnicodeEnd => if (c == '}') {
                     state = .String;
                 } else {
-                    try parser.err_stream.print("invalid escape sequence\n", .{});
+                    try err_stream.print("invalid escape sequence\n", .{});
                     return error.Invalid;
                 },
                 .Identifier => {
-                    if (isIdentifier(c)) {} else {
-                        const slice = parser.it.buffer[start_index..parser.it.index];
-                        result.id = getKeyword(slice) orelse .{ .Identifier = slice };
-                        break;
+                    if (!isIdentifier(c)) {
+                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        const slice = it.bytes[start_index..it.i];
+                        // directly returning causes llvm error
+                        const copy = getKeyword(slice) orelse Token{ .Identifier = slice };
+                        return copy;
                     }
                 },
                 .Equal => switch (c) {
                     '=' => {
-                        result.id = .EqualEqual;
-                        break;
+                        return Token.EqualEqual;
                     },
                     else => {
-                        result.id = .Equal;
-                        parser.it.index = start_index + 1;
-                        break;
+                        it.i = start_index + 1;
+                        return Token.Equal;
                     },
                 },
                 .Bang => switch (c) {
                     '=' => {
-                        result.id = .BangEqual;
-                        break;
+                        return Token.BangEqual;
                     },
                     else => {
-                        try parser.err_stream.print("invalid escape sequence\n", .{});
+                        try err_stream.print("invalid escape sequence\n", .{});
                         return error.Invalid;
                     },
                 },
                 .Pipe => switch (c) {
                     '=' => {
-                        result.id = .PipeEqual;
-                        break;
+                        return Token.PipeEqual;
                     },
                     else => {
-                        result.id = .Pipe;
-                        parser.it.index = start_index + 1;
-                        break;
+                        it.i = start_index + 1;
+                        return Token.Pipe;
                     },
                 },
                 .Percent => switch (c) {
                     '=' => {
-                        result.id = .PercentEqual;
-                        break;
+                        return Token.PercentEqual;
                     },
                     else => {
-                        result.id = .Percent;
-                        parser.it.index = start_index + 1;
-                        break;
+                        it.i = start_index + 1;
+                        return Token.Percent;
                     },
                 },
                 .Asterisk => switch (c) {
                     '=' => {
-                        result.id = .AsteriskEqual;
-                        break;
+                        return Token.AsteriskEqual;
                     },
                     else => {
-                        result.id = .Asterisk;
-                        parser.it.index = start_index + 1;
-                        break;
+                        it.i = start_index + 1;
+                        return Token.Asterisk;
                     },
                 },
                 .Plus => switch (c) {
                     '=' => {
-                        result.id = .PlusEqual;
-                        parser.it.index = start_index + 1;
-                        break;
+                        return Token.PlusEqual;
                     },
                     else => {
-                        result.id = .Plus;
-                        parser.it.index = start_index + 1;
-                        break;
+                        it.i = start_index + 1;
+                        return Token.Plus;
                     },
                 },
                 .LArr => switch (c) {
@@ -535,24 +521,20 @@ pub const Token = union(enum) {
                         state = .LArrArr;
                     },
                     '=' => {
-                        result.id = .LArrEqual;
-                        break;
+                        return Token.LArrEqual;
                     },
                     else => {
-                        result.id = .LArr;
-                        parser.it.index = start_index + 1;
-                        break;
+                        it.i = start_index + 1;
+                        return Token.LArr;
                     },
                 },
                 .LArrArr => switch (c) {
                     '=' => {
-                        result.id = .LArrArrEqual;
-                        break;
+                        return Token.LArrArrEqual;
                     },
                     else => {
-                        result.id = .LArrArr;
-                        parser.it.index = start_index + 2;
-                        break;
+                        it.i = start_index + 2;
+                        return Token.LArrArr;
                     },
                 },
                 .RArr => switch (c) {
@@ -560,35 +542,29 @@ pub const Token = union(enum) {
                         state = .RArrArr;
                     },
                     '=' => {
-                        result.id = .RArrEqual;
-                        break;
+                        return Token.RArrEqual;
                     },
                     else => {
-                        result.id = .RArr;
-                        parser.it.index = start_index + 1;
-                        break;
+                        it.i = start_index + 1;
+                        return Token.RArr;
                     },
                 },
                 .RArrArr => switch (c) {
                     '=' => {
-                        result.id = .RArrArrEqual;
-                        break;
+                        return Token.RArrArrEqual;
                     },
                     else => {
-                        result.id = .RArrArr;
-                        parser.it.index = start_index + 2;
-                        break;
+                        it.i = start_index + 2;
+                        return Token.RArrArr;
                     },
                 },
                 .Caret => switch (c) {
                     '=' => {
-                        result.id = .CaretEqual;
-                        break;
+                        return Token.CaretEqual;
                     },
                     else => {
-                        result.id = .Caret;
-                        parser.it.index = start_index + 1;
-                        break;
+                        it.i = start_index + 1;
+                        return Token.Caret;
                     },
                 },
                 .Period => switch (c) {
@@ -596,30 +572,26 @@ pub const Token = union(enum) {
                         state = .Period2;
                     },
                     else => {
-                        result.id = .Period;
-                        parser.it.index = start_index + 1;
-                        break;
+                        it.i = start_index + 1;
+                        return Token.Period;
                     },
                 },
                 .Period2 => switch (c) {
                     '.' => {
-                        result.id = .Ellipsis;
-                        break;
+                        return Token.Ellipsis;
                     },
                     else => {
-                        try parser.err_stream.print("invalid escape sequence\n", .{});
+                        try err_stream.print("invalid escape sequence\n", .{});
                         return error.Invalid;
                     },
                 },
                 .Minus => switch (c) {
                     '=' => {
-                        result.id = .MinusEqual;
-                        break;
+                        return Token.MinusEqual;
                     },
                     else => {
-                        result.id = .Minus;
-                        parser.it.index = start_index + 2;
-                        break;
+                        it.i = start_index + 1;
+                        return Token.Minus;
                     },
                 },
                 .Slash => switch (c) {
@@ -627,40 +599,34 @@ pub const Token = union(enum) {
                         state = .SlashSlash;
                     },
                     '=' => {
-                        result.id = .SlashEqual;
-                        break;
+                        return Token.SlashEqual;
                     },
                     else => {
-                        result.id = .Slash;
-                        parser.it.index = start_index + 1;
-                        break;
+                        it.i = start_index + 1;
+                        return Token.Slash;
                     },
                 },
                 .SlashSlash => switch (c) {
                     '=' => {
-                        result.id = .SlashSlashEqual;
-                        break;
+                        return Token.SlashSlashEqual;
                     },
                     else => {
-                        result.id = .SlashSlash;
-                        parser.it.index = start_index + 2;
-                        break;
+                        it.i = start_index + 2;
+                        return Token.SlashSlash;
                     },
                 },
                 .Ampersand => switch (c) {
                     '=' => {
-                        result.id = .AmpersandEqual;
-                        break;
+                        return Token.AmpersandEqual;
                     },
                     else => {
-                        result.id = .Ampersand;
-                        parser.it.index = start_index + 1;
-                        break;
+                        it.i = start_index + 1;
+                        return Token.Ampersand;
                     },
                 },
                 .LineComment => switch (c) {
                     '\n', '\r' => {
-                        parser.it.index -= 1;
+                        it.i -= 1;
                         state = .Start;
                     },
                     else => {},
@@ -678,65 +644,66 @@ pub const Token = union(enum) {
                     '.' => {
                         state = .FloatFraction;
                     },
-                    '0'...'9', 'a'...'f', 'A'...'F' => {
-                        try parser.err_stream.print("octal literals start with '0o'\n", .{});
+                    '0'...'9', 'a', 'c'...'f', 'A'...'F' => {
+                        try err_stream.print("octal literals start with '0o'\n", .{});
                         return error.Invalid;
                     },
                     '_' => {
                         state = .Number;
                     },
                     else => {
-                        parser.it.index = start_index - 1; // TODO
-                        result.id = .{ .Number = parser.it.buffer[start_index..parser.it.index] };
+                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        return Token{ .Number = it.bytes[start_index..it.i] };
                     },
                 },
                 .BinaryNumber => switch (c) {
                     '0', '1', '_' => {},
                     '2'...'9', 'a'...'f', 'A'...'F' => {
-                        try parser.err_stream.print("invalid digit in octal literal\n", .{});
+                        try err_stream.print("invalid digit in octal literal\n", .{});
                         return error.Invalid;
                     },
                     '.' => {
-                        try parser.err_stream.print("invalid base for floating point number\n", .{});
+                        try err_stream.print("invalid base for floating point number\n", .{});
                         return error.Invalid;
                     },
                     else => {
-                        parser.it.index = start_index - 1; // TODO
-                        result.id = .{ .Number = parser.it.buffer[start_index..parser.it.index] };
+                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        return Token{ .Number = it.bytes[start_index..it.i] };
                     },
                 },
                 .OctalNumber => switch (c) {
                     '0'...'7', '_' => {},
                     '8'...'9', 'a'...'f', 'A'...'F' => {
-                        try parser.err_stream.print("invalid digit in octal literal\n", .{});
+                        try err_stream.print("invalid digit in octal literal\n", .{});
                         return error.Invalid;
                     },
                     '.' => {
-                        try parser.err_stream.print("invalid base for floating point number\n", .{});
+                        try err_stream.print("invalid base for floating point number\n", .{});
                         return error.Invalid;
                     },
                     else => {
-                        parser.it.index = start_index - 1; // TODO
-                        result.id = .{ .Number = parser.it.buffer[start_index..parser.it.index] };
+                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        return Token{ .Number = it.bytes[start_index..it.i] };
                     },
                 },
                 .HexNumber => switch (c) {
                     '0'...'9', 'a'...'f', 'A'...'F', '_' => {},
                     '.' => {
-                        state = .FloatFractionHex;
+                        try err_stream.print("invalid base for floating point number\n", .{});
+                        return error.Invalid;
                     },
                     'p', 'P' => {
                         state = .FloatExponent;
                     },
                     else => {
-                        parser.it.index = start_index - 1; // TODO
-                        result.id = .{ .Number = parser.it.buffer[start_index..parser.it.index] };
+                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        return Token{ .Number = it.bytes[start_index..it.i] };
                     },
                 },
                 .Number => switch (c) {
                     '0'...'9', '_' => {},
                     'a'...'d', 'f', 'A'...'F' => {
-                        try parser.err_stream.print("invalid digit in octal literal\n", .{});
+                        try err_stream.print("invalid digit in octal literal\n", .{});
                         return error.Invalid;
                     },
                     '.' => {
@@ -746,8 +713,8 @@ pub const Token = union(enum) {
                         state = .FloatExponent;
                     },
                     else => {
-                        parser.it.index = start_index - 1; // TODO
-                        result.id = .{ .Number = parser.it.buffer[start_index..parser.it.index] };
+                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        return Token{ .Number = it.bytes[start_index..it.i] };
                     },
                 },
                 .FloatFraction => switch (c) {
@@ -756,8 +723,8 @@ pub const Token = union(enum) {
                         state = .FloatExponent;
                     },
                     else => {
-                        parser.it.index = start_index - 1; // TODO
-                        result.id = .{ .Number = parser.it.buffer[start_index..parser.it.index] };
+                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        return Token{ .Number = it.bytes[start_index..it.i] };
                     },
                 },
                 .FloatExponent => switch (c) {
@@ -765,7 +732,7 @@ pub const Token = union(enum) {
                         state = .FloatExponentDigits;
                     },
                     else => {
-                        parser.it.index = start_index - 1; // TODO
+                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         state = .FloatExponentDigits;
                     },
                 },
@@ -776,24 +743,41 @@ pub const Token = union(enum) {
                     '_' => {},
                     else => {
                         if (counter == 0) {
-                            try parser.err_stream.print("invalid exponent\n", .{});
+                            try err_stream.print("invalid exponent\n", .{});
                             return error.Invalid;
                         }
-                        parser.it.index = start_index - 1; // TODO
-                        result.id = .{ .Number = parser.it.buffer[start_index..parser.it.index] };
+                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        return Token{ .Number = it.bytes[start_index..it.i] };
                     },
                 },
             }
         } else {
             switch (state) {
-                .LineComment, .Start => {},
+                .LineComment, .Start => return Token.Eof,
                 .Identifier => {
-                    const slice = parser.it.buffer[start_index..];
-                    result.id = Token.getKeyword(slice) orelse .{ .Identifier = slice };
+                    const slice = it.bytes[start_index..];
+                    // directly returning causes llvm error
+                    const copy = Token.getKeyword(slice) orelse Token{ .Identifier = slice };
+                    return copy;
                 },
 
-                .Cr, .BackSlash, .BackSlashCr, .Period2, .StringLiteral, .EscapeSequence, .CrEscape, .HexEscape, .UnicodeStart, .UnicodeEscape, .UnicodeEnd, .FloatFraction, .FloatExponent, .FloatExponentDigits, .Bang => {
-                    try parser.err_stream.print("unexpected eof\n", .{});
+                .Cr,
+                .BackSlash,
+                .BackSlashCr,
+                .Period2,
+                .String,
+                .EscapeSequence,
+                .CrEscape,
+                .HexEscape,
+                .UnicodeStart,
+                .UnicodeEscape,
+                .UnicodeEnd,
+                .FloatFraction,
+                .FloatExponent,
+                .FloatExponentDigits,
+                .Bang,
+                => {
+                    try err_stream.print("unexpected eof\n", .{});
                     return error.Invalid;
                 },
 
@@ -802,25 +786,122 @@ pub const Token = union(enum) {
                 .HexNumber,
                 .Number,
                 .Zero,
-                => result.id = .{ .Number = parser.it.buffer[start_index..] },
+                => return Token{ .Number = it.bytes[start_index..] },
 
-                .Equal => result.id = .Equal,
-                .Minus => result.id = .Minus,
-                .Slash => result.id = .Slash,
-                .SlashSlash => result.id = .SlashSlash,
-                .Ampersand => result.id = .Ampersand,
-                .Period => result.id = .Period,
-                .Pipe => result.id = .Pipe,
-                .RArr => result.id = .RArr,
-                .RArrArr => result.id = .RArrArr,
-                .LArr => result.id = .LArr,
-                .LArrArr => result.id = .LArrArr,
-                .Plus => result.id = .Plus,
-                .Percent => result.id = .Percent,
-                .Caret => result.id = .Caret,
-                .Asterisk => result.id = .Asterisk,
+                .Equal => return Token.Equal,
+                .Minus => return Token.Minus,
+                .Slash => return Token.Slash,
+                .SlashSlash => return Token.SlashSlash,
+                .Ampersand => return Token.Ampersand,
+                .Period => return Token.Period,
+                .Pipe => return Token.Pipe,
+                .RArr => return Token.RArr,
+                .RArrArr => return Token.RArrArr,
+                .LArr => return Token.LArr,
+                .LArrArr => return Token.LArrArr,
+                .Plus => return Token.Plus,
+                .Percent => return Token.Percent,
+                .Caret => return Token.Caret,
+                .Asterisk => return Token.Asterisk,
             }
         }
-        return result;
     }
 };
+
+fn expectTokens(source: []const u8, expected_tokens: []const Token) !void {
+    var it = unicode.Utf8Iterator{
+        .i = 0,
+        .bytes = source,
+    };
+    for (expected_tokens) |expected_token_id| {
+        const token = try Token.next(&it, std.io.null_out_stream);
+        if (!std.meta.eql(token, expected_token_id)) {
+            std.debug.panic("expected {}, found {}\n", .{ @tagName(expected_token_id), @tagName(token) });
+        }
+    }
+    const last_token = try Token.next(&it, std.io.null_out_stream);
+    std.testing.expect(last_token == .Eof);
+}
+
+test "operators" {
+    try expectTokens(
+        \\ != | |= = ==
+        \\ ( ) { } [ ] . ...
+        \\ ^ ^= + += - -=
+        \\ * *= % %= / /= // //=
+        \\ , & &= < <= <<
+        \\ <<= > >= >> >>= ~
+        \\
+    , &[_]Token{
+        .BangEqual,
+        .Pipe,
+        .PipeEqual,
+        .Equal,
+        .EqualEqual,
+        .Nl,
+        .LParen,
+        .RParen,
+        .LBrace,
+        .RBrace,
+        .LBracket,
+        .RBracket,
+        .Period,
+        .Ellipsis,
+        .Nl,
+        .Caret,
+        .CaretEqual,
+        .Plus,
+        .PlusEqual,
+        .Minus,
+        .MinusEqual,
+        .Nl,
+        .Asterisk,
+        .AsteriskEqual,
+        .Percent,
+        .PercentEqual,
+        .Slash,
+        .SlashEqual,
+        .SlashSlash,
+        .SlashSlashEqual,
+        .Nl,
+        .Comma,
+        .Ampersand,
+        .AmpersandEqual,
+        .LArr,
+        .LArrEqual,
+        .LArrArr,
+        .Nl,
+        .LArrArrEqual,
+        .RArr,
+        .RArrEqual,
+        .RArrArr,
+        .RArrArrEqual,
+        .Tilde,
+        .Nl,
+    });
+}
+
+test "keywords" {
+    try expectTokens(
+        \\not　and or let continue break return if else false true for while match catch try error import
+    , &[_]Token{
+        .Keyword_not,
+        .Keyword_and,
+        .Keyword_or,
+        .Keyword_let,
+        .Keyword_continue,
+        .Keyword_break,
+        .Keyword_return,
+        .Keyword_if,
+        .Keyword_else,
+        .Keyword_false,
+        .Keyword_true,
+        .Keyword_for,
+        .Keyword_while,
+        .Keyword_match,
+        .Keyword_catch,
+        .Keyword_try,
+        .Keyword_error,
+        .Keyword_import,
+    });
+}

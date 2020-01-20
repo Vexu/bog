@@ -1,4 +1,4 @@
-root <- stmt*
+root <- (NL stmt)* NL? EOF
 
 stmt <-
     / if
@@ -18,7 +18,7 @@ while <- "while" bool_expr block
 
 for <- "for" unwrap "in" bit_expr ("..." bit_expr) block
 
-block <- (INDENT stmt)+
+block <- (NL INDENT stmt)+ NL
 
 match <- "match" bool_expr (INDENT match_case)+
 
