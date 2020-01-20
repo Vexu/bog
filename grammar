@@ -30,7 +30,7 @@ let <- "let" unwrap "=" expr
 
 assign <- 
     / IDENTIFIER "=" expr
-    / IDENTIFIER ("+=" / "-=" / "*=" / "/=" / "%=" / "<<=" / ">>=" / "&=" / "|=" / "^=") bit_expr
+    / IDENTIFIER ("+=" / "-=" / "*=" / "/=" / "//=" / "%=" / "<<=" / ">>=" / "&=" / "|=" / "^=") bit_expr
 
 unwrap <-
     / IDENTIFIER
@@ -57,7 +57,7 @@ shift_expr <- add_expr (("<<" / ">>") add_expr)
 
 add_expr <- mul_expr (("-" / "+") mul_expr)*
 
-mul_expr <- prefix_expr (("*" / "/" / "%") prefix_expr)*
+mul_expr <- prefix_expr (("*" / "/" / "//" / "%") prefix_expr)*
 
 prefix_expr <- ("-", "+", "not", "~") primary_expr suffix_expr*
 
