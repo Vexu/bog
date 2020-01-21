@@ -5,20 +5,14 @@ const Op = enum(u8) {
     /// A = LOAD(A)
     Load = 1,
 
-    /// A = LOAD(A, B) 
-    LoadMemb = 2,
-
     /// B = A
-    Store = 3,
+    Store = 2,
 
     /// A = DECL(A)
     Decl = 4,
 
-    /// A = DECL(A, B)
-    DeclMemb = 5,
-
-    PushRegs,
-    PopRes,
+    Push,
+    Pop,
     Call,
 
     /// A = A // B
@@ -63,5 +57,21 @@ const Op = enum(u8) {
     /// A = A or B
     Or = 23,
 
+    Jump,
+
+    JumpTrue,
+
+    Return,
+
+    Break,
+    EndBreak,
+
+    Try,
+    
+
     _,
+};
+
+pub const Builder = struct {
+
 };
