@@ -68,101 +68,120 @@ fn isIdentifier(c: u32) bool {
     };
 }
 
-fn getIndent(parser: *Parser, err_stream: var) u8 {
+fn getIndent(parser: *Parser) Token {
     var count: u32 = 0;
     while (parser.it.nextCodepoint()) |c| {
-        if (parser.indent_char) |some| {} else if (isWhiteSpace(c)) {
+        if (parser.indent_char) |some| {
+            if (c == some) {
+                count += 1;
+            } else {
+                parser.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                break;
+            }
+        } else if (isWhiteSpace(c)) {
             parser.indent_char = c;
             count += 1;
+        } else if (c == '\n' or c == '\r') {
+            count = 0;
         } else {
-            if (parser.chars_per_indent) |some| {
-                if (count % parser.chars_per_indent) {
-                    try err_stream.print("invalid indentation\n", .{});
-                    return error.Invalid;
-                } else {
-                    const levels = @divExact(count, parser.chars_per_indent);
-                    if (levels > 25) {
-                        try err_stream.print("indentation exceeds maximum of 25 levels\n", .{});
-                        return error.Invalid;
-                    }
-                    return levels;
-                }
-            } else {
-                parser.chars_per_indent = count;
-            }
+            break;
         }
+    }
+    if (count == 0) {
+        parser.chars_per_indent = null;
+        parser.indent_char = null;
+        return 0;
+    } else if (parser.chars_per_indent) |some| {
+        if (count % parser.chars_per_indent) {
+            return Token{ .Invalid = "invalid indentation" };
+        } else {
+            const levels = @divExact(count, parser.chars_per_indent);
+            if (levels > 25) {
+                return Token{ .Invalid = "indentation exceeds maximum of 25 levels" };
+            }
+            return @truncate(u8, levels);
+        }
+    } else {
+        parser.chars_per_indent = count;
+        return 1;
     }
 }
 
-pub const Token = union(enum) {
-    Invalid: []const u8,
-    Eof,
-    Identifier: []const u8,
-    String: []const u8,
-    Number: []const u8,
-    Nl,
-    Pipe,
-    PipeEqual,
-    Equal,
-    EqualEqual,
-    BangEqual,
-    LParen,
-    RParen,
-    Percent,
-    PercentEqual,
-    LBrace,
-    RBrace,
-    LBracket,
-    RBracket,
-    Period,
-    Ellipsis,
-    Caret,
-    CaretEqual,
-    Plus,
-    PlusEqual,
-    Minus,
-    MinusEqual,
-    Asterisk,
-    AsteriskEqual,
-    // AsteriskAsterisk,
-    // AsteriskAsteriskEqual,
-    Slash,
-    SlashEqual,
-    SlashSlash,
-    SlashSlashEqual,
-    Comma,
-    Ampersand,
-    AmpersandEqual,
-    LArr,
-    LArrEqual,
-    LArrArr,
-    LArrArrEqual,
-    RArr,
-    RArrEqual,
-    RArrArr,
-    RArrArrEqual,
-    Tilde,
-    Colon,
+pub const Token = struct {
+    start: usize,
+    id: Id,
 
-    /// keywords
-    Keyword_not,
-    Keyword_and,
-    Keyword_or,
-    Keyword_let,
-    Keyword_continue,
-    Keyword_break,
-    Keyword_return,
-    Keyword_if,
-    Keyword_else,
-    Keyword_false,
-    Keyword_true,
-    Keyword_for,
-    Keyword_while,
-    Keyword_match,
-    Keyword_catch,
-    Keyword_try,
-    Keyword_error,
-    Keyword_import,
+    const Id = union(enum) {
+        Invalid: []const u8,
+        Eof,
+        Indent: u32,
+        Identifier: []const u8,
+        String: []const u8,
+        Number: []const u8,
+        Nl,
+        Pipe,
+        PipeEqual,
+        Equal,
+        EqualEqual,
+        BangEqual,
+        LParen,
+        RParen,
+        Percent,
+        PercentEqual,
+        LBrace,
+        RBrace,
+        LBracket,
+        RBracket,
+        Period,
+        Ellipsis,
+        Caret,
+        CaretEqual,
+        Plus,
+        PlusEqual,
+        Minus,
+        MinusEqual,
+        Asterisk,
+        AsteriskEqual,
+        // AsteriskAsterisk,
+        // AsteriskAsteriskEqual,
+        Slash,
+        SlashEqual,
+        SlashSlash,
+        SlashSlashEqual,
+        Comma,
+        Ampersand,
+        AmpersandEqual,
+        LArr,
+        LArrEqual,
+        LArrArr,
+        LArrArrEqual,
+        RArr,
+        RArrEqual,
+        RArrArr,
+        RArrArrEqual,
+        Tilde,
+        Colon,
+
+        /// keywords
+        Keyword_not,
+        Keyword_and,
+        Keyword_or,
+        Keyword_let,
+        Keyword_continue,
+        Keyword_break,
+        Keyword_return,
+        Keyword_if,
+        Keyword_else,
+        Keyword_false,
+        Keyword_true,
+        Keyword_for,
+        Keyword_while,
+        Keyword_match,
+        Keyword_catch,
+        Keyword_try,
+        Keyword_error,
+        Keyword_import,
+    };
 
     pub const Keyword = struct {
         bytes: []const u8,
@@ -781,20 +800,17 @@ pub const Token = union(enum) {
     }
 };
 
-fn expectTokens(source: []const u8, expected_tokens: []const Token) void {
+fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
     var it = unicode.Utf8Iterator{
         .i = 0,
         .bytes = source,
     };
     for (expected_tokens) |expected_token| {
         const token = Token.next(&it);
-        std.testing.expectEqual(token, expected_token);
-        // if (!std.meta.eql(token, expected_token_id)) {
-        //     std.debug.panic("expected {}, found {}\n", .{ @tagName(expected_token_id), @tagName(token) });
-        // }
+        std.testing.expectEqual(token.id, expected_token);
     }
     const last_token = Token.next(&it);
-    std.testing.expect(last_token == .Eof);
+    std.testing.expect(last_token.id == .Eof);
 }
 
 test "operators" {
