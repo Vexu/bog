@@ -69,9 +69,6 @@ pub const Token = struct {
     const Id = union(enum) {
         Invalid: []const u8,
         Eof,
-
-        /// similar to Eof but means more input might produce a valid token
-        InvalidEof,
         Indent: u32,
         Identifier: []const u8,
         String: []const u8,
@@ -176,6 +173,8 @@ pub const Token = struct {
         return null;
     }
 };
+
+pub const TokenList = std.SegmentedList(Token, 64);
 
 pub const Tokenizer = struct {
     it: unicode.Utf8Iterator,
@@ -874,7 +873,7 @@ pub const Tokenizer = struct {
 
                 .String => {
                     self.it.i = self.start_index;
-                    res.id = .InvalidEof;
+                    res.id = .Eof;
                 },
                 .Equal => res.id = .Equal,
                 .Minus => res.id = .Minus,

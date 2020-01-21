@@ -26,7 +26,7 @@ match_case
    <- unwrap block
     / (range_expr ",")+ block
 
-let <- "let" (unwrap_no_ident / (IDENTIFIER member)) "=" expr
+let <- "let" unwrap "=" expr
 
 assign
    <- IDENTIFIER member "=" expr
@@ -36,10 +36,7 @@ member <- (("[" STRING "]") / ("." IDENTIFIER))*
 
 unwrap
    <- IDENTIFIER
-    / unwrap_no_ident
-
-unwrap_no_ident
-   <- "{" (IDENTIFIER / STRING) ":" unwrap ("," (IDENTIFIER / STRING) ":" unwrap)* "}"
+    / "{" (IDENTIFIER / STRING) ":" unwrap ("," (IDENTIFIER / STRING) ":" unwrap)* "}"
     / "(" ("..." ",")?  unwrap ("," unwrap)* ("," "...")? ")"
     / "[" ("..." ",")?  unwrap ("," unwrap)* ("," "...")? "]"
     / "error" IDENTIFIER
