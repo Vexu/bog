@@ -1,4 +1,4 @@
-root <- (NL stmt)* NL? EOF
+root <- (stmt NL)* EOF
 
 stmt
    <- if
@@ -16,15 +16,15 @@ if <- "if" bool_expr block ("else" "if" bool_expr block)* ("else" block)?
 
 while <- "while" bool_expr block
 
-for <- "for" unwrap "in" bit_expr ("..." bit_expr) block
+for <- "for" unwrap "in" range_expr block
 
-block <- (NL INDENT stmt)+ NL
+block <- (NL INDENT stmt)+
 
 match <- "match" bool_expr (INDENT match_case)+
 
 match_case
    <- unwrap block
-    / (bool_expr ("..." bool_expr) ",")+ block
+    / (range_expr ",")+ block
 
 let <- "let" (unwrap_no_ident / (IDENTIFIER member)) "=" expr
 
@@ -50,13 +50,13 @@ fn <- "|" (unwrap ",")* "|" (block / bool_expr)
 
 import <- "import" STRING
 
-bool_expr <- bit_expr (("or" bit_expr)* / ("and" bit_expr)*)
+bool_expr <- comparision_expr (("or" comparision_expr)* / ("and" comparision_expr)*)
 
-bit_expr <- equality_expr (("&" equality_expr)* / ("|" equality_expr)* / ("|" equality_expr)*) / ("catch" unwrap (expr / block))
+comparision_expr <- range_expr (("<" / "<=" / ">" / ">=" / "in" / "==" / "!=") range_expr)
 
-equality_expr <- comparision_expr (("==" / "!=") comparision_expr)*
+range_expr <- bit_expr ("..." bit_expr)?
 
-comparision_expr <- shift_expr (("<" / "<=" / ">" / ">=" / "in") shift_expr)*
+bit_expr <- shift_expr (("&" shift_expr)* / ("|" shift_expr)* / ("|" shift_expr)*) / ("catch" unwrap block)
 
 shift_expr <- add_expr (("<<" / ">>") add_expr)
 
@@ -64,7 +64,7 @@ add_expr <- mul_expr (("-" / "+") mul_expr)*
 
 mul_expr <- prefix_expr (("*" / "/" / "//" / "%") prefix_expr)*
 
-prefix_expr <- ("-" / "+" / "not" / "~" / "try") primary_expr suffix_expr*
+prefix_expr <- ("-" / "+" / "not" / "~" / "try")? primary_expr suffix_expr*
 
 suffix_expr
    <- "[" expr "]"

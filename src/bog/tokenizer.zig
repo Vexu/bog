@@ -206,6 +206,8 @@ pub const Tokenizer = struct {
             } else {
                 break;
             }
+        } else {
+            count = 0;
         }
         if (count == 0) {
             self.it.i = self.start_index;
