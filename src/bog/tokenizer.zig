@@ -62,45 +62,6 @@ fn isIdentifier(c: u32) bool {
     };
 }
 
-fn getIndent(parser: *Parser) Token {
-    var count: u32 = 0;
-    while (parser.it.nextCodepoint()) |c| {
-        if (parser.indent_char) |some| {
-            if (c == some) {
-                count += 1;
-            } else {
-                parser.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                break;
-            }
-        } else if (isWhiteSpace(c)) {
-            parser.indent_char = c;
-            count += 1;
-        } else if (c == '\n' or c == '\r') {
-            count = 0;
-        } else {
-            break;
-        }
-    }
-    if (count == 0) {
-        parser.chars_per_indent = null;
-        parser.indent_char = null;
-        return 0;
-    } else if (parser.chars_per_indent) |some| {
-        if (count % parser.chars_per_indent) {
-            return Token{ .Invalid = "invalid indentation" };
-        } else {
-            const levels = @divExact(count, parser.chars_per_indent);
-            if (levels > 25) {
-                return Token{ .Invalid = "indentation exceeds maximum of 25 levels" };
-            }
-            return @truncate(u8, levels);
-        }
-    } else {
-        parser.chars_per_indent = count;
-        return 1;
-    }
-}
-
 pub const Token = struct {
     start: usize,
     id: Id,
@@ -108,6 +69,9 @@ pub const Token = struct {
     const Id = union(enum) {
         Invalid: []const u8,
         Eof,
+
+        /// similar to Eof but means more input might produce a valid token
+        InvalidEof,
         Indent: u32,
         Identifier: []const u8,
         String: []const u8,
@@ -179,7 +143,7 @@ pub const Token = struct {
 
     pub const Keyword = struct {
         bytes: []const u8,
-        id: Token,
+        id: Id,
     };
 
     pub const keywords = [_]Keyword{
@@ -203,7 +167,7 @@ pub const Token = struct {
         .{ .bytes = "import", .id = .Keyword_import },
     };
 
-    pub fn getKeyword(bytes: []const u8) ?Token {
+    pub fn getKeyword(bytes: []const u8) ?Token.Id {
         for (keywords) |kw| {
             if (mem.eql(u8, kw.bytes, bytes)) {
                 return kw.id;
@@ -211,9 +175,70 @@ pub const Token = struct {
         }
         return null;
     }
+};
 
-    pub fn next(it: *unicode.Utf8Iterator) Token {
-        var start_index = it.i;
+pub const Tokenizer = struct {
+    it: unicode.Utf8Iterator,
+    start_index: usize = 0,
+    indent_char: ?u32 = null,
+    chars_per_indent: ?u8 = null,
+    expect_indent: bool = false,
+
+    fn getIndent(self: *Tokenizer) ?Token {
+        var count: u8 = 0;
+        var res = Token{
+            .id = .Eof,
+            .start = self.start_index,
+        };
+        while (self.it.nextCodepoint()) |c| {
+            if (self.indent_char) |some| {
+                if (c == some) {
+                    count += 1;
+                } else {
+                    self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                    break;
+                }
+            } else if (isWhiteSpace(c)) {
+                self.indent_char = c;
+                count += 1;
+            } else if (c == '\n' or c == '\r') {
+                count = 0;
+            } else {
+                break;
+            }
+        }
+        if (count == 0) {
+            self.it.i = self.start_index;
+            self.chars_per_indent = null;
+            self.indent_char = null;
+            return null;
+        } else if (self.chars_per_indent) |some| {
+            if (count % some != 0) {
+                res.id = .{ .Invalid = "invalid indentation" };
+                return res;
+            } else {
+                const levels = @divExact(count, some);
+                if (levels > 25) {
+                    res.id = .{ .Invalid = "indentation exceeds maximum of 25 levels" };
+                    return res;
+                }
+                res.id = .{ .Indent = levels };
+                return res;
+            }
+        } else {
+            self.chars_per_indent = count;
+            res.id = .{ .Indent = 1 };
+            return res;
+        }
+    }
+
+    pub fn next(self: *Tokenizer) Token {
+        self.start_index = self.it.i;
+        if (self.expect_indent) {
+            self.expect_indent = false;
+            if (self.getIndent()) |some|
+                return some;
+        }
         var state: enum {
             Start,
             Cr,
@@ -253,23 +278,28 @@ pub const Token = struct {
             FloatExponent,
             FloatExponentDigits,
         } = .Start;
+        var res = Token{
+            .id = .Eof,
+            .start = self.start_index,
+        };
         var str_delimit: u32 = undefined;
         var counter: u32 = 0;
 
-        while (it.nextCodepoint()) |c| {
+        while (self.it.nextCodepoint()) |c| {
             switch (state) {
                 .Start => switch (c) {
                     '#' => {
                         state = .LineComment;
                     },
                     '\n' => {
-                        return Token.Nl;
+                        res.id = .Nl;
+                        self.expect_indent = true;
+                        break;
                     },
                     '\r' => {
                         state = .Cr;
                     },
                     '"', '\'' => {
-                        start_index = it.i;
                         str_delimit = c;
                         state = .String;
                     },
@@ -283,19 +313,24 @@ pub const Token = struct {
                         state = .Pipe;
                     },
                     '(' => {
-                        return Token.LParen;
+                        res.id = .LParen;
+                        break;
                     },
                     ')' => {
-                        return Token.RParen;
+                        res.id = .RParen;
+                        break;
                     },
                     '[' => {
-                        return Token.LBracket;
+                        res.id = .LBracket;
+                        break;
                     },
                     ']' => {
-                        return Token.RBracket;
+                        res.id = .RBracket;
+                        break;
                     },
                     ',' => {
-                        return Token.Comma;
+                        res.id = .Comma;
+                        break;
                     },
                     '%' => {
                         state = .Percent;
@@ -316,16 +351,20 @@ pub const Token = struct {
                         state = .Caret;
                     },
                     '{' => {
-                        return Token.LBrace;
+                        res.id = .LBrace;
+                        break;
                     },
                     '}' => {
-                        return Token.RBrace;
+                        res.id = .RBrace;
+                        break;
                     },
                     '~' => {
-                        return Token.Tilde;
+                        res.id = .Tilde;
+                        break;
                     },
                     ':' => {
-                        return Token.Colon;
+                        res.id = .Colon;
+                        break;
                     },
                     '.' => {
                         state = .Period;
@@ -350,20 +389,25 @@ pub const Token = struct {
                     },
                     else => {
                         if (isWhiteSpace(c)) {
-                            start_index = it.i;
+                            self.start_index = self.it.i;
+                            res.start = self.start_index;
                         } else if (isIdentifier(c)) {
                             state = .Identifier;
                         } else {
-                            return Token{ .Invalid = "invalid character" };
+                            res.id = .{ .Invalid = "invalid character" };
+                            break;
                         }
                     },
                 },
                 .Cr => switch (c) {
                     '\n' => {
-                        return Token.Nl;
+                        res.id = .Nl;
+                        self.expect_indent = true;
+                        break;
                     },
                     else => {
-                        return Token{ .Invalid = "invalid character" };
+                        res.id = .{ .Invalid = "invalid character" };
+                        break;
                     },
                 },
                 .BackSlash => switch (c) {
@@ -374,7 +418,8 @@ pub const Token = struct {
                         state = .BackSlashCr;
                     },
                     else => {
-                        return Token{ .Invalid = "invalid character" };
+                        res.id = .{ .Invalid = "invalid character" };
+                        break;
                     },
                 },
                 .BackSlashCr => switch (c) {
@@ -382,7 +427,8 @@ pub const Token = struct {
                         state = .Start;
                     },
                     else => {
-                        return Token{ .Invalid = "invalid character" };
+                        res.id = .{ .Invalid = "invalid character" };
+                        break;
                     },
                 },
                 .String => switch (c) {
@@ -391,12 +437,14 @@ pub const Token = struct {
                     },
                     '\n', '\r' => {
                         if (str_delimit == '\'') {
-                            return Token{ .Invalid = "invalid newline, use'\"' for multiline strings" };
+                            res.id = .{ .Invalid = "invalid newline, use'\"' for multiline strings" };
+                            break;
                         }
                     },
                     else => {
                         if (c == str_delimit) {
-                            return Token{ .String = it.bytes[start_index..it.i] };
+                            res.id = .{ .String = self.it.bytes[self.start_index..self.it.i] };
+                            break;
                         }
                     },
                 },
@@ -412,7 +460,8 @@ pub const Token = struct {
                         state = .UnicodeStart;
                     },
                     else => {
-                        return Token{ .Invalid = "invalid escape sequence" };
+                        res.id = .{ .Invalid = "invalid escape sequence" };
+                        break;
                     },
                 },
                 .HexEscape => switch (c) {
@@ -430,7 +479,8 @@ pub const Token = struct {
                     counter = 0;
                     state = .UnicodeEscape;
                 } else {
-                    return Token{ .Invalid = "invalid escape sequence" };
+                    res.id = .{ .Invalid = "invalid escape sequence" };
+                    break;
                 },
                 .UnicodeEscape => switch (c) {
                     '0'...'9', 'a'...'f', 'A'...'F' => {
@@ -443,74 +493,87 @@ pub const Token = struct {
                         state = .String;
                     },
                     else => {
-                        return Token{ .Invalid = "invalid escape sequence" };
+                        res.id = .{ .Invalid = "invalid escape sequence" };
+                        break;
                     },
                 },
                 .UnicodeEnd => if (c == '}') {
                     state = .String;
                 } else {
-                    return Token{ .Invalid = "invalid escape sequence" };
+                    res.id = .{ .Invalid = "invalid escape sequence" };
+                    break;
                 },
                 .Identifier => {
                     if (!isIdentifier(c)) {
-                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        const slice = it.bytes[start_index..it.i];
-                        // directly returning causes llvm error
-                        const copy = getKeyword(slice) orelse Token{ .Identifier = slice };
-                        return copy;
+                        self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        const slice = self.it.bytes[self.start_index..self.it.i];
+                        res.id = Token.getKeyword(slice) orelse .{ .Identifier = slice };
+                        break;
                     }
                 },
                 .Equal => switch (c) {
                     '=' => {
-                        return Token.EqualEqual;
+                        res.id = .EqualEqual;
+                        break;
                     },
                     else => {
-                        it.i = start_index + 1;
-                        return Token.Equal;
+                        self.it.i = self.start_index + 1;
+                        res.id = .Equal;
+                        break;
                     },
                 },
                 .Bang => switch (c) {
                     '=' => {
-                        return Token.BangEqual;
+                        res.id = .BangEqual;
+                        break;
                     },
                     else => {
-                        return Token{ .Invalid = "invalid character, use 'not' for boolean not" };
+                        res.id = .{ .Invalid = "invalid character, use 'not' for boolean not" };
+                        break;
                     },
                 },
                 .Pipe => switch (c) {
                     '=' => {
-                        return Token.PipeEqual;
+                        res.id = .PipeEqual;
+                        break;
                     },
                     else => {
-                        it.i = start_index + 1;
-                        return Token.Pipe;
+                        self.it.i = self.start_index + 1;
+                        res.id = .Pipe;
+                        break;
                     },
                 },
                 .Percent => switch (c) {
                     '=' => {
-                        return Token.PercentEqual;
+                        res.id = .PercentEqual;
+                        break;
                     },
                     else => {
-                        it.i = start_index + 1;
-                        return Token.Percent;
+                        self.it.i = self.start_index + 1;
+                        res.id = .Percent;
+                        break;
                     },
                 },
                 .Asterisk => switch (c) {
                     '=' => {
-                        return Token.AsteriskEqual;
+                        res.id = .AsteriskEqual;
+                        break;
                     },
                     else => {
-                        it.i = start_index + 1;
-                        return Token.Asterisk;
+                        self.it.i = self.start_index + 1;
+                        res.id = .Asterisk;
+                        break;
                     },
                 },
                 .Plus => switch (c) {
                     '=' => {
-                        return Token.PlusEqual;
+                        res.id = .PlusEqual;
+                        break;
                     },
                     else => {
-                        it.i = start_index + 1;
-                        return Token.Plus;
+                        self.it.i = self.start_index + 1;
+                        res.id = .Plus;
+                        break;
                     },
                 },
                 .LArr => switch (c) {
@@ -518,20 +581,24 @@ pub const Token = struct {
                         state = .LArrArr;
                     },
                     '=' => {
-                        return Token.LArrEqual;
+                        res.id = .LArrEqual;
+                        break;
                     },
                     else => {
-                        it.i = start_index + 1;
-                        return Token.LArr;
+                        self.it.i = self.start_index + 1;
+                        res.id = .LArr;
+                        break;
                     },
                 },
                 .LArrArr => switch (c) {
                     '=' => {
-                        return Token.LArrArrEqual;
+                        res.id = .LArrArrEqual;
+                        break;
                     },
                     else => {
-                        it.i = start_index + 2;
-                        return Token.LArrArr;
+                        self.it.i = self.start_index + 2;
+                        res.id = .LArrArr;
+                        break;
                     },
                 },
                 .RArr => switch (c) {
@@ -539,29 +606,35 @@ pub const Token = struct {
                         state = .RArrArr;
                     },
                     '=' => {
-                        return Token.RArrEqual;
+                        res.id = .RArrEqual;
+                        break;
                     },
                     else => {
-                        it.i = start_index + 1;
-                        return Token.RArr;
+                        self.it.i = self.start_index + 1;
+                        res.id = .RArr;
+                        break;
                     },
                 },
                 .RArrArr => switch (c) {
                     '=' => {
-                        return Token.RArrArrEqual;
+                        res.id = .RArrArrEqual;
+                        break;
                     },
                     else => {
-                        it.i = start_index + 2;
-                        return Token.RArrArr;
+                        self.it.i = self.start_index + 2;
+                        res.id = .RArrArr;
+                        break;
                     },
                 },
                 .Caret => switch (c) {
                     '=' => {
-                        return Token.CaretEqual;
+                        res.id = .CaretEqual;
+                        break;
                     },
                     else => {
-                        it.i = start_index + 1;
-                        return Token.Caret;
+                        self.it.i = self.start_index + 1;
+                        res.id = .Caret;
+                        break;
                     },
                 },
                 .Period => switch (c) {
@@ -569,25 +642,30 @@ pub const Token = struct {
                         state = .Period2;
                     },
                     else => {
-                        it.i = start_index + 1;
-                        return Token.Period;
+                        self.it.i = self.start_index + 1;
+                        res.id = .Period;
+                        break;
                     },
                 },
                 .Period2 => switch (c) {
                     '.' => {
-                        return Token.Ellipsis;
+                        res.id = .Ellipsis;
+                        break;
                     },
                     else => {
-                        return Token{ .Invalid = "invalid character" };
+                        res.id = .{ .Invalid = "invalid character" };
+                        break;
                     },
                 },
                 .Minus => switch (c) {
                     '=' => {
-                        return Token.MinusEqual;
+                        res.id = .MinusEqual;
+                        break;
                     },
                     else => {
-                        it.i = start_index + 1;
-                        return Token.Minus;
+                        self.it.i = self.start_index + 1;
+                        res.id = .Minus;
+                        break;
                     },
                 },
                 .Slash => switch (c) {
@@ -595,34 +673,40 @@ pub const Token = struct {
                         state = .SlashSlash;
                     },
                     '=' => {
-                        return Token.SlashEqual;
+                        res.id = .SlashEqual;
+                        break;
                     },
                     else => {
-                        it.i = start_index + 1;
-                        return Token.Slash;
+                        self.it.i = self.start_index + 1;
+                        res.id = .Slash;
+                        break;
                     },
                 },
                 .SlashSlash => switch (c) {
                     '=' => {
-                        return Token.SlashSlashEqual;
+                        res.id = .SlashSlashEqual;
+                        break;
                     },
                     else => {
-                        it.i = start_index + 2;
-                        return Token.SlashSlash;
+                        self.it.i = self.start_index + 2;
+                        res.id = .SlashSlash;
+                        break;
                     },
                 },
                 .Ampersand => switch (c) {
                     '=' => {
-                        return Token.AmpersandEqual;
+                        res.id = .AmpersandEqual;
+                        break;
                     },
                     else => {
-                        it.i = start_index + 1;
-                        return Token.Ampersand;
+                        self.it.i = self.start_index + 1;
+                        res.id = .Ampersand;
+                        break;
                     },
                 },
                 .LineComment => switch (c) {
                     '\n', '\r' => {
-                        it.i -= 1;
+                        self.it.i -= 1;
                         state = .Start;
                     },
                     else => {},
@@ -641,59 +725,70 @@ pub const Token = struct {
                         state = .FloatFraction;
                     },
                     '0'...'9', 'a', 'c'...'f', 'A'...'F' => {
-                        return Token{ .Invalid = "octal literals start with '0o'" };
+                        res.id = .{ .Invalid = "octal literals start with '0o'" };
+                        break;
                     },
                     '_' => {
                         state = .Number;
                     },
                     else => {
-                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        return Token{ .Number = it.bytes[start_index..it.i] };
+                        self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        res.id = .{ .Number = self.it.bytes[self.start_index..self.it.i] };
+                        break;
                     },
                 },
                 .BinaryNumber => switch (c) {
                     '0', '1', '_' => {},
                     '2'...'9', 'a'...'f', 'A'...'F' => {
-                        return Token{ .Invalid = "invalid digit in octal number" };
+                        res.id = .{ .Invalid = "invalid digit in octal number" };
+                        break;
                     },
                     '.' => {
-                        return Token{ .Invalid = "invalid base for floating point number" };
+                        res.id = .{ .Invalid = "invalid base for floating point number" };
+                        break;
                     },
                     else => {
-                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        return Token{ .Number = it.bytes[start_index..it.i] };
+                        self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        res.id = .{ .Number = self.it.bytes[self.start_index..self.it.i] };
+                        break;
                     },
                 },
                 .OctalNumber => switch (c) {
                     '0'...'7', '_' => {},
                     '8'...'9', 'a'...'f', 'A'...'F' => {
-                        return Token{ .Invalid = "invalid digit in number" };
+                        res.id = .{ .Invalid = "invalid digit in number" };
+                        break;
                     },
                     '.' => {
-                        return Token{ .Invalid = "invalid base for floating point number" };
+                        res.id = .{ .Invalid = "invalid base for floating point number" };
+                        break;
                     },
                     else => {
-                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        return Token{ .Number = it.bytes[start_index..it.i] };
+                        self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        res.id = .{ .Number = self.it.bytes[self.start_index..self.it.i] };
+                        break;
                     },
                 },
                 .HexNumber => switch (c) {
                     '0'...'9', 'a'...'f', 'A'...'F', '_' => {},
                     '.' => {
-                        return Token{ .Invalid = "invalid base for floating point number" };
+                        res.id = .{ .Invalid = "invalid base for floating point number" };
+                        break;
                     },
                     'p', 'P' => {
                         state = .FloatExponent;
                     },
                     else => {
-                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        return Token{ .Number = it.bytes[start_index..it.i] };
+                        self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        res.id = .{ .Number = self.it.bytes[self.start_index..self.it.i] };
+                        break;
                     },
                 },
                 .Number => switch (c) {
                     '0'...'9', '_' => {},
                     'a'...'d', 'f', 'A'...'F' => {
-                        return Token{ .Invalid = "invalid digit in hex number" };
+                        res.id = .{ .Invalid = "invalid digit in hex number" };
+                        break;
                     },
                     '.' => {
                         state = .FloatFraction;
@@ -702,8 +797,9 @@ pub const Token = struct {
                         state = .FloatExponent;
                     },
                     else => {
-                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        return Token{ .Number = it.bytes[start_index..it.i] };
+                        self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        res.id = .{ .Number = self.it.bytes[self.start_index..self.it.i] };
+                        break;
                     },
                 },
                 .FloatFraction => switch (c) {
@@ -712,8 +808,9 @@ pub const Token = struct {
                         state = .FloatExponent;
                     },
                     else => {
-                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        return Token{ .Number = it.bytes[start_index..it.i] };
+                        self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        res.id = .{ .Number = self.it.bytes[self.start_index..self.it.i] };
+                        break;
                     },
                 },
                 .FloatExponent => switch (c) {
@@ -721,7 +818,7 @@ pub const Token = struct {
                         state = .FloatExponentDigits;
                     },
                     else => {
-                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         state = .FloatExponentDigits;
                     },
                 },
@@ -732,28 +829,27 @@ pub const Token = struct {
                     '_' => {},
                     else => {
                         if (counter == 0) {
-                            return Token{ .Invalid = "invalid exponent digit" };
+                            res.id = .{ .Invalid = "invalid exponent digit" };
+                            break;
                         }
-                        it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        return Token{ .Number = it.bytes[start_index..it.i] };
+                        self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        res.id = .{ .Number = self.it.bytes[self.start_index..self.it.i] };
+                        break;
                     },
                 },
             }
         } else {
             switch (state) {
-                .LineComment, .Start => return Token.Eof,
+                .LineComment, .Start => {},
                 .Identifier => {
-                    const slice = it.bytes[start_index..];
-                    // directly returning causes llvm error
-                    const copy = Token.getKeyword(slice) orelse Token{ .Identifier = slice };
-                    return copy;
+                    const slice = self.it.bytes[self.start_index..];
+                    res.id = Token.getKeyword(slice) orelse .{ .Identifier = slice };
                 },
 
                 .Cr,
                 .BackSlash,
                 .BackSlashCr,
                 .Period2,
-                .String,
                 .EscapeSequence,
                 .HexEscape,
                 .UnicodeStart,
@@ -764,7 +860,7 @@ pub const Token = struct {
                 .FloatExponentDigits,
                 .Bang,
                 => {
-                    return Token{ .Invalid = "unexpected eof" };
+                    res.id = .{ .Invalid = "unexpected eof" };
                 },
 
                 .BinaryNumber,
@@ -772,49 +868,56 @@ pub const Token = struct {
                 .HexNumber,
                 .Number,
                 .Zero,
-                => return Token{ .Number = it.bytes[start_index..] },
+                => res.id = .{ .Number = self.it.bytes[self.start_index..] },
 
-                .Equal => return Token.Equal,
-                .Minus => return Token.Minus,
-                .Slash => return Token.Slash,
-                .SlashSlash => return Token.SlashSlash,
-                .Ampersand => return Token.Ampersand,
-                .Period => return Token.Period,
-                .Pipe => return Token.Pipe,
-                .RArr => return Token.RArr,
-                .RArrArr => return Token.RArrArr,
-                .LArr => return Token.LArr,
-                .LArrArr => return Token.LArrArr,
-                .Plus => return Token.Plus,
-                .Percent => return Token.Percent,
-                .Caret => return Token.Caret,
-                .Asterisk => return Token.Asterisk,
+                .String => {
+                    self.it.i = self.start_index;
+                    res.id = .InvalidEof;
+                },
+                .Equal => res.id = .Equal,
+                .Minus => res.id = .Minus,
+                .Slash => res.id = .Slash,
+                .SlashSlash => res.id = .SlashSlash,
+                .Ampersand => res.id = .Ampersand,
+                .Period => res.id = .Period,
+                .Pipe => res.id = .Pipe,
+                .RArr => res.id = .RArr,
+                .RArrArr => res.id = .RArrArr,
+                .LArr => res.id = .LArr,
+                .LArrArr => res.id = .LArrArr,
+                .Plus => res.id = .Plus,
+                .Percent => res.id = .Percent,
+                .Caret => res.id = .Caret,
+                .Asterisk => res.id = .Asterisk,
             }
         }
+        return res;
     }
 };
 
 fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
-    var it = unicode.Utf8Iterator{
-        .i = 0,
-        .bytes = source,
+    var tokenizer = Tokenizer{
+        .it = .{
+            .i = 0,
+            .bytes = source,
+        },
     };
     for (expected_tokens) |expected_token| {
-        const token = Token.next(&it);
-        std.testing.expectEqual(token.id, expected_token);
+        const token = tokenizer.next();
+        std.testing.expectEqual(expected_token, token.id);
     }
-    const last_token = Token.next(&it);
+    const last_token = tokenizer.next();
     std.testing.expect(last_token.id == .Eof);
 }
 
 test "operators" {
     expectTokens(
-        \\ != | |= = ==
-        \\ ( ) { } [ ] . ...
-        \\ ^ ^= + += - -=
-        \\ * *= % %= / /= // //=
-        \\ , & &= < <= <<
-        \\ <<= > >= >> >>= ~
+        \\!= | |= = ==
+        \\    ( ) { } [ ] . ...
+        \\        ^ ^= + += - -=
+        \\* *= % %= / /= // //=
+        \\, & &= < <= <<
+        \\<<= > >= >> >>= ~
         \\
     , &[_]Token.Id{
         .BangEqual,
@@ -823,6 +926,7 @@ test "operators" {
         .Equal,
         .EqualEqual,
         .Nl,
+        .{ .Indent = 1 },
         .LParen,
         .RParen,
         .LBrace,
@@ -832,6 +936,7 @@ test "operators" {
         .Period,
         .Ellipsis,
         .Nl,
+        .{ .Indent = 2 },
         .Caret,
         .CaretEqual,
         .Plus,
