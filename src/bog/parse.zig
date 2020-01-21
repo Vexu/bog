@@ -95,6 +95,7 @@ fn getIndent(parser: *Parser, err_stream: var) u8 {
 }
 
 pub const Token = union(enum) {
+    Invalid: []const u8,
     Eof,
     Identifier: []const u8,
     String: []const u8,
@@ -141,6 +142,7 @@ pub const Token = union(enum) {
     RArrArr,
     RArrArrEqual,
     Tilde,
+    Colon,
 
     /// keywords
     Keyword_not,
@@ -197,7 +199,7 @@ pub const Token = union(enum) {
         return null;
     }
 
-    pub fn next(it: *unicode.Utf8Iterator, err_stream: var) !Token {
+    pub fn next(it: *unicode.Utf8Iterator) Token {
         var start_index = it.i;
         var state: enum {
             Start,
@@ -206,7 +208,6 @@ pub const Token = union(enum) {
             BackSlashCr,
             String,
             EscapeSequence,
-            CrEscape,
             HexEscape,
             UnicodeStart,
             UnicodeEscape,
@@ -310,6 +311,9 @@ pub const Token = union(enum) {
                     '~' => {
                         return Token.Tilde;
                     },
+                    ':' => {
+                        return Token.Colon;
+                    },
                     '.' => {
                         state = .Period;
                     },
@@ -337,8 +341,7 @@ pub const Token = union(enum) {
                         } else if (isIdentifier(c)) {
                             state = .Identifier;
                         } else {
-                            try err_stream.print("invalid character\n", .{});
-                            return error.Invalid;
+                            return Token{ .Invalid = "invalid character" };
                         }
                     },
                 },
@@ -347,8 +350,7 @@ pub const Token = union(enum) {
                         return Token.Nl;
                     },
                     else => {
-                        try err_stream.print("invalid character\n", .{});
-                        return error.Invalid;
+                        return Token{ .Invalid = "invalid character" };
                     },
                 },
                 .BackSlash => switch (c) {
@@ -359,8 +361,7 @@ pub const Token = union(enum) {
                         state = .BackSlashCr;
                     },
                     else => {
-                        try err_stream.print("invalid character\n", .{});
-                        return error.Invalid;
+                        return Token{ .Invalid = "invalid character" };
                     },
                 },
                 .BackSlashCr => switch (c) {
@@ -368,8 +369,7 @@ pub const Token = union(enum) {
                         state = .Start;
                     },
                     else => {
-                        try err_stream.print("invalid character\n", .{});
-                        return error.Invalid;
+                        return Token{ .Invalid = "invalid character" };
                     },
                 },
                 .String => switch (c) {
@@ -377,8 +377,9 @@ pub const Token = union(enum) {
                         state = .EscapeSequence;
                     },
                     '\n', '\r' => {
-                        try err_stream.print("invalid character\n", .{});
-                        return error.Invalid;
+                        if (str_delimit == '\'') {
+                            return Token{ .Invalid = "invalid newline, use'\"' for multiline strings" };
+                        }
                     },
                     else => {
                         if (c == str_delimit) {
@@ -387,11 +388,8 @@ pub const Token = union(enum) {
                     },
                 },
                 .EscapeSequence => switch (c) {
-                    '\'', '"', '\\', 'n', 'r', 't', '\n' => {
+                    '\'', '"', '\\', 'r', 't', '\n' => {
                         state = .String;
-                    },
-                    '\r' => {
-                        state = .CrEscape;
                     },
                     'x' => {
                         counter = 0;
@@ -401,17 +399,7 @@ pub const Token = union(enum) {
                         state = .UnicodeStart;
                     },
                     else => {
-                        try err_stream.print("invalid escape sequence\n", .{});
-                        return error.Invalid;
-                    },
-                },
-                .CrEscape => switch (c) {
-                    '\n' => {
-                        state = .String;
-                    },
-                    else => {
-                        try err_stream.print("invalid character\n", .{});
-                        return error.Invalid;
+                        return Token{ .Invalid = "invalid escape sequence" };
                     },
                 },
                 .HexEscape => switch (c) {
@@ -429,8 +417,7 @@ pub const Token = union(enum) {
                     counter = 0;
                     state = .UnicodeEscape;
                 } else {
-                    try err_stream.print("invalid escape sequence\n", .{});
-                    return error.Invalid;
+                    return Token{ .Invalid = "invalid escape sequence" };
                 },
                 .UnicodeEscape => switch (c) {
                     '0'...'9', 'a'...'f', 'A'...'F' => {
@@ -443,15 +430,13 @@ pub const Token = union(enum) {
                         state = .String;
                     },
                     else => {
-                        try err_stream.print("invalid escape sequence\n", .{});
-                        return error.Invalid;
+                        return Token{ .Invalid = "invalid escape sequence" };
                     },
                 },
                 .UnicodeEnd => if (c == '}') {
                     state = .String;
                 } else {
-                    try err_stream.print("invalid escape sequence\n", .{});
-                    return error.Invalid;
+                    return Token{ .Invalid = "invalid escape sequence" };
                 },
                 .Identifier => {
                     if (!isIdentifier(c)) {
@@ -476,8 +461,7 @@ pub const Token = union(enum) {
                         return Token.BangEqual;
                     },
                     else => {
-                        try err_stream.print("invalid escape sequence\n", .{});
-                        return error.Invalid;
+                        return Token{ .Invalid = "invalid character, use 'not' for boolean not" };
                     },
                 },
                 .Pipe => switch (c) {
@@ -581,8 +565,7 @@ pub const Token = union(enum) {
                         return Token.Ellipsis;
                     },
                     else => {
-                        try err_stream.print("invalid escape sequence\n", .{});
-                        return error.Invalid;
+                        return Token{ .Invalid = "invalid character" };
                     },
                 },
                 .Minus => switch (c) {
@@ -645,8 +628,7 @@ pub const Token = union(enum) {
                         state = .FloatFraction;
                     },
                     '0'...'9', 'a', 'c'...'f', 'A'...'F' => {
-                        try err_stream.print("octal literals start with '0o'\n", .{});
-                        return error.Invalid;
+                        return Token{ .Invalid = "octal literals start with '0o'" };
                     },
                     '_' => {
                         state = .Number;
@@ -659,12 +641,10 @@ pub const Token = union(enum) {
                 .BinaryNumber => switch (c) {
                     '0', '1', '_' => {},
                     '2'...'9', 'a'...'f', 'A'...'F' => {
-                        try err_stream.print("invalid digit in octal literal\n", .{});
-                        return error.Invalid;
+                        return Token{ .Invalid = "invalid digit in octal number" };
                     },
                     '.' => {
-                        try err_stream.print("invalid base for floating point number\n", .{});
-                        return error.Invalid;
+                        return Token{ .Invalid = "invalid base for floating point number" };
                     },
                     else => {
                         it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
@@ -674,12 +654,10 @@ pub const Token = union(enum) {
                 .OctalNumber => switch (c) {
                     '0'...'7', '_' => {},
                     '8'...'9', 'a'...'f', 'A'...'F' => {
-                        try err_stream.print("invalid digit in octal literal\n", .{});
-                        return error.Invalid;
+                        return Token{ .Invalid = "invalid digit in number" };
                     },
                     '.' => {
-                        try err_stream.print("invalid base for floating point number\n", .{});
-                        return error.Invalid;
+                        return Token{ .Invalid = "invalid base for floating point number" };
                     },
                     else => {
                         it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
@@ -689,8 +667,7 @@ pub const Token = union(enum) {
                 .HexNumber => switch (c) {
                     '0'...'9', 'a'...'f', 'A'...'F', '_' => {},
                     '.' => {
-                        try err_stream.print("invalid base for floating point number\n", .{});
-                        return error.Invalid;
+                        return Token{ .Invalid = "invalid base for floating point number" };
                     },
                     'p', 'P' => {
                         state = .FloatExponent;
@@ -703,8 +680,7 @@ pub const Token = union(enum) {
                 .Number => switch (c) {
                     '0'...'9', '_' => {},
                     'a'...'d', 'f', 'A'...'F' => {
-                        try err_stream.print("invalid digit in octal literal\n", .{});
-                        return error.Invalid;
+                        return Token{ .Invalid = "invalid digit in hex number" };
                     },
                     '.' => {
                         state = .FloatFraction;
@@ -743,8 +719,7 @@ pub const Token = union(enum) {
                     '_' => {},
                     else => {
                         if (counter == 0) {
-                            try err_stream.print("invalid exponent\n", .{});
-                            return error.Invalid;
+                            return Token{ .Invalid = "invalid exponent digit" };
                         }
                         it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         return Token{ .Number = it.bytes[start_index..it.i] };
@@ -767,7 +742,6 @@ pub const Token = union(enum) {
                 .Period2,
                 .String,
                 .EscapeSequence,
-                .CrEscape,
                 .HexEscape,
                 .UnicodeStart,
                 .UnicodeEscape,
@@ -777,8 +751,7 @@ pub const Token = union(enum) {
                 .FloatExponentDigits,
                 .Bang,
                 => {
-                    try err_stream.print("unexpected eof\n", .{});
-                    return error.Invalid;
+                    return Token{ .Invalid = "unexpected eof" };
                 },
 
                 .BinaryNumber,
@@ -808,23 +781,24 @@ pub const Token = union(enum) {
     }
 };
 
-fn expectTokens(source: []const u8, expected_tokens: []const Token) !void {
+fn expectTokens(source: []const u8, expected_tokens: []const Token) void {
     var it = unicode.Utf8Iterator{
         .i = 0,
         .bytes = source,
     };
-    for (expected_tokens) |expected_token_id| {
-        const token = try Token.next(&it, std.io.null_out_stream);
-        if (!std.meta.eql(token, expected_token_id)) {
-            std.debug.panic("expected {}, found {}\n", .{ @tagName(expected_token_id), @tagName(token) });
-        }
+    for (expected_tokens) |expected_token| {
+        const token = Token.next(&it);
+        std.testing.expectEqual(token, expected_token);
+        // if (!std.meta.eql(token, expected_token_id)) {
+        //     std.debug.panic("expected {}, found {}\n", .{ @tagName(expected_token_id), @tagName(token) });
+        // }
     }
-    const last_token = try Token.next(&it, std.io.null_out_stream);
+    const last_token = Token.next(&it);
     std.testing.expect(last_token == .Eof);
 }
 
 test "operators" {
-    try expectTokens(
+    expectTokens(
         \\ != | |= = ==
         \\ ( ) { } [ ] . ...
         \\ ^ ^= + += - -=
@@ -882,7 +856,7 @@ test "operators" {
 }
 
 test "keywords" {
-    try expectTokens(
+    expectTokens(
         \\not　and or let continue break return if else false true for while match catch try error import
     , &[_]Token{
         .Keyword_not,

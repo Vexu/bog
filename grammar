@@ -1,7 +1,7 @@
 root <- (NL stmt)* NL? EOF
 
-stmt <-
-    / if
+stmt
+   <- if
     / while
     / for
     / match
@@ -22,21 +22,26 @@ block <- (NL INDENT stmt)+ NL
 
 match <- "match" bool_expr (INDENT match_case)+
 
-match_case <-
-    / unwrap block
+match_case
+   <- unwrap block
     / (bool_expr ("..." bool_expr) ",")+ block
 
-let <- "let" unwrap "=" expr
+let <- "let" (unwrap_no_ident / (IDENTIFIER member)) "=" expr
 
-assign <- 
-    / IDENTIFIER "=" expr
-    / IDENTIFIER ("+=" / "-=" / "*=" / "/=" / "//=" / "%=" / "<<=" / ">>=" / "&=" / "|=" / "^=") bit_expr
+assign
+   <- IDENTIFIER member "=" expr
+    / IDENTIFIER member ("+=" / "-=" / "*=" / "/=" / "//=" / "%=" / "<<=" / ">>=" / "&=" / "|=" / "^=") bit_expr
 
-unwrap <-
-    / IDENTIFIER
-    / "{" IDENTIFIER ("," IDENTIFIER)* "}"
-    / "(" IDENTIFIER ("," IDENTIFIER)* ")"
-    / "[" IDENTIFIER ("," IDENTIFIER)* "]"
+member <- (("[" STRING "]") / ("." IDENTIFIER))*
+
+unwrap
+   <- IDENTIFIER
+    / unwrap_no_ident
+
+unwrap_no_ident
+   <- "{" (IDENTIFIER / STRING) ":" unwrap ("," (IDENTIFIER / STRING) ":" unwrap)* "}"
+    / "(" ("..." ",")?  unwrap ("," unwrap)* ("," "...")? ")"
+    / "[" ("..." ",")?  unwrap ("," unwrap)* ("," "...")? "]"
     / "error" IDENTIFIER
 
 expr <- (fn / import / bool_expr)
@@ -47,7 +52,7 @@ import <- "import" STRING
 
 bool_expr <- bit_expr (("or" bit_expr)* / ("and" bit_expr)*)
 
-bit_expr <- equality_expr (("&" equality_expr)* / ("|" equality_expr)* / ("|" equality_expr)*)
+bit_expr <- equality_expr (("&" equality_expr)* / ("|" equality_expr)* / ("|" equality_expr)*) / ("catch" unwrap (expr / block))
 
 equality_expr <- comparision_expr (("==" / "!=") comparision_expr)*
 
@@ -59,20 +64,20 @@ add_expr <- mul_expr (("-" / "+") mul_expr)*
 
 mul_expr <- prefix_expr (("*" / "/" / "//" / "%") prefix_expr)*
 
-prefix_expr <- ("-", "+", "not", "~") primary_expr suffix_expr*
+prefix_expr <- ("-" / "+" / "not" / "~" / "try") primary_expr suffix_expr*
 
-suffix_expr <-
-    / "[" expr "]"
+suffix_expr
+   <- "[" expr "]"
     / "(" (expr ",")* ")"
     / "." IDENTIFIER
 
-primary_expr <-
-    / IDENTIFIER
+primary_expr
+   <- IDENTIFIER
     / STRING
     / NUMBER
     / "true" / "false"
     / "(" (expr ",")* ")"
-    / "{" ((IDENTIFIER / STRING) expr ",")* "}"
+    / "{" ((IDENTIFIER / STRING) ":" expr ",")* "}"
     / "[" (expr ",")* "]"
     / "error" primary_expr
 
