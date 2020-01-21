@@ -11,9 +11,30 @@ pub const Parser = struct {
     // err_stream: std.io.OutStream(std.fs.File.WriteError),
     // builder: bytecode.Builder,
     tokenizer: Tokenizer,
-    it: Tokeniter,
+    // it: Tokeniter,
 
-    fn parse(parser: *Parser, input: []const u8) !void {
+    pub fn init() Parser {
+        return .{
+            .tokenizer = .{
+                .it = .{
+                    .i = 0,
+                    .bytes = "",
+                },
+            },
+        };
+    }
+
+    pub fn parse(parser: *Parser, input: []const u8) error{Foo}!void {
+        parser.tokenizer.it = .{
+            .bytes = input,
+            .i = 0,
+        };
+        while (true) {
+            const tok = parser.tokenizer.next();
+            std.debug.warn(">>> {}\n", .{tok});
+            if (tok.id == .Eof)
+                break;
+        }
         
     }
 
