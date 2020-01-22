@@ -19,23 +19,23 @@ expr
 
 fn : "fn" "(" (unwrap ",")* ")" expr
 
-bool_expr : comparision_expr (("or" comparision_expr)* / ("and" comparision_expr)*)
+bool_expr : comparision_expr (("or" comparision_expr)* | ("and" comparision_expr)*)
 
 comparision_expr : range_expr (("<" | "<=" | ">" | ">=" | "in" | "==" | "!=" | "is") range_expr)
 
 range_expr : bit_expr ("..." bit_expr)?
 
-bit_expr : shift_expr (("&" shift_expr)* / ("|" shift_expr)* / ("|" shift_expr)*) / ("catch" "(" unwrap ")" expr)
+bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("|" shift_expr)*) | ("catch" "(" unwrap ")" expr)
 
-shift_expr : add_expr (("<<" / ">>") add_expr)
+shift_expr : add_expr (("<<" | ">>") add_expr)
 
-add_expr : mul_expr (("-" / "+") mul_expr)*
+add_expr : mul_expr (("-" | "+") mul_expr)*
 
-mul_expr : prefix_expr (("*" / "/" / "//" / "%") prefix_expr)*
+mul_expr : prefix_expr (("*" | "/" | "//" | "%") prefix_expr)*
 
-prefix_expr : ("-" / "+" / "not" / "~" / "try")? primary_expr suffix_expr* assign?
+prefix_expr : ("-" | "+" | "not" | "~" | "try")? primary_expr suffix_expr* [.l assign]?
 
-assign [if .l]
+assign
     : "=" expr.r
     | ("+=" | "-=" | "*=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") bit_expr.r
 
@@ -64,7 +64,7 @@ primary_expr
     | for
     | match
 
-block : "(" (NL INDENT stmt)+ ")"
+block : "(" (NL stmt)+ ")"
 
 if : "if" "(" bool_expr.r ")" expr ("else" "if" "(" expr ")")* ("else" expr)?
 

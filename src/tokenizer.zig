@@ -69,7 +69,6 @@ pub const Token = struct {
     const Id = union(enum) {
         Invalid: []const u8,
         Eof,
-        Indent: u32,
         Identifier: []const u8,
         String: []const u8,
         Number: []const u8,
@@ -136,6 +135,8 @@ pub const Token = struct {
         Keyword_try,
         Keyword_error,
         Keyword_import,
+        Keyword_is,
+        Keyword_in,
     };
 
     pub const Keyword = struct {
@@ -181,67 +182,9 @@ pub const TokenList = std.SegmentedList(Token, 64);
 pub const Tokenizer = struct {
     it: unicode.Utf8Iterator,
     start_index: usize = 0,
-    indent_char: ?u32 = null,
-    chars_per_indent: ?u8 = null,
-    expect_indent: bool = false,
-
-    fn getIndent(self: *Tokenizer) ?Token {
-        var count: u8 = 0;
-        var res = Token{
-            .id = .Eof,
-            .start = self.start_index,
-        };
-        while (self.it.nextCodepoint()) |c| {
-            if (self.indent_char) |some| {
-                if (c == some) {
-                    count += 1;
-                } else {
-                    self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                    break;
-                }
-            } else if (isWhiteSpace(c)) {
-                self.indent_char = c;
-                count += 1;
-            } else if (c == '\n' or c == '\r') {
-                count = 0;
-            } else {
-                break;
-            }
-        } else {
-            count = 0;
-        }
-        if (count == 0) {
-            self.it.i = self.start_index;
-            self.chars_per_indent = null;
-            self.indent_char = null;
-            return null;
-        } else if (self.chars_per_indent) |some| {
-            if (count % some != 0) {
-                res.id = .{ .Invalid = "invalid indentation" };
-                return res;
-            } else {
-                const levels = @divExact(count, some);
-                if (levels > 25) {
-                    res.id = .{ .Invalid = "indentation exceeds maximum of 25 levels" };
-                    return res;
-                }
-                res.id = .{ .Indent = levels };
-                return res;
-            }
-        } else {
-            self.chars_per_indent = count;
-            res.id = .{ .Indent = 1 };
-            return res;
-        }
-    }
 
     pub fn next(self: *Tokenizer) Token {
         self.start_index = self.it.i;
-        if (self.expect_indent) {
-            self.expect_indent = false;
-            if (self.getIndent()) |some|
-                return some;
-        }
         var state: enum {
             Start,
             Cr,
@@ -296,7 +239,6 @@ pub const Tokenizer = struct {
                     },
                     '\n' => {
                         res.id = .Nl;
-                        self.expect_indent = true;
                         break;
                     },
                     '\r' => {
@@ -405,7 +347,6 @@ pub const Tokenizer = struct {
                 .Cr => switch (c) {
                     '\n' => {
                         res.id = .Nl;
-                        self.expect_indent = true;
                         break;
                     },
                     else => {
@@ -850,6 +791,17 @@ pub const Tokenizer = struct {
                 },
 
                 .Cr,
+                => {
+                    res.id = .{ .Invalid = "unexpected eof" };
+                },
+
+                .BinaryNumber,
+                .OctalNumber,
+                .HexNumber,
+                .Number,
+                .Zero,
+                => res.id = .{ .Number = self.it.bytes[self.start_index..] },
+
                 .BackSlash,
                 .BackSlashCr,
                 .Period2,
@@ -862,18 +814,8 @@ pub const Tokenizer = struct {
                 .FloatExponent,
                 .FloatExponentDigits,
                 .Bang,
-                => {
-                    res.id = .{ .Invalid = "unexpected eof" };
-                },
-
-                .BinaryNumber,
-                .OctalNumber,
-                .HexNumber,
-                .Number,
-                .Zero,
-                => res.id = .{ .Number = self.it.bytes[self.start_index..] },
-
                 .String => {
+                    res.start = self.it.i;
                     self.it.i = self.start_index;
                     res.id = .Eof;
                 },
@@ -916,8 +858,8 @@ fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
 test "operators" {
     expectTokens(
         \\!= | |= = ==
-        \\    ( ) { } [ ] . ...
-        \\        ^ ^= + += - -=
+        \\( ) { } [ ] . ...
+        \\^ ^= + += - -=
         \\* *= % %= / /= // //=
         \\, & &= < <= <<
         \\<<= > >= >> >>= ~
@@ -929,7 +871,6 @@ test "operators" {
         .Equal,
         .EqualEqual,
         .Nl,
-        .{ .Indent = 1 },
         .LParen,
         .RParen,
         .LBrace,
@@ -939,7 +880,6 @@ test "operators" {
         .Period,
         .Ellipsis,
         .Nl,
-        .{ .Indent = 2 },
         .Caret,
         .CaretEqual,
         .Plus,
@@ -995,5 +935,7 @@ test "keywords" {
         .Keyword_try,
         .Keyword_error,
         .Keyword_import,
+        .Keyword_is,
+        .Keyword_in,
     });
 }
