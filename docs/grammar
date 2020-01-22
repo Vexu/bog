@@ -1,8 +1,6 @@
 root : (stmt NL)* EOF
 
-stmt 
-   : let
-   | expr.l
+stmt : let | expr.l
 
 let : "let" unwrap "=" expr.r
 
@@ -13,19 +11,17 @@ unwrap
     | "[" ("..." ",")?  unwrap ("," unwrap)* ("," "...")? "]"
     | "error" IDENTIFIER
 
-expr
-    : fn
-    | bool_expr
+expr : fn | bool_expr
 
 fn : "fn" "(" (unwrap ",")* ")" expr
 
 bool_expr : comparision_expr (("or" comparision_expr)* | ("and" comparision_expr)*)
 
-comparision_expr : range_expr (("<" | "<=" | ">" | ">=" | "in" | "==" | "!=" | "is") range_expr)
+comparision_expr : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in"  | "is") range_expr)
 
 range_expr : bit_expr ("..." bit_expr)?
 
-bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("|" shift_expr)*) | ("catch" "(" unwrap ")" expr)
+bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)*) | ("catch" ("|" unwrap "|")? expr)
 
 shift_expr : add_expr (("<<" | ">>") add_expr)
 
