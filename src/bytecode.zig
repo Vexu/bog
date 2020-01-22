@@ -3,6 +3,7 @@ const mem = std.mem;
 const Allocator = mem.Allocator;
 
 pub const Op = enum(u8) {
+    Move,
     Push,
     Pop,
     Call,
@@ -182,5 +183,33 @@ pub const Builder = struct {
     pub fn add(self: *Builder, lhs: RegRef, rhs: RegRef) anyerror!RegRef {
         std.debug.warn("{} + {}\n", .{ lhs, rhs });
         return lhs;
+    }
+
+    pub fn mul(self: *Builder, lhs: RegRef, rhs: RegRef) anyerror!RegRef {
+        std.debug.warn("{} * {}\n", .{ lhs, rhs });
+        return lhs;
+    }
+
+    pub fn div(self: *Builder, lhs: RegRef, rhs: RegRef) anyerror!RegRef {
+        std.debug.warn("{} / {}\n", .{ lhs, rhs });
+        return lhs;
+    }
+
+    pub fn divFloor(self: *Builder, lhs: RegRef, rhs: RegRef) anyerror!RegRef {
+        std.debug.warn("{} // {}\n", .{ lhs, rhs });
+        return lhs;
+    }
+
+    pub fn mod(self: *Builder, lhs: RegRef, rhs: RegRef) anyerror!RegRef {
+        std.debug.warn("{} % {}\n", .{ lhs, rhs });
+        return lhs;
+    }
+
+
+    var counter: RegRef = 0;
+    pub fn constNumber(self: *Builder, num: var) anyerror!RegRef {
+        counter += 1;
+        std.debug.warn("#{} const num {}\n", .{ counter, num });
+        return counter;
     }
 };

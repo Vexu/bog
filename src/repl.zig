@@ -20,6 +20,9 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
 
         // TODO
         // executor.exec(parser.builder)
+        while (parser.token_it.next()) |tok| {
+            try out_stream.print("{}\n", .{tok});
+        }
     }
 }
 

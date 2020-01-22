@@ -233,37 +233,111 @@ pub const Parser = struct {
     fn addExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) !?RegRef {
         var lhs = (try parser.mulExpr(lr_value, skip_nl)) orelse return null;
 
-        // TODO improve
-        if (parser.eatToken(.Minus, skip_nl)) |_| {
-            // -
-            while (true) {
+        while (true) {
+            if (parser.eatToken(.Minus, skip_nl)) |_| {
+                // -
                 const rhs = (try parser.mulExpr(lr_value, true)).?;
                 lhs = try parser.builder.sub(lhs, rhs);
-                if (parser.eatToken(.Minus, skip_nl) == null) break;
-            }
-        } else {
-            // +
-            while (parser.eatToken(.Plus, skip_nl)) |_| {
+            } else if (parser.eatToken(.Plus, skip_nl)) |_| {
+                // +
                 const rhs = (try parser.mulExpr(lr_value, true)).?;
                 lhs = try parser.builder.add(lhs, rhs);
-            }
+            } else break;
         }
         return lhs;
     }
 
     /// mul_expr : prefix_expr (("*" | "/" | "//" | "%") prefix_expr)*
     fn mulExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) anyerror!?RegRef {
-        // var lhs = (try parser.prefixExpr(lr_value, skip_nl)) orelse return null;
+        var lhs = (try parser.prefixExpr(lr_value, skip_nl)) orelse return null;
 
-        // return lhs;
+        while (true) {
+            if (parser.eatToken(.Asterisk, skip_nl)) |_| {
+                // *
+                const rhs = (try parser.prefixExpr(lr_value, true)).?;
+                lhs = try parser.builder.mul(lhs, rhs);
+            } else if (parser.eatToken(.Slash, skip_nl)) |_| {
+                // /
+                const rhs = (try parser.prefixExpr(lr_value, true)).?;
+                lhs = try parser.builder.div(lhs, rhs);
+            } else if (parser.eatToken(.SlashSlash, skip_nl)) |_| {
+                // //
+                const rhs = (try parser.prefixExpr(lr_value, true)).?;
+                lhs = try parser.builder.divFloor(lhs, rhs);
+            } else if (parser.eatToken(.Percent, skip_nl)) |_| {
+                // %
+                const rhs = (try parser.prefixExpr(lr_value, true)).?;
+                lhs = try parser.builder.mod(lhs, rhs);
+            } else break;
+        }
+
+        return lhs;
+    }
+
+    /// prefix_expr : ("-" | "+" | "not" | "~" | "try")? primary_expr suffix_expr* [.l assign]?
+    fn prefixExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) anyerror!?RegRef {
+        // TODO prefix op
+        var primary = try parser.primaryExpr(lr_value, skip_nl);
+        // while (try parser.suffixExpr(skip_nl, primary)) |suffix| {
+        //     primary = suffix;
+        // }
+        // if (lr_value == .L) {
+        //     try parser.assign(skip_nl);
+        // }
+        return primary;
+    }
+
+    /// assign
+    ///     : "=" expr.r
+    ///     | ("+=" | "-=" | "*=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") bit_expr.r
+    fn assign(parser: *Parser, skip_nl: bool) anyerror!?RegRef {
         unreachable;
     }
 
-    fn eatToken(parser: *Parser, id: Token.Id, skip_nl: bool) ?*Token {
+    /// primary_expr
+    ///     : IDENTIFIER
+    ///     | STRING
+    ///     | NUMBER
+    ///     | "true"
+    ///     | "false"
+    ///     | "(" (expr.r ",")* ")"
+    ///     | "{" ((IDENTIFIER | STRING) ":" expr.r ",")* "}"
+    ///     | "[" (expr.r ",")* "]"
+    ///     | "error" expr.r
+    ///     | "return" expr.r
+    ///     | "break"
+    ///     | "continue"
+    ///     | "import" STRING
+    ///     | block
+    ///     | if
+    ///     | while
+    ///     | for
+    ///     | match
+    fn primaryExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) anyerror!RegRef {
+        if (parser.eatToken(.Number, skip_nl)) |tok| {
+            return parser.builder.constNumber(tok.id.Number);
+        }
         unreachable;
     }
 
-    fn expectToken(parser: *Parser, id: Token.Id, skip_nl: bool) anyerror!?*Token {
-        unreachable;
+    fn eatToken(parser: *Parser, id: @TagType(Token.Id), skip_nl: bool) ?*Token {
+        var next = parser.token_it.next().?;
+        if (skip_nl) {
+            while (next.id == .Nl) {
+                next = parser.token_it.next().?;
+            }
+        }
+        if (next.id == id) {
+            return next;
+        } else {
+            _ = parser.token_it.prev();
+            return null;
+        }
+    }
+
+    fn expectToken(parser: *Parser, id: @TagType(Token.Id), skip_nl: bool) anyerror!*Token {
+        if (parser.eatToken(id, skip_nl)) |tok| return tok;
+        // TODO err expected token {id} found {parser.token_it.next().?.id}
+        return error.ParseError;
     }
 };
