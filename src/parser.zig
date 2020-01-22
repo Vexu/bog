@@ -6,14 +6,17 @@ const Tokenizer = tokenizer.Tokenizer;
 const Token = tokenizer.Token;
 const TokenList = tokenizer.TokenList;
 const bytecode = @import("bytecode.zig");
+const Allocator = std.mem.Allocator;
 
 pub const Parser = struct {
     // err_stream: std.io.OutStream(std.fs.File.WriteError),
     // builder: bytecode.Builder,
     tokenizer: Tokenizer,
-    // it: Tokeniter,
+    tokens: TokenList,
+    token_it: TokenList.Iterator,
+    // eof_callback: ?fn () error{OutOfMemory}![]const u8 = null,
 
-    pub fn init() Parser {
+    pub fn init(allocator: *Allocator) Parser {
         return .{
             .tokenizer = .{
                 .it = .{
@@ -21,21 +24,33 @@ pub const Parser = struct {
                     .bytes = "",
                 },
             },
+            .tokens = TokenList.init(allocator),
+            .token_it = undefined, // set in `tokenize`
         };
     }
 
-    pub fn parse(parser: *Parser, input: []const u8) error{Foo}!void {
-        parser.tokenizer.it = .{
-            .bytes = input,
-            .i = 0,
-        };
+    pub fn deinit(parser: *Parser) void {
+        parser.tokens.deinit();
+    }
+
+    pub fn parse(parser: *Parser, input: []const u8) !void {
+        try parser.tokenize(input);
+    }
+
+    fn tokenize(parser: *Parser, input: []const u8) !void {
+        parser.tokenizer.it.bytes = input;
+        const new_len = if (parser.tokens.len != 0) blk: {
+            const len = parser.tokens.len - 1; // pop .Eof
+            parser.tokens.len = len;
+            break :blk len;
+        } else 0;
+        parser.token_it = parser.tokens.iterator(new_len);
         while (true) {
-            const tok = parser.tokenizer.next();
-            std.debug.warn(">>> {}\n", .{tok});
+            const tok = try parser.tokens.addOne();
+            tok.* = parser.tokenizer.next();
             if (tok.id == .Eof)
                 break;
         }
-        
     }
 
     ///root <- (stmt NL)* EOF

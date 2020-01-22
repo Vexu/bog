@@ -137,6 +137,7 @@ pub const Token = struct {
         Keyword_import,
         Keyword_is,
         Keyword_in,
+        Keyword_fn,
     };
 
     pub const Keyword = struct {
@@ -165,6 +166,7 @@ pub const Token = struct {
         .{ .bytes = "import", .id = .Keyword_import },
         .{ .bytes = "is", .id = .Keyword_is },
         .{ .bytes = "in", .id = .Keyword_in },
+        .{ .bytes = "fn", .id = .Keyword_fn },
     };
 
     pub fn getKeyword(bytes: []const u8) ?Token.Id {
@@ -182,6 +184,7 @@ pub const TokenList = std.SegmentedList(Token, 64);
 pub const Tokenizer = struct {
     it: unicode.Utf8Iterator,
     start_index: usize = 0,
+    repl: bool = false,
 
     pub fn next(self: *Tokenizer) Token {
         self.start_index = self.it.i;
@@ -790,11 +793,8 @@ pub const Tokenizer = struct {
                     res.id = Token.getKeyword(slice) orelse .{ .Identifier = slice };
                 },
 
-                .Cr,
-                => {
-                    res.id = .{ .Invalid = "unexpected eof" };
-                },
 
+                .FloatFraction,
                 .BinaryNumber,
                 .OctalNumber,
                 .HexNumber,
@@ -802,23 +802,15 @@ pub const Tokenizer = struct {
                 .Zero,
                 => res.id = .{ .Number = self.it.bytes[self.start_index..] },
 
-                .BackSlash,
-                .BackSlashCr,
-                .Period2,
-                .EscapeSequence,
-                .HexEscape,
-                .UnicodeStart,
-                .UnicodeEscape,
-                .UnicodeEnd,
-                .FloatFraction,
-                .FloatExponent,
-                .FloatExponentDigits,
-                .Bang,
                 .String => {
-                    res.start = self.it.i;
-                    self.it.i = self.start_index;
-                    res.id = .Eof;
+                    if (self.repl) {
+                        res.start = self.it.i;
+                        self.it.i = self.start_index;
+                        res.id = .Eof;
+                    } else
+                        res.id = .{ .Invalid = "unterminated string" };
                 },
+
                 .Equal => res.id = .Equal,
                 .Minus => res.id = .Minus,
                 .Slash => res.id = .Slash,
@@ -834,6 +826,9 @@ pub const Tokenizer = struct {
                 .Percent => res.id = .Percent,
                 .Caret => res.id = .Caret,
                 .Asterisk => res.id = .Asterisk,
+                else => {
+                    res.id = .{ .Invalid = "unexpected eof" };
+                },
             }
         }
         return res;
@@ -915,7 +910,7 @@ test "operators" {
 
 test "keywords" {
     expectTokens(
-        \\not　and or let continue break return if else false true for while match catch try error import is in
+        \\not　and or let continue break return if else false true for while match catch try error import is in fn
     , &[_]Token.Id{
         .Keyword_not,
         .Keyword_and,
@@ -937,5 +932,6 @@ test "keywords" {
         .Keyword_import,
         .Keyword_is,
         .Keyword_in,
+        .Keyword_fn,
     });
 }

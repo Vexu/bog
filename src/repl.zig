@@ -1,22 +1,45 @@
 const std = @import("std");
+const ArrayList = std.ArrayList;
+const Allocator = std.mem.Allocator;
 const Parser = @import("parser.zig").Parser;
 
-pub const Repl = struct {
-    buf: [512]u8,
-    parser: Parser,
+pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
+    var buffer = try ArrayList(u8).initCapacity(allocator, std.mem.page_size);
+    defer buffer.deinit();
+    var parser = Parser.init(allocator);
+    defer parser.deinit();
+    parser.tokenizer.repl = true;
 
-    pub fn init() Repl {
-        return .{
-            .buf = undefined,
-            .parser = Parser.init(),
+    while (true) {
+        try out_stream.write("<<< ");
+        readLine(&buffer, in_stream) catch |e| switch (e) {
+            error.EndOfStream => return out_stream.write(std.cstr.line_sep),
+            else => |err| return err,
         };
-    }
+        try parser.parse(buffer.toSliceConst());
 
-    pub fn run(repl: *Repl, in_stream: var, out_stream: var) !void {
-        while (true) {
-            try out_stream.write("<<< ");
-            const input = std.io.readLineSliceFrom(in_stream, &repl.buf) catch return;
-            try repl.parser.parse(input);
+        // TODO
+        while (parser.token_it.next()) |tok| {
+            try out_stream.print("{}\n", .{tok});
         }
     }
-};
+}
+
+fn readLine(buffer: *ArrayList(u8), in_stream: var) !void {
+    const start_len = buffer.len;
+    while (true) {
+        var byte: u8 = in_stream.readByte() catch |e| switch (e) {
+            error.EndOfStream => if (start_len == buffer.len) return error.EndOfStream else continue,
+            else => |err| return err,
+        };
+        try buffer.append(byte);
+
+        if (byte == '\n') {
+            return;
+        }
+
+        // if (buffer.len() == std.mem.page_size) {
+        //     return error.StreamTooLong;
+        // }
+    }
+}
