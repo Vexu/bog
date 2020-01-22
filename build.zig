@@ -16,7 +16,13 @@ pub fn build(b: *Builder) void {
     var exe = b.addExecutable("lang", "src/main.zig");
     exe.setBuildMode(mode);
     exe.install();
-    
+
     const run_step = b.step("run", "Run");
     run_step.dependOn(&exe.run().step);
+
+    const fmt_step = b.step("fmt", "Format all source files");
+    fmt_step.dependOn(&b.addFmt(&[_][]const u8{
+        "build.zig",
+        "src",
+    }).step);
 }

@@ -793,7 +793,6 @@ pub const Tokenizer = struct {
                     res.id = Token.getKeyword(slice) orelse .{ .Identifier = slice };
                 },
 
-
                 .FloatFraction,
                 .BinaryNumber,
                 .OctalNumber,
