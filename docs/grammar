@@ -62,7 +62,7 @@ primary_expr
 
 block : "(" (NL stmt)+ ")"
 
-if : "if" "(" bool_expr.r ")" expr ("else" "if" "(" expr ")")* ("else" expr)?
+if : "if" "(" bool_expr.r ")" expr ("else" "if" "(" bool_expr.r ")" expr)* ("else" expr)?
 
 while : "while" "(" bool_expr.r ")" expr
 

@@ -19,9 +19,7 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
         try parser.parse(buffer.toSliceConst());
 
         // TODO
-        while (parser.token_it.next()) |tok| {
-            try out_stream.print("{}\n", .{tok});
-        }
+        // executor.exec(parser.builder)
     }
 }
 

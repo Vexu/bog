@@ -66,7 +66,7 @@ pub const Token = struct {
     start: usize,
     id: Id,
 
-    const Id = union(enum) {
+    pub const Id = union(enum) {
         Invalid: []const u8,
         Eof,
         Identifier: []const u8,
