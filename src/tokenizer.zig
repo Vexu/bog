@@ -162,6 +162,8 @@ pub const Token = struct {
         .{ .bytes = "try", .id = .Keyword_try },
         .{ .bytes = "error", .id = .Keyword_error },
         .{ .bytes = "import", .id = .Keyword_import },
+        .{ .bytes = "is", .id = .Keyword_is },
+        .{ .bytes = "in", .id = .Keyword_in },
     };
 
     pub fn getKeyword(bytes: []const u8) ?Token.Id {
@@ -973,7 +975,7 @@ test "operators" {
 
 test "keywords" {
     expectTokens(
-        \\not　and or let continue break return if else false true for while match catch try error import
+        \\not　and or let continue break return if else false true for while match catch try error import is in
     , &[_]Token.Id{
         .Keyword_not,
         .Keyword_and,

@@ -1,80 +1,79 @@
-root <- (stmt NL)* EOF
+root : (stmt NL)* EOF
 
-stmt
-   <- if
-    / while
-    / for
-    / match
-    / let
-    / expr
-    / assign
-    / "return" expr
-    / "break"
-    / "continue"
+stmt 
+   : let
+   | expr.l
 
-if <- "if" bool_expr block ("else" "if" bool_expr block)* ("else" block)?
-
-while <- "while" bool_expr block
-
-for <- "for" unwrap "in" range_expr block
-
-block <- (NL INDENT stmt)+
-
-match <- "match" bool_expr (INDENT match_case)+
-
-match_case
-   <- unwrap block
-    / (range_expr ",")+ block
-
-let <- "let" unwrap "=" expr
-
-assign
-   <- IDENTIFIER member "=" expr
-    / IDENTIFIER member ("+=" / "-=" / "*=" / "/=" / "//=" / "%=" / "<<=" / ">>=" / "&=" / "|=" / "^=") bit_expr
-
-member <- (("[" STRING "]") / ("." IDENTIFIER))*
+let : "let" unwrap "=" expr.r
 
 unwrap
-   <- IDENTIFIER
-    / "{" (IDENTIFIER / STRING) ":" unwrap ("," (IDENTIFIER / STRING) ":" unwrap)* "}"
-    / "(" ("..." ",")?  unwrap ("," unwrap)* ("," "...")? ")"
-    / "[" ("..." ",")?  unwrap ("," unwrap)* ("," "...")? "]"
-    / "error" IDENTIFIER
+    : IDENTIFIER
+    | "{" (IDENTIFIER | STRING) ":" unwrap ("," (IDENTIFIER | STRING) ":" unwrap)* "}"
+    | "(" ("..." ",")?  unwrap ("," unwrap)* ("," "...")? ")"
+    | "[" ("..." ",")?  unwrap ("," unwrap)* ("," "...")? "]"
+    | "error" IDENTIFIER
 
-expr <- (fn / import / bool_expr)
+expr
+    : fn
+    | bool_expr
 
-fn <- "|" (unwrap ",")* "|" (block / bool_expr)
+fn : "fn" "(" (unwrap ",")* ")" expr
 
-import <- "import" STRING
+bool_expr : comparision_expr (("or" comparision_expr)* / ("and" comparision_expr)*)
 
-bool_expr <- comparision_expr (("or" comparision_expr)* / ("and" comparision_expr)*)
+comparision_expr : range_expr (("<" | "<=" | ">" | ">=" | "in" | "==" | "!=" | "is") range_expr)
 
-comparision_expr <- range_expr (("<" / "<=" / ">" / ">=" / "in" / "==" / "!=") range_expr)
+range_expr : bit_expr ("..." bit_expr)?
 
-range_expr <- bit_expr ("..." bit_expr)?
+bit_expr : shift_expr (("&" shift_expr)* / ("|" shift_expr)* / ("|" shift_expr)*) / ("catch" "(" unwrap ")" expr)
 
-bit_expr <- shift_expr (("&" shift_expr)* / ("|" shift_expr)* / ("|" shift_expr)*) / ("catch" unwrap block)
+shift_expr : add_expr (("<<" / ">>") add_expr)
 
-shift_expr <- add_expr (("<<" / ">>") add_expr)
+add_expr : mul_expr (("-" / "+") mul_expr)*
 
-add_expr <- mul_expr (("-" / "+") mul_expr)*
+mul_expr : prefix_expr (("*" / "/" / "//" / "%") prefix_expr)*
 
-mul_expr <- prefix_expr (("*" / "/" / "//" / "%") prefix_expr)*
+prefix_expr : ("-" / "+" / "not" / "~" / "try")? primary_expr suffix_expr* assign?
 
-prefix_expr <- ("-" / "+" / "not" / "~" / "try")? primary_expr suffix_expr*
+assign [if .l]
+    : "=" expr.r
+    | ("+=" | "-=" | "*=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") bit_expr.r
 
 suffix_expr
-   <- "[" expr "]"
-    / "(" (expr ",")* ")"
-    / "." IDENTIFIER
+    : "[" expr.r "]"
+    | "(" (expr.r ",")* ")"
+    | "." IDENTIFIER
 
 primary_expr
-   <- IDENTIFIER
-    / STRING
-    / NUMBER
-    / "true" / "false"
-    / "(" (expr ",")* ")"
-    / "{" ((IDENTIFIER / STRING) ":" expr ",")* "}"
-    / "[" (expr ",")* "]"
-    / "error" primary_expr
+    : IDENTIFIER
+    | STRING
+    | NUMBER
+    | "true" 
+    | "false"
+    | "(" (expr.r ",")* ")"
+    | "{" ((IDENTIFIER | STRING) ":" expr.r ",")* "}"
+    | "[" (expr.r ",")* "]"
+    | "error" expr.r
+    | "return" expr.r
+    | "break"
+    | "continue"
+    | "import" STRING
+    | block
+    | if
+    | while
+    | for
+    | match
 
+block : "(" (NL INDENT stmt)+ ")"
+
+if : "if" "(" bool_expr.r ")" expr ("else" "if" "(" expr ")")* ("else" expr)?
+
+while : "while" "(" bool_expr.r ")" expr
+
+for : "for" "(" unwrap "in" range_expr.r ")" expr
+
+match : "match" "(" bool_expr.r ")" "(" (NL match_case ",")+ ")"
+
+match_case
+    : unwrap ":" expr
+    | (range_expr.r ",")+ ":" expr
