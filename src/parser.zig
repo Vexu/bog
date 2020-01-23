@@ -81,7 +81,7 @@ pub const Parser = struct {
         } else return parser.expr(.L);
     }
 
-    /// let : let : "let" unwrap "=" expr.r
+    /// let : "let" unwrap "=" expr.r
     fn let(parser: *Parser) anyerror!void {
         unreachable;
     }
@@ -182,10 +182,10 @@ pub const Parser = struct {
                 lhs = try parser.builder.infix(lhs, tok, rhs);
                 if (parser.eatToken(.Caret, skip_nl)) |tt| tok = tt else break;
             }
-        } else if (parser.eatToken(.RArrEqual, skip_nl)) |_| {
+        } else if (parser.eatToken(.Keyword_catch, skip_nl)) |_| {
             // catch
-            const is_err = try parser.builder.isErr(lhs);
-            const jump = try parser.builder.jumpFalse(is_err);
+            const jump = try parser.builder.jumpNotErr(lhs);
+            defer parser.builder.finishJump(jump);
             if (parser.eatToken(.Pipe, true)) |_| {
                 @panic("TODO");
                 // const unwrap = try parser.unwrap();
@@ -195,7 +195,6 @@ pub const Parser = struct {
             if (try parser.expr(lr_value)) |rhs| {
                 try parser.builder.move(rhs, lhs);
             }
-            parser.builder.finishJump(jump);
         }
         return lhs;
     }
@@ -327,10 +326,61 @@ pub const Parser = struct {
     ///     | for
     ///     | match
     fn primaryExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) anyerror!RegRef {
-        if (parser.eatToken(.Number, skip_nl)) |tok| {
+        if (parser.eatToken(.Number, skip_nl) orelse
+            parser.eatToken(.String, skip_nl) orelse
+            parser.eatToken(.Keyword_true, skip_nl) orelse
+            parser.eatToken(.Keyword_false, skip_nl)) |tok|
+        {
             return parser.builder.constant(tok);
         }
-        unreachable;
+        if (parser.eatToken(.Identifier, skip_nl)) |tok| {
+            return parser.builder.declRef(tok);
+        }
+        if (parser.eatToken(.Keyword_error, skip_nl)) |tok| {
+            _ = try parser.expectToken(.LParen, true);
+            const val = (try parser.expr(.R)).?;
+            _ = try parser.expectToken(.RParen, true);
+            return parser.builder.buildErr(tok, val);
+        }
+        if (parser.eatToken(.Keyword_import, skip_nl)) |tok| {
+            _ = try parser.expectToken(.LParen, true);
+            const str = try parser.builder.constant(try parser.expectToken(.String, true));
+            _ = try parser.expectToken(.RParen, true);
+            return parser.builder.import(tok, str);
+        }
+        if (parser.eatToken(.LParen, skip_nl)) |tok| {
+            if (parser.eatToken(.Nl, false)) |_| {
+                // block
+            } else {
+                // tuple or grouped expr
+            }
+        }
+        if (parser.eatToken(.LBrace, skip_nl)) |tok| {
+            //     | "{" ((IDENTIFIER | STRING) ":" expr.r ",")* "}"
+        }
+        if (parser.eatToken(.LBracket, skip_nl)) |tok| {
+            //     | "[" (expr.r ",")* "]"
+            const arr = try parser.builder.buildList(tok);
+            var count: u32 = 0;
+            var rbracket: *Token = undefined;
+            if (parser.eatToken(.RBracket, true)) |t| {
+                rbracket = t;
+            } else {
+                while (true) {
+                    const val = (try parser.expr(.R)).?;
+                    try parser.builder.listPush(val);
+                    if (parser.eatToken(.Comma, true) == null) break;
+                }
+                rbracket = try parser.expectToken(.RBracket, true);
+            }
+            return try parser.builder.finishList(rbracket, count);
+        }
+        //     | if
+        //     | while
+        //     | for
+        //     | match
+        // TODO expected Identifier, String, Number, true, false, '(', '{', '[', error, import, if, while, for, match
+        return error.ParseError;
     }
 
     fn eatToken(parser: *Parser, id: @TagType(Token.Id), skip_nl: bool) ?*Token {

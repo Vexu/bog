@@ -77,6 +77,7 @@ pub const Builder = struct {
     pub fn deinit(self: *Builder) void {}
 
     pub fn discard(self: *Builder, reg: RegRef) anyerror!void {
+        defer self.registerFree(reg);
         std.debug.warn("discard #{}\n", .{reg});
     }
 
@@ -90,13 +91,13 @@ pub const Builder = struct {
         return 1;
     }
 
-    pub fn finishJump(self: *Builder, jump: usize) void {
-        std.debug.warn("finishJump #{}\n", .{jump});
+    pub fn jumpNotErr(self: *Builder, reg: RegRef) anyerror!usize {
+        std.debug.warn("jumpNotErr #{}\n", .{reg});
+        return 1;
     }
 
-    pub fn isErr(self: *Builder, reg: RegRef) anyerror!RegRef {
-        std.debug.warn("isErr {}\n", .{reg});
-        return reg;
+    pub fn finishJump(self: *Builder, jump: usize) void {
+        std.debug.warn("#finishJump #{}\n", .{jump});
     }
 
     fn registerAlloc(self: *Builder) RegRef {
@@ -115,6 +116,42 @@ pub const Builder = struct {
     pub fn constant(self: *Builder, tok: *Token) anyerror!RegRef {
         const reg = self.registerAlloc();
         std.debug.warn("#{} constant {}\n", .{ reg, tok });
+        return reg;
+    }
+
+    pub fn declRef(self: *Builder, tok: *Token) anyerror!RegRef {
+        const reg = self.registerAlloc();
+        std.debug.warn("#{} declref {}\n", .{ reg, tok });
+        return reg;
+    }
+
+    pub fn buildErr(self: *Builder, tok: *Token, val: RegRef) anyerror!RegRef {
+        const reg = self.registerAlloc();
+        std.debug.warn("buildErr {}\n", .{ val });
+        return reg;
+    }
+
+    pub fn buildList(self: *Builder, tok: *Token) anyerror!usize {
+        // todo allocate register here?
+        const list = 1;
+        std.debug.warn("buildList {}\n", .{ list });
+        return list;
+    }
+
+    pub fn finishList(self: *Builder, tok: *Token, list: usize) anyerror!RegRef {
+        const reg = self.registerAlloc();
+        std.debug.warn("#finishList {}\n", .{ list });
+        return reg;
+    }
+
+    pub fn listPush(self: *Builder, val: RegRef) anyerror!void {
+        defer self.registerFree(val);
+        std.debug.warn("listPush {}\n", .{ val });
+    }
+
+    pub fn import(self: *Builder, tok: *Token, str: RegRef) anyerror!RegRef {
+        const reg = self.registerAlloc();
+        std.debug.warn("import {}\n", .{ str });
         return reg;
     }
 
