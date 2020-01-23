@@ -13,26 +13,26 @@ unwrap
 
 expr
     : fn 
+    | [.l jump_expr]
     | bool_expr
-    | "return" expr.r
-    | "break"
-    | "continue"
+
+jump_expr : "return" expr.r | "break" | "continue"
 
 fn : "fn" "(" (unwrap ",")* ")" expr
 
-bool_expr : comparision_expr (("or" comparision_expr)* | ("and" comparision_expr)*)
+bool_expr : comparision_expr (("or" comparision_expr.r)* | ("and" comparision_expr.r)*)
 
-comparision_expr : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in"  | "is") range_expr)
+comparision_expr : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in"  | "is") range_expr.r)
 
-range_expr : bit_expr ("..." bit_expr)?
+range_expr : bit_expr ("..." bit_expr.r)?
 
-bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)*) | ("catch" ("|" unwrap "|")? expr)
+bit_expr : shift_expr (("&" shift_expr.r)* | ("|" shift_expr.r)* | ("^" shift_expr.r)*) | ("catch" ("|" unwrap "|")? expr)
 
-shift_expr : add_expr (("<<" | ">>") add_expr)
+shift_expr : add_expr (("<<" | ">>") add_expr.r)
 
-add_expr : mul_expr (("-" | "+") mul_expr)*
+add_expr : mul_expr (("-" | "+") mul_expr.r)*
 
-mul_expr : prefix_expr (("*" | "/" | "//" | "%") prefix_expr)*
+mul_expr : prefix_expr (("*" | "/" | "//" | "%") prefix_expr.r)*
 
 prefix_expr 
     : "try" bool_expr.r
@@ -56,8 +56,8 @@ primary_expr
     | "(" (expr.r ",")* ")"
     | "{" ((IDENTIFIER | STRING) ":" expr.r ",")* "}"
     | "[" (expr.r ",")* "]"
-    | "error" expr.r
-    | "import" STRING
+    | "error" "(" expr.r ")"
+    | "import" "(" STRING ")"
     | block
     | if
     | while
