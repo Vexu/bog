@@ -11,7 +11,12 @@ unwrap
     | "[" ("..." ",")?  unwrap ("," unwrap)* ("," "...")? "]"
     | "error" IDENTIFIER
 
-expr : fn | bool_expr
+expr
+    : fn 
+    | bool_expr
+    | "return" expr.r
+    | "break"
+    | "continue"
 
 fn : "fn" "(" (unwrap ",")* ")" expr
 
@@ -29,15 +34,17 @@ add_expr : mul_expr (("-" | "+") mul_expr)*
 
 mul_expr : prefix_expr (("*" | "/" | "//" | "%") prefix_expr)*
 
-prefix_expr : ("-" | "+" | "not" | "~" | "try")? primary_expr suffix_expr* [.l assign]?
+prefix_expr 
+    : "try" bool_expr.r
+    | ("-" | "+" | "not" | "~")? primary_expr suffix_expr* [.l assign]?
 
 assign
     : "=" expr.r
     | ("+=" | "-=" | "*=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") bit_expr.r
 
 suffix_expr
-    : "[" expr.r "]"
-    | "(" (expr.r ",")* ")"
+    : "[" bool_expr.r "]"
+    | "(" (bool_expr.r ",")* ")"
     | "." IDENTIFIER
 
 primary_expr
@@ -50,9 +57,6 @@ primary_expr
     | "{" ((IDENTIFIER | STRING) ":" expr.r ",")* "}"
     | "[" (expr.r ",")* "]"
     | "error" expr.r
-    | "return" expr.r
-    | "break"
-    | "continue"
     | "import" STRING
     | block
     | if

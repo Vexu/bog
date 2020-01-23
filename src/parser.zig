@@ -86,7 +86,12 @@ pub const Parser = struct {
         unreachable;
     }
 
-    /// expr : fn | bool_expr
+    /// expr
+    ///     : fn 
+    ///     | bool_expr
+    ///     | "return" expr.r
+    ///     | "break"
+    ///     | "continue"
     fn expr(parser: *Parser, lr_value: LRValue) anyerror!?RegRef {
         return if (parser.eatToken(.Keyword_fn, true)) |_|
             try parser.func()
@@ -274,16 +279,31 @@ pub const Parser = struct {
         return lhs;
     }
 
-    /// prefix_expr : ("-" | "+" | "not" | "~" | "try")? primary_expr suffix_expr* [.l assign]?
+    /// prefix_expr 
+    ///     : "try" bool_expr.r
+    ///     | ("-" | "+" | "not" | "~")? primary_expr suffix_expr* [.l assign]?
     fn prefixExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) anyerror!?RegRef {
-        // TODO prefix op
+        if (parser.eatToken(.Keyword_try, skip_nl)) |_| {
+            const rhs = (try parser.boolExpr(.R, true)).?;
+            return try parser.builder.tryExpr(rhs);
+        }
+        const prefix_op = parser.eatToken(.Minus, skip_nl) orelse parser.eatToken(.Plus, skip_nl) orelse
+            parser.eatToken(.Tilde, skip_nl) orelse parser.eatToken(.Keyword_not, skip_nl);
         var primary = try parser.primaryExpr(lr_value, skip_nl);
         // while (try parser.suffixExpr(skip_nl, primary)) |suffix| {
         //     primary = suffix;
         // }
-        // if (lr_value == .L) {
-        //     try parser.assign(skip_nl);
-        // }
+        if (prefix_op) |some| {
+            primary = switch (some.id) {
+                .Plus => primary, // unary plus is no op
+                .Minus => try parser.builder.negate(primary),
+                .Tilde => try parser.builder.bitNot(primary),
+                .Keyword_not => try parser.builder.boolNot(primary),
+                else => unreachable,
+            };
+        } else if (lr_value == .L) {
+            // try parser.assign(skip_nl);
+        }
         return primary;
     }
 
@@ -304,9 +324,6 @@ pub const Parser = struct {
     ///     | "{" ((IDENTIFIER | STRING) ":" expr.r ",")* "}"
     ///     | "[" (expr.r ",")* "]"
     ///     | "error" expr.r
-    ///     | "return" expr.r
-    ///     | "break"
-    ///     | "continue"
     ///     | "import" STRING
     ///     | block
     ///     | if

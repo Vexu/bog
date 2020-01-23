@@ -205,6 +205,26 @@ pub const Builder = struct {
         return lhs;
     }
 
+    pub fn negate(self: *Builder, rhs: RegRef) anyerror!RegRef {
+        std.debug.warn("-{}\n", .{ rhs });
+        return rhs;
+    }
+
+    pub fn boolNot(self: *Builder, rhs: RegRef) anyerror!RegRef {
+        std.debug.warn("not {}\n", .{ rhs });
+        return rhs;
+    }
+
+    pub fn bitNot(self: *Builder, rhs: RegRef) anyerror!RegRef {
+        std.debug.warn("~{}\n", .{ rhs });
+        return rhs;
+    }
+
+    pub fn tryExpr(self: *Builder, rhs: RegRef) anyerror!RegRef {
+        std.debug.warn("try {}\n", .{ rhs });
+        return rhs;
+    }
+
 
     var counter: RegRef = 0;
     pub fn constNumber(self: *Builder, num: var) anyerror!RegRef {
