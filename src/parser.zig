@@ -8,7 +8,7 @@ const TokenList = tokenizer.TokenList;
 const Allocator = mem.Allocator;
 const bytecode = @import("bytecode.zig");
 const Builder = bytecode.Builder;
-const RegRef = Builder.RegRef;
+const RegRef = bytecode.RegRef;
 
 pub const Parser = struct {
     builder: Builder,
@@ -16,9 +16,9 @@ pub const Parser = struct {
     tokens: TokenList,
     token_it: TokenList.Iterator,
 
-    pub fn init(allocator: *Allocator) Parser {
-        return .{
-            .builder = Builder.init(allocator),
+    pub fn init(allocator: *Allocator) !Parser {
+        return Parser{
+            .builder = try Builder.init(allocator),
             .tokenizer = .{
                 .it = .{
                     .i = 0,
@@ -75,14 +75,14 @@ pub const Parser = struct {
 
     /// stmt : let | expr.l
     fn stmt(parser: *Parser) !?RegRef {
-        if (parser.eatToken(.Keyword_let, true)) |_| {
-            try parser.let();
-            return null;
-        } else return parser.expr(.L);
+        return if (try parser.let())
+            null
+        else
+            try parser.expr(.L, false);
     }
 
     /// let : "let" unwrap "=" expr.r
-    fn let(parser: *Parser) anyerror!void {
+    fn let(parser: *Parser) anyerror!bool {
         unreachable;
     }
 
@@ -90,16 +90,38 @@ pub const Parser = struct {
     ///     : fn
     ///     | [.l jump_expr]
     ///     | bool_expr
-    fn expr(parser: *Parser, lr_value: LRValue) anyerror!?RegRef {
-        return if (parser.eatToken(.Keyword_fn, true)) |_|
-            try parser.func()
+    fn expr(parser: *Parser, lr_value: LRValue, skip_nl: bool) anyerror!?RegRef {
+        return if (try parser.func(skip_nl)) |val|
+            val
+        else if (try parser.jumpExpr(lr_value))
+            null
         else
-            try parser.boolExpr(lr_value, true);
+            try parser.boolExpr(lr_value, skip_nl);
     }
 
     /// fn : "fn" "(" (unwrap ",")* ")" expr
-    fn func(parser: *Parser) anyerror!RegRef {
-        unreachable;
+    fn func(parser: *Parser, skip_nl: bool) anyerror!?RegRef {
+        const tok = parser.eatToken(.Keyword_fn, skip_nl) orelse return null;
+        return error.Unimplemented;
+        // try parser.builder.beginFunc(tok);
+        // try parser.expectToken(.LParen, true);
+        // try parser.expectToken(.LParen, true);
+        // const res = try parser.expr(.R true);
+        // return try parser.builder.endFunc(tok, res);
+    }
+
+    /// jump_expr : "return" expr.r | "break" | "continue"
+    fn jumpExpr(parser: *Parser, lr_value: LRValue) anyerror!bool {
+        const tok = parser.eatToken(.Keyword_return, false) orelse
+            parser.eatToken(.Keyword_break, false) orelse
+            parser.eatToken(.Keyword_continue, false) orelse
+            return false;
+        if (lr_value != .L) {
+            // TODO return, break, continue do not produce values
+            return error.ParseError;
+        }
+        return error.Unimplemented;
+        // return true;
     }
 
     /// bool_expr : comparision_expr (("or" comparision_expr.r)* | ("and" comparision_expr.r)*)
@@ -192,7 +214,7 @@ pub const Parser = struct {
                 // lhs = try parser.builder.unwrap(lhs, unwrap);
                 // _ = try parser.expectToken(.Pipe, true);
             }
-            if (try parser.expr(lr_value)) |rhs| {
+            if (try parser.expr(lr_value, true)) |rhs| {
                 try parser.builder.move(rhs, lhs);
             }
         }
@@ -299,7 +321,7 @@ pub const Parser = struct {
                 return error.ParseError;
             }
             const rhs = if (tok.id == .Equal)
-                (try parser.expr(.R)).?
+                (try parser.expr(.R, true)).?
             else
                 (try parser.bitExpr(.R, true)).?;
             try parser.builder.assign(lhs, tok, rhs);
@@ -338,7 +360,7 @@ pub const Parser = struct {
         }
         if (parser.eatToken(.Keyword_error, skip_nl)) |tok| {
             _ = try parser.expectToken(.LParen, true);
-            const val = (try parser.expr(.R)).?;
+            const val = (try parser.expr(.R, true)).?;
             _ = try parser.expectToken(.RParen, true);
             return parser.builder.buildErr(tok, val);
         }
@@ -367,7 +389,7 @@ pub const Parser = struct {
                 rbracket = t;
             } else {
                 while (true) {
-                    const val = (try parser.expr(.R)).?;
+                    const val = (try parser.expr(.R, true)).?;
                     try parser.builder.listPush(val);
                     if (parser.eatToken(.Comma, true) == null) break;
                 }

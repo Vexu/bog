@@ -6,7 +6,7 @@ const Parser = @import("parser.zig").Parser;
 pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     var buffer = try ArrayList(u8).initCapacity(allocator, std.mem.page_size);
     defer buffer.deinit();
-    var parser = Parser.init(allocator);
+    var parser = try Parser.init(allocator);
     defer parser.deinit();
     parser.tokenizer.repl = true;
 

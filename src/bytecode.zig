@@ -61,17 +61,85 @@ pub const Op = enum(u8) {
     Break,
     EndBreak,
 
-    Try,
-
     _,
 };
 
-pub const Builder = struct {
-    regs: RegRef = 0,
-    pub const RegRef = u32;
+pub const Instruction = packed struct {
+    op: Op,
+    A: u8 = 0,
+    B: u8 = 0,
+    C: u8 = 0,
+};
 
-    pub fn init(allocator: *Allocator) Builder {
-        return .{};
+pub const Code = std.ArrayList(u32);
+
+pub const MaxStack = 250;
+pub const RegRef = u8;
+
+const FuncState = struct {
+    frame_size: u8 = 0,
+    cur_regs: u8 = 0,
+    // parent_ref: ?u8,
+    code: Code,
+
+    fn init(allocator: *Allocator) FuncState {
+        return .{
+            .code = Code.init(allocator),
+        };
+    }
+
+    fn deinit(self: *FuncState) void {
+        self.code.deinit();
+    }
+
+    fn registerAlloc(self: *FuncState) !RegRef {
+        const reg = self.cur_regs;
+        self.cur_regs += 1;
+        if (self.cur_regs > self.frame_size) {
+            if (self.cur_regs >= MaxStack)
+                return error.StackOverflow;
+            self.frame_size = self.cur_regs;
+        }
+        return reg;
+    }
+
+    fn registerFree(self: *FuncState, reg: RegRef) void {
+        std.debug.assert(self.cur_regs != 0);
+        self.cur_regs -= 1;
+    }
+
+    fn emitInstruction(self: *FuncState, inst: Instruction, arg: ?u32) anyerror!void {
+        try self.code.append(@bitCast(u32, inst));
+        if (arg) |some| {
+            try self.code.append(some);
+        }
+    }
+};
+
+const FuncList = std.SegmentedList(FuncState, 4);
+
+const Symbol = struct {
+    name: []const u8,
+    func: *FuncState,
+    reg: RegRef,
+};
+
+const SymbolList = std.SegmentedList(Symbol, 8);
+
+pub const Builder = struct {
+    funcs: FuncList,
+    syms: SymbolList,
+    cur_func: *FuncState,
+
+    pub fn init(allocator: *Allocator) !Builder {
+        var funcs = FuncList.init(allocator);
+        const first = try funcs.addOne();
+        first.* = FuncState.init(allocator);
+        return Builder{
+            .funcs = funcs,
+            .cur_func = first,
+            .syms = SymbolList.init(allocator),
+        };
     }
 
     pub fn deinit(self: *Builder) void {}
@@ -100,29 +168,27 @@ pub const Builder = struct {
         std.debug.warn("#finishJump #{}\n", .{jump});
     }
 
-    fn registerAlloc(self: *Builder) RegRef {
-        // TODO push if > 8
-        const reg = self.regs;
-        self.regs += 1;
-        if (self.regs > 7) @panic("TODO register overflow");
-        return reg;
-    }
-
-    fn registerFree(self: *Builder, reg: RegRef) void {
-        std.debug.assert(self.regs != 0);
-        self.regs -= 1;
-    }
-
     pub fn constant(self: *Builder, tok: *Token) anyerror!RegRef {
-        const reg = self.registerAlloc();
+        const reg = try self.cur_func.registerAlloc();
         std.debug.warn("#{} constant {}\n", .{ reg, tok });
         return reg;
     }
 
     pub fn declRef(self: *Builder, tok: *Token) anyerror!RegRef {
-        const reg = self.registerAlloc();
-        std.debug.warn("#{} declref {}\n", .{ reg, tok });
-        return reg;
+        const name = tok.id.Identifier;
+        var it = self.syms.iterator(self.syms.len);
+        const found = while (it.prev()) |sym| {
+            if (mem.eql(u8, sym.name, name))
+                break sym;
+        } else {
+            return error.UndeclaredIdentifier;
+        };
+        if (found.func != self.cur_func) {
+            // TODO pushStack
+            return error.Unimplemented;
+        } else {
+            return found.reg;
+        }
     }
 
     pub fn buildErr(self: *Builder, tok: *Token, val: RegRef) anyerror!RegRef {
@@ -161,8 +227,34 @@ pub const Builder = struct {
     }
 
     pub fn infix(self: *Builder, lhs: RegRef, tok: *Token, rhs: RegRef) anyerror!RegRef {
-        defer self.registerFree(rhs);
-        std.debug.warn("#{} {} #{}\n", .{ lhs, tok, rhs });
+        defer self.cur_func.registerFree(rhs);
+        try self.cur_func.emitInstruction(.{
+            .op = switch (tok.id) {
+                .SlashSlash => .DivFloor,
+                .Slash => .Div,
+                .Asterisk => .Mul,
+                .Percent => .Mod,
+                .Plus => .Add,
+                .Minus => .Sub,
+                .LArrArr => .LShift,
+                .RArrArr => .RShift,
+                .Keyword_and => .And,
+                .Keyword_or => .Or,
+                .Ampersand => .BinAnd,
+                .Pipe => .BinOr,
+                // .LArr, // TODO
+                // .LArrEqual,
+                // .RArr,
+                // .RArrEqual,
+                // .EqualEqual,
+                // .BangEqual,
+                // .Keyword_in,
+                // .Keyword_is,
+                else => unreachable,
+            },
+            .A = lhs,
+            .B = rhs,
+        }, null);
         return lhs;
     }
 

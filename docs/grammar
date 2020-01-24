@@ -75,5 +75,5 @@ for : "for" "(" unwrap "in" range_expr.r ")" expr
 match : "match" "(" bool_expr.r ")" "(" (NL match_case ",")+ ")"
 
 match_case
-    : unwrap ":" expr
-    | (range_expr.r ",")+ ":" expr
+    : "let" unwrap ":" expr
+    | (bool_expr.r ",")+ ":" expr
