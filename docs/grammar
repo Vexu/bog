@@ -34,9 +34,9 @@ add_expr : mul_expr (("-" | "+") mul_expr.r)*
 
 mul_expr : prefix_expr (("*" | "/" | "//" | "%") prefix_expr.r)*
 
-prefix_expr 
-    : "try" bool_expr.r
-    | ("-" | "+" | "not" | "~")? primary_expr suffix_expr* [.l assign]?
+prefix_expr
+    : ("try" | "-" | "+" | "not" | "~") bool_expr.r
+    | primary_expr suffix_expr* [.l assign?]
 
 assign
     : "=" expr.r

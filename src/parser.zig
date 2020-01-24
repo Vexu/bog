@@ -244,7 +244,7 @@ pub const Parser = struct {
 
     /// prefix_expr
     ///     : ("try" | "-" | "+" | "not" | "~") bool_expr.r
-    ///     | primary_expr suffix_expr* [.l assign]?
+    ///     | primary_expr suffix_expr* [.l assign?]
     fn prefixExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) anyerror!?RegRef {
         if (parser.eatToken(.Keyword_try, skip_nl) orelse
             parser.eatToken(.Minus, skip_nl) orelse
@@ -330,6 +330,7 @@ pub const Parser = struct {
     ///     | match
     fn primaryExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) anyerror!RegRef {
         if (parser.eatToken(.Number, skip_nl) orelse
+            parser.eatToken(.Integer, skip_nl) orelse
             parser.eatToken(.String, skip_nl) orelse
             parser.eatToken(.Keyword_true, skip_nl) orelse
             parser.eatToken(.Keyword_false, skip_nl)) |tok|
@@ -337,7 +338,13 @@ pub const Parser = struct {
             return parser.builder.constant(tok);
         }
         if (parser.eatToken(.Identifier, skip_nl)) |tok| {
-            return parser.builder.declRef(tok);
+            return parser.builder.declRef(tok) catch |e| switch (e) {
+                error.UndeclaredIdentifier => {
+                    // TODO reference to undeclared identifier 'tok.id.Identifier'
+                    return error.Unimplemented;
+                },
+                else => |err| return err,
+            };
         }
         if (parser.eatToken(.Keyword_error, skip_nl)) |tok| {
             _ = try parser.expectToken(.LParen, true);

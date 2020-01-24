@@ -1,5 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
+const math = std.math;
 const Allocator = mem.Allocator;
 const testing = std.testing;
 const unicode = std.unicode;
@@ -63,6 +64,27 @@ fn isIdentifier(c: u32) bool {
     };
 }
 
+fn parseInt(buf: []const u8, radix: u8) Token.Id {
+    var x: u64 = 0;
+
+    for (buf) |c| {
+        const digit = switch (c) {
+            '0'...'9' => c - '0',
+            'A'...'Z' => c - 'A' + 10,
+            'a'...'z' => c - 'a' + 10,
+            '_' => continue,
+            else => unreachable,
+        };
+
+        x = math.mul(u64, x, radix) catch return .{
+            .Invalid = "integer too big",
+        };
+        x += digit;
+    }
+
+    return .{ .Integer = x };
+}
+
 pub const Token = struct {
     start: usize,
     id: Id,
@@ -72,6 +94,7 @@ pub const Token = struct {
         Eof,
         Identifier: []const u8,
         String: []const u8,
+        Integer: u64,
         Number: []const u8,
         Nl,
         Pipe,
@@ -189,6 +212,7 @@ pub const Tokenizer = struct {
     level: u32 = 0,
     string: bool = false,
     prev_nl: bool = true,
+    no_eof: bool = false,
     repl: bool,
 
     pub fn init(allocator: *Allocator, repl: bool) Tokenizer {
@@ -213,7 +237,7 @@ pub const Tokenizer = struct {
             const tok = try self.tokens.addOne();
             tok.* = self.next();
             if (tok.id == .Eof) {
-                return if (self.repl and (self.level != 0 or self.string))
+                return if (self.repl and (self.level != 0 or self.string or self.no_eof))
                     false
                 else
                     true;
@@ -420,6 +444,7 @@ pub const Tokenizer = struct {
                 },
                 .BackSlash => switch (c) {
                     '\n' => {
+                        self.no_eof = true;
                         state = .Start;
                     },
                     '\r' => {
@@ -432,6 +457,7 @@ pub const Tokenizer = struct {
                 },
                 .BackSlashCr => switch (c) {
                     '\n' => {
+                        self.no_eof = true;
                         state = .Start;
                     },
                     else => {
@@ -742,7 +768,7 @@ pub const Tokenizer = struct {
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res.id = .{ .Number = self.it.bytes[self.start_index..self.it.i] };
+                        res.id = .{ .Integer = 0 };
                         break;
                     },
                 },
@@ -758,7 +784,7 @@ pub const Tokenizer = struct {
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res.id = .{ .Number = self.it.bytes[self.start_index..self.it.i] };
+                        res.id = parseInt(self.it.bytes[self.start_index + 2 .. self.it.i], 2);
                         break;
                     },
                 },
@@ -774,7 +800,7 @@ pub const Tokenizer = struct {
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res.id = .{ .Number = self.it.bytes[self.start_index..self.it.i] };
+                        res.id = parseInt(self.it.bytes[self.start_index + 2 .. self.it.i], 8);
                         break;
                     },
                 },
@@ -789,7 +815,7 @@ pub const Tokenizer = struct {
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res.id = .{ .Number = self.it.bytes[self.start_index..self.it.i] };
+                        res.id = parseInt(self.it.bytes[self.start_index + 2 .. self.it.i], 16);
                         break;
                     },
                 },
@@ -807,7 +833,7 @@ pub const Tokenizer = struct {
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res.id = .{ .Number = self.it.bytes[self.start_index..self.it.i] };
+                        res.id = parseInt(self.it.bytes[self.start_index..self.it.i], 10);
                         break;
                     },
                 },
@@ -854,14 +880,18 @@ pub const Tokenizer = struct {
                     const slice = self.it.bytes[self.start_index..];
                     res.id = Token.getKeyword(slice) orelse .{ .Identifier = slice };
                 },
-
-                .FloatFraction,
                 .BinaryNumber,
                 .OctalNumber,
                 .HexNumber,
                 .Number,
                 .Zero,
-                => res.id = .{ .Number = self.it.bytes[self.start_index..] },
+                => res.id = parseInt(self.it.bytes[self.start_index..], switch (state) {
+                    .BinaryNumber => 2,
+                    .OctalNumber => 8,
+                    .HexEscape => 16,
+                    .Number, .Zero => 10,
+                    else => unreachable,
+                }),
 
                 .String => {
                     if (self.repl) {
@@ -871,6 +901,7 @@ pub const Tokenizer = struct {
                         res.id = .{ .Invalid = "unterminated string" };
                 },
 
+                .FloatFraction => res.id = .{ .Number = self.it.bytes[self.start_index..] },
                 .Equal => res.id = .Equal,
                 .Minus => res.id = .Minus,
                 .Slash => res.id = .Slash,
@@ -893,6 +924,8 @@ pub const Tokenizer = struct {
         }
         res.start = self.start_index;
         self.prev_nl = res.id == .Nl or res.id == .Eof;
+        if (state != .Start)
+            self.no_eof = false;
         return res;
     }
 };

@@ -16,6 +16,16 @@ pub const Op = enum(u8) {
 
     /// DISCARD(A)
     Discard,
+
+    /// A = arg1
+    ConstSmallInt,
+
+    /// A = STRING(arg1)
+    ConstString,
+
+    /// A = NUM(arg1)
+    ConstNum,
+
     /// A = A // B
     DivFloor,
 
@@ -78,12 +88,18 @@ pub const Op = enum(u8) {
 
 pub const Instruction = packed struct {
     op: Op,
-    A: u8 = 0,
-    B: u8 = 0,
-    C: u8 = 0,
+    A: RegRef = 0,
+    B: RegRef = 0,
+    C: RegRef = 0,
 };
 
 pub const Code = std.ArrayList(u32);
+
+pub const Module = struct {
+    sect_funcs: []const u32,
+    sect_values: []const u64,
+    sect_strings: []const u8,
+};
 
 pub const MaxStack = 250;
 pub const RegRef = u8;
@@ -191,7 +207,26 @@ pub const Builder = struct {
 
     pub fn constant(self: *Builder, tok: *Token) anyerror!RegRef {
         const reg = try self.cur_func.registerAlloc();
-        std.debug.warn("#{} constant {}\n", .{ reg, tok });
+        var arg: ?u32 = null;
+        const op: Op = switch (tok.id) {
+            .String,
+            .Keyword_false,
+            .Keyword_true,
+            .Number,
+            => return error.Unimplemented,
+            .Integer => |val| if (val <= std.math.maxInt(u32)) blk: {
+                // fits in u32
+                arg = @truncate(u32, val);
+                break :blk .ConstSmallInt;
+            } else {
+                return error.Unimplemented;
+            },
+            else => unreachable,
+        };
+        try self.cur_func.emitInstruction(.{
+            .op = op,
+            .A = reg,
+        }, arg);
         return reg;
     }
 
