@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 const Parser = @import("parser.zig").Parser;
 const Tokenizer = @import("tokenizer.zig").Tokenizer;
 const Builder = @import("bytecode.zig").Builder;
+const Vm = @import("vm.zig").Vm;
 
 pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     var buffer = try ArrayList(u8).initCapacity(allocator, std.mem.page_size);
@@ -13,6 +14,8 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     defer builder.deinit();
     var tokenizer = Tokenizer.init(allocator, true);
     defer tokenizer.deinit();
+    var vm = Vm.init(allocator);
+    defer vm.deinit();
 
     while (true) {
         var begin_index = tokenizer.tokens.len;
@@ -29,12 +32,12 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
         }
         try Parser.parse(&builder, &tokenizer.tokens.iterator(begin_index));
 
-        // TODO
-        // vm.exec(parser.builder)
-        var token_it = tokenizer.tokens.iterator(begin_index);
-        while (token_it.next()) |tok| {
-            try out_stream.print("{}\n", .{tok});
-        }
+        vm.code = builder.cur_func.code.toSliceConst(); // TODO
+        try vm.exec();
+        // var token_it = tokenizer.tokens.iterator(begin_index);
+        // while (token_it.next()) |tok| {
+        //     try out_stream.print("{}\n", .{tok});
+        // }
     }
 }
 
