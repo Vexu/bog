@@ -6,12 +6,12 @@ let {print} = import('io')
 
 let assert = fn(ok) if (not ok) error("assertion failure")
 
-let x = 1
+let x = 0
 
 # error: cannot convert boolean to integer
 # x + true
-# TODO not sure how type conversion is going to be
-# x + (true as int)
+x + (true as int)
+assert(x == 1)
 
 let foo = fn(arg) (
     if (arg == 4) (

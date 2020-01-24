@@ -1,28 +1,28 @@
 const std = @import("std");
 
-const ValueMap = std.StringHashMap(*Value);
-const ValueList = std.ArrayList(*Value);
+const ValueMap = std.StringHashMap(*Ref);
+const ValueList = std.ArrayList(*Ref);
 
 pub const Value = struct {
     ref: u32 = 0,
     mut: bool = false,
     kind: union(enum) {
-        Tuple: []*Value,
+        Tuple: []*Ref,
         Map: ValueMap,
-        Array: *ValueList,
-        Error: *Value,
+        List: *ValueList,
+        Error: *Ref,
         Int: i64,
         Float: f64,
         Range: struct {
-            begin: *Value,
-            end: *Value,
+            begin: *Ref,
+            end: *Ref,
+        },
+        Fn: struct {
+            arg_count: u8,
         },
 
         /// always inferred
         Bool: bool,
-        Fn: struct {
-            arg_count: u8,
-        },
         None,
     },
 

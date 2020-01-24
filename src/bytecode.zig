@@ -35,6 +35,9 @@ pub const Op = enum(u8) {
     /// A = A * B
     Mul,
 
+    /// A = A ** B
+    Pow,
+
     /// A = A % B
     Mod,
 
@@ -73,6 +76,9 @@ pub const Op = enum(u8) {
 
     /// IF (A==error) RET A
     Try,
+
+    /// A as B
+    Cast,
 
     Jump,
 
@@ -282,6 +288,11 @@ pub const Builder = struct {
         return rhs;
     }
 
+    pub fn cast(self: *Builder, lhs: RegRef, tok: *Token) anyerror!RegRef {
+        std.debug.warn("#{} as {}\n", .{ lhs, tok.id.Identifier });
+        return lhs;
+    }
+
     pub fn infix(self: *Builder, lhs: RegRef, tok: *Token, rhs: RegRef) anyerror!RegRef {
         defer self.cur_func.registerFree(rhs);
         try self.cur_func.emitInstruction(.{
@@ -289,6 +300,7 @@ pub const Builder = struct {
                 .SlashSlash => .DivFloor,
                 .Slash => .Div,
                 .Asterisk => .Mul,
+                .AsteriskAsterisk => .Pow,
                 .Percent => .Mod,
                 .Plus => .Add,
                 .Minus => .Sub,

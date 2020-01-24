@@ -32,15 +32,19 @@ shift_expr : add_expr (("<<" | ">>") add_expr.r)
 
 add_expr : mul_expr (("-" | "+") mul_expr.r)*
 
-mul_expr : prefix_expr (("*" | "/" | "//" | "%") prefix_expr.r)*
+mul_expr : cast_expr (("*" | "/" | "//" | "%") cast_expr.r)*
+
+cast_expr : prefix_expr ("as" IDENTIFIER)
 
 prefix_expr
-    : ("try" | "-" | "+" | "not" | "~") bool_expr.r
-    | primary_expr suffix_expr* [.l assign?]
+    : ("try" | "-" | "+" | "not" | "~") power_expr.r
+    | power_expr
+
+power_expr : primary_expr suffix_expr*  ([.l assign?] | ("**" power_expr.r)?)
 
 assign
     : "=" expr.r
-    | ("+=" | "-=" | "*=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") bit_expr.r
+    | ("+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") bit_expr.r
 
 suffix_expr
     : "[" bool_expr.r "]"

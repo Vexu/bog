@@ -225,9 +225,9 @@ pub const Parser = struct {
         return lhs;
     }
 
-    /// mul_expr : prefix_expr (("*" | "/" | "//" | "%") prefix_expr.r)*
+    /// mul_expr : cast_expr (("*" | "/" | "//" | "%") cast_expr.r)*
     fn mulExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) anyerror!?RegRef {
-        var lhs = (try parser.prefixExpr(lr_value, skip_nl)) orelse return null;
+        var lhs = (try parser.castExpr(lr_value, skip_nl)) orelse return null;
 
         while (parser.eatToken(.Asterisk, skip_nl) orelse
             parser.eatToken(.Slash, skip_nl) orelse
@@ -235,16 +235,28 @@ pub const Parser = struct {
             parser.eatToken(.Percent, skip_nl)) |tok|
         {
             parser.skipNl();
-            const rhs = (try parser.prefixExpr(.R, skip_nl)).?;
+            const rhs = (try parser.castExpr(.R, skip_nl)).?;
             lhs = try parser.builder.infix(lhs, tok, rhs);
         }
 
         return lhs;
     }
 
+    /// cast_expr : prefix_expr ("as" IDENTIFIER)
+    fn castExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) anyerror!?RegRef {
+        var lhs = (try parser.prefixExpr(lr_value, skip_nl)) orelse return null;
+
+        if (parser.eatToken(.Keyword_as, skip_nl)) |_| {
+            const tok = try parser.expectToken(.Identifier, skip_nl);
+            lhs = try parser.builder.cast(lhs, tok);
+        }
+
+        return lhs;
+    }
+
     /// prefix_expr
-    ///     : ("try" | "-" | "+" | "not" | "~") bool_expr.r
-    ///     | primary_expr suffix_expr* [.l assign?]
+    ///     : ("try" | "-" | "+" | "not" | "~") power_expr.r
+    ///     | power_expr
     fn prefixExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) anyerror!?RegRef {
         if (parser.eatToken(.Keyword_try, skip_nl) orelse
             parser.eatToken(.Minus, skip_nl) orelse
@@ -253,11 +265,21 @@ pub const Parser = struct {
             parser.eatToken(.Keyword_not, skip_nl)) |tok|
         {
             parser.skipNl();
-            const rhs = (try parser.boolExpr(.R, skip_nl)).?;
+            const rhs = (try parser.powerExpr(.R, skip_nl)).?;
             return try parser.builder.prefix(tok, rhs);
         }
+        return try parser.powerExpr(lr_value, skip_nl);
+    }
+
+    /// power_expr : primary_expr suffix_expr*  ([.l assign?] | ("**" power_expr.r)?)
+    fn powerExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) anyerror!?RegRef {
         var primary = try parser.primaryExpr(lr_value, skip_nl);
         primary = try parser.suffixExpr(primary, skip_nl);
+        if (parser.eatToken(.AsteriskAsterisk, skip_nl)) |tok| {
+            parser.skipNl();
+            const rhs = (try parser.powerExpr(.R, skip_nl)).?;
+            return try parser.builder.infix(primary, tok, rhs);
+        }
         return try parser.assign(lr_value, primary, skip_nl);
     }
 
@@ -281,12 +303,13 @@ pub const Parser = struct {
 
     /// assign
     ///     : "=" expr.r
-    ///     | ("+=" | "-=" | "*=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") bit_expr.r
+    ///     | ("+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") bit_expr.r
     fn assign(parser: *Parser, lr_value: LRValue, lhs: RegRef, skip_nl: bool) anyerror!?RegRef {
         // assignment cannot happen in places where NL is not necessary
         if (parser.eatToken(.Equal, false) orelse
             parser.eatToken(.MinusEqual, false) orelse
             parser.eatToken(.AsteriskEqual, false) orelse
+            parser.eatToken(.AsteriskAsteriskEqual, false) orelse
             parser.eatToken(.SlashEqual, false) orelse
             parser.eatToken(.SlashSlashEqual, false) orelse
             parser.eatToken(.PercentEqual, false) orelse

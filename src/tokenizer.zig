@@ -120,8 +120,8 @@ pub const Token = struct {
         MinusEqual,
         Asterisk,
         AsteriskEqual,
-        // AsteriskAsterisk,
-        // AsteriskAsteriskEqual,
+        AsteriskAsterisk,
+        AsteriskAsteriskEqual,
         Slash,
         SlashEqual,
         SlashSlash,
@@ -162,6 +162,7 @@ pub const Token = struct {
         Keyword_is,
         Keyword_in,
         Keyword_fn,
+        Keyword_as,
     };
 
     pub const Keyword = struct {
@@ -191,6 +192,7 @@ pub const Token = struct {
         .{ .bytes = "is", .id = .Keyword_is },
         .{ .bytes = "in", .id = .Keyword_in },
         .{ .bytes = "fn", .id = .Keyword_fn },
+        .{ .bytes = "as", .id = .Keyword_as },
     };
 
     pub fn getKeyword(bytes: []const u8) ?Token.Id {
@@ -264,6 +266,7 @@ pub const Tokenizer = struct {
             Pipe,
             Percent,
             Asterisk,
+            AsteriskAsterisk,
             Plus,
             LArr,
             LArrArr,
@@ -594,9 +597,23 @@ pub const Tokenizer = struct {
                         res.id = .AsteriskEqual;
                         break;
                     },
+                    '*' => {
+                        state = .AsteriskAsterisk;
+                    },
                     else => {
                         self.it.i = self.start_index + 1;
                         res.id = .Asterisk;
+                        break;
+                    },
+                },
+                .AsteriskAsterisk => switch (c) {
+                    '=' => {
+                        res.id = .AsteriskAsteriskEqual;
+                        break;
+                    },
+                    else => {
+                        self.it.i = self.start_index + 2;
+                        res.id = .AsteriskAsterisk;
                         break;
                     },
                 },
@@ -917,6 +934,7 @@ pub const Tokenizer = struct {
                 .Percent => res.id = .Percent,
                 .Caret => res.id = .Caret,
                 .Asterisk => res.id = .Asterisk,
+                .AsteriskAsterisk => res.id.AsteriskAsterisk,
                 else => {
                     res.id = .{ .Invalid = "unexpected eof" };
                 },
@@ -932,6 +950,8 @@ pub const Tokenizer = struct {
 
 fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
     var tokenizer = Tokenizer{
+        .tokens = undefined, // not used
+        .repl = false,
         .it = .{
             .i = 0,
             .bytes = source,
@@ -950,7 +970,7 @@ test "operators" {
         \\!= | |= = ==
         \\( ) { } [ ] . ...
         \\^ ^= + += - -=
-        \\* *= % %= / /= // //=
+        \\* *= ** **= % %= / /= // //=
         \\, & &= < <= <<
         \\<<= > >= >> >>= ~
         \\
@@ -979,6 +999,8 @@ test "operators" {
         .Nl,
         .Asterisk,
         .AsteriskEqual,
+        .AsteriskAsterisk,
+        .AsteriskAsteriskEqual,
         .Percent,
         .PercentEqual,
         .Slash,
@@ -1005,7 +1027,7 @@ test "operators" {
 
 test "keywords" {
     expectTokens(
-        \\not　and or let continue break return if else false true for while match catch try error import is in fn
+        \\not　and or let continue break return if else false true for while match catch try error import is in fn as
     , &[_]Token.Id{
         .Keyword_not,
         .Keyword_and,
@@ -1028,5 +1050,6 @@ test "keywords" {
         .Keyword_is,
         .Keyword_in,
         .Keyword_fn,
+        .Keyword_as,
     });
 }
