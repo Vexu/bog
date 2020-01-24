@@ -29,7 +29,7 @@ pub const Error = struct {
             .UnexpectedToken => try stream.print("unexpected token '{}'", .{err.tok.string()}),
             .PrimaryExpr => try stream.print("expected Identifier, String, Number, true, false, '(', '{{', '[', error, import, if, while, for, match. found '{}'", .{err.tok.string()}),
             .UndeclaredIdentifier => try stream.print("use of undeclared identifier '{}'", .{err.tok.id.Identifier}),
-            .StackOverflow => try stream.write("operation caused stack of 250 to run out, try assigning to an intermediate value")
+            .StackOverflow => try stream.write("operation caused stack of 250 to run out, try assigning to an intermediate value"),
         }
     }
 };

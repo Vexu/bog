@@ -17,14 +17,8 @@ pub const Op = enum(u8) {
     /// DISCARD(A)
     Discard,
 
-    /// A = arg1
-    ConstSmallInt,
-
-    /// A = STRING(arg1)
-    ConstString,
-
-    /// A = NUM(arg1)
-    ConstNum,
+    /// A = BOOL(B)
+    ConstBool,
 
     /// A = A // B
     DivFloor,
@@ -80,16 +74,34 @@ pub const Op = enum(u8) {
     /// A as B
     Cast,
 
-    Jump,
-
-    JumpTrue,
-
     Return,
 
-    Break,
-    EndBreak,
+    // all ops below have args
+    const HasArg = 120;
 
-    _,
+    /// ip = arg1
+    Jump = HasArg,
+
+    /// if (A) ip = arg1
+    JumpTrue,
+
+    /// if (not A) ip = arg1
+    JumpFalse,
+
+    /// A = arg1
+    ConstSmallInt,
+
+    /// A = STRING(arg1)
+    ConstString,
+
+    /// A = NUM(arg1)
+    ConstNum,
+
+    // _,
+
+    pub fn hasArg(op: Op) bool {
+        return @enumToInt(op) >= HasArg;
+    }
 };
 
 pub const Instruction = packed struct {
@@ -216,12 +228,15 @@ pub const Builder = struct {
     pub fn constant(self: *Builder, tok: *Token) !RegRef {
         const reg = try self.cur_func.registerAlloc();
         var arg: ?u32 = null;
+        var breg: RegRef = 0;
         const op: Op = switch (tok.id) {
             .String,
-            .Keyword_false,
-            .Keyword_true,
             .Number,
             => return error.Unimplemented,
+            .Keyword_false, .Keyword_true => blk: {
+                breg = @boolToInt(tok.id == .Keyword_true);
+                break :blk .ConstBool;
+            },
             .Integer => |val| if (val <= std.math.maxInt(u32)) blk: {
                 // fits in u32
                 arg = @truncate(u32, val);
@@ -234,6 +249,7 @@ pub const Builder = struct {
         try self.cur_func.emitInstruction(.{
             .op = op,
             .A = reg,
+            .B = breg,
         }, arg);
         return reg;
     }

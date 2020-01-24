@@ -206,8 +206,7 @@ pub const Token = struct {
 
     pub fn string(token: Token) []const u8 {
         return switch (token.id) {
-            .Identifier,
-            .Invalid => |val| val,
+            .Identifier, .Invalid => |val| val,
             .Eof => "<EOF>",
             .String => "String",
             .Integer => "Integer",

@@ -19,9 +19,18 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     var vm = Vm.init(allocator);
     defer vm.deinit();
 
+    // TODO move this
+    try vm.stack.resize(250);
+    try vm.call_stack.push(.{
+        .return_ip = null,
+        .result_reg = undefined,
+        .stack = vm.stack.toSliceConst()[0..250], // TODO
+    });
+
     while (true) {
         var begin_index = tokenizer.tokens.len;
         if (begin_index != 0) begin_index -= 1;
+        const bytecode_begin = builder.cur_func.code.len;
         readLine(&buffer, ">>> ", in_stream, out_stream) catch |err| switch (err) {
             error.EndOfStream => return,
             else => |e| return e,
@@ -45,13 +54,14 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
                     try out_stream.write("\n" ++ RESET);
                     // TODO print location
                 }
-                return;
+                parser.errors.shrink(0);
+                builder.cur_func.code.resize(bytecode_begin) catch unreachable;
+                continue;
             },
             else => |e| return e,
         };
 
-        vm.code = builder.cur_func.code.toSliceConst(); // TODO
-        try vm.exec();
+        try vm.exec(builder.cur_func.code.toSliceConst());
         // var token_it = tokenizer.tokens.iterator(begin_index);
         // while (token_it.next()) |tok| {
         //     try out_stream.print("{}\n", .{tok});
