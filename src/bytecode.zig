@@ -5,52 +5,64 @@ const tokenizer = @import("tokenizer.zig");
 const Token = tokenizer.Token;
 
 pub const Op = enum(u8) {
+    /// A <- B
     Move,
-    Push,
-    Pop,
+
+    /// CALL(A)
     Call,
 
+    /// STACK(A, B) = C
+    PushStack,
+
+    /// DISCARD(A)
+    Discard,
     /// A = A // B
-    DivFloor = 10,
+    DivFloor,
 
     /// A = A / B
-    Div = 11,
+    Div,
 
     /// A = A * B
-    Mul = 12,
+    Mul,
 
     /// A = A % B
-    Mod = 13,
+    Mod,
 
     /// A = A + B
-    Add = 14,
+    Add,
 
     /// A = A - B
-    Sub = 15,
+    Sub,
 
     /// A = A << B
-    LShift = 16,
+    LShift,
 
     /// A = A << B
-    RShift = 17,
+    RShift,
 
     /// A = A & B
-    BinAnd = 18,
+    BinAnd,
 
     /// A = A | B
-    BinOr = 19,
-
-    /// A = ~A
-    BinNot = 20,
-
-    /// A = not A
-    Not = 21,
+    BinOr,
 
     /// A = A and B
-    And = 22,
+    And,
 
     /// A = A or B
-    Or = 23,
+    Or,
+
+    /// A = not A
+    Not,
+
+    /// A = ~A
+    BinNot,
+
+    /// A = -A
+    Negate,
+
+    /// IF (A==error) RET A
+    Try,
 
     Jump,
 
@@ -147,13 +159,20 @@ pub const Builder = struct {
     }
 
     pub fn discard(self: *Builder, reg: RegRef) anyerror!void {
-        defer self.registerFree(reg);
-        std.debug.warn("discard #{}\n", .{reg});
+        defer self.cur_func.registerFree(reg);
+        try self.cur_func.emitInstruction(.{
+            .op = .Discard,
+            .A = reg,
+        }, null);
     }
 
     pub fn move(self: *Builder, from: RegRef, to: RegRef) anyerror!void {
-        defer self.registerFree(from);
-        std.debug.warn("move #{} to #{}\n", .{ from, to });
+        defer self.cur_func.registerFree(from);
+        try self.cur_func.emitInstruction(.{
+            .op = .Move,
+            .A = to,
+            .B = from,
+        }, null);
     }
 
     pub fn jumpFalse(self: *Builder, reg: RegRef) anyerror!usize {

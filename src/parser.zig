@@ -28,14 +28,15 @@ pub const Parser = struct {
 
     /// root : (stmt NL)* EOF
     fn root(parser: *Parser) !void {
-        if (parser.eatToken(.Eof, true)) |_| return;
         while (true) {
+            if (parser.eatToken(.Eof, true)) |_| return;
             const res = try parser.stmt();
             if (res) |some|
                 try parser.builder.discard(some);
-            if (parser.eatToken(.Nl, false)) |_| continue;
-            _ = try parser.expectToken(.Eof, true);
-            return;
+            if (parser.eatToken(.Nl, false) == null) {
+                _ = try parser.expectToken(.Eof, true);
+                return;
+            }
         }
     }
 
@@ -99,13 +100,15 @@ pub const Parser = struct {
         if (parser.eatToken(.Keyword_or, skip_nl)) |t| {
             var tok = t;
             while (true) {
-                const rhs = (try parser.comparisionExpr(.R, true)).?;
+                parser.skipNl();
+                const rhs = (try parser.comparisionExpr(.R, skip_nl)).?;
                 lhs = try parser.builder.infix(lhs, tok, rhs);
                 if (parser.eatToken(.Keyword_or, skip_nl)) |tt| tok = tt else break;
             }
         } else {
             while (parser.eatToken(.Keyword_and, skip_nl)) |tok| {
-                const rhs = (try parser.comparisionExpr(.R, true)).?;
+                parser.skipNl();
+                const rhs = (try parser.comparisionExpr(.R, skip_nl)).?;
                 lhs = try parser.builder.infix(lhs, tok, rhs);
             }
         }
@@ -125,7 +128,8 @@ pub const Parser = struct {
             parser.eatToken(.Keyword_in, skip_nl) orelse
             parser.eatToken(.Keyword_is, skip_nl)) |tok|
         {
-            const rhs = (try parser.rangeExpr(.R, true)).?;
+            parser.skipNl();
+            const rhs = (try parser.rangeExpr(.R, skip_nl)).?;
             lhs = try parser.builder.infix(lhs, tok, rhs);
         }
         return lhs;
@@ -136,7 +140,8 @@ pub const Parser = struct {
         var lhs = (try parser.bitExpr(lr_value, skip_nl)) orelse return null;
 
         if (parser.eatToken(.Ellipsis, skip_nl)) |tok| {
-            const rhs = (try parser.bitExpr(.R, true)).?;
+            parser.skipNl();
+            const rhs = (try parser.bitExpr(.R, skip_nl)).?;
             lhs = try parser.builder.infix(lhs, tok, rhs);
         }
         return lhs;
@@ -151,7 +156,8 @@ pub const Parser = struct {
             // &
             var tok = t;
             while (true) {
-                const rhs = (try parser.shiftExpr(.R, true)).?;
+                parser.skipNl();
+                const rhs = (try parser.shiftExpr(.R, skip_nl)).?;
                 lhs = try parser.builder.infix(lhs, tok, rhs);
                 if (parser.eatToken(.Ampersand, skip_nl)) |tt| tok = tt else break;
             }
@@ -159,7 +165,8 @@ pub const Parser = struct {
             // |
             var tok = t;
             while (true) {
-                const rhs = (try parser.shiftExpr(.R, true)).?;
+                parser.skipNl();
+                const rhs = (try parser.shiftExpr(.R, skip_nl)).?;
                 lhs = try parser.builder.infix(lhs, tok, rhs);
                 if (parser.eatToken(.Pipe, skip_nl)) |tt| tok = tt else break;
             }
@@ -167,7 +174,8 @@ pub const Parser = struct {
             // ^
             var tok = t;
             while (true) {
-                const rhs = (try parser.shiftExpr(.R, true)).?;
+                parser.skipNl();
+                const rhs = (try parser.shiftExpr(.R, skip_nl)).?;
                 lhs = try parser.builder.infix(lhs, tok, rhs);
                 if (parser.eatToken(.Caret, skip_nl)) |tt| tok = tt else break;
             }
@@ -181,7 +189,8 @@ pub const Parser = struct {
                 // lhs = try parser.builder.unwrap(lhs, unwrap);
                 // _ = try parser.expectToken(.Pipe, true);
             }
-            if (try parser.expr(lr_value, true)) |rhs| {
+            parser.skipNl();
+            if (try parser.expr(lr_value, skip_nl)) |rhs| {
                 try parser.builder.move(rhs, lhs);
             }
         }
@@ -195,7 +204,8 @@ pub const Parser = struct {
         if (parser.eatToken(.LArrArr, skip_nl) orelse
             parser.eatToken(.RArrArr, skip_nl)) |tok|
         {
-            const rhs = (try parser.addExpr(.R, true)).?;
+            parser.skipNl();
+            const rhs = (try parser.addExpr(.R, skip_nl)).?;
             return try parser.builder.infix(lhs, tok, rhs);
         }
         return lhs;
@@ -208,7 +218,8 @@ pub const Parser = struct {
         while (parser.eatToken(.Minus, skip_nl) orelse
             parser.eatToken(.Plus, skip_nl)) |tok|
         {
-            const rhs = (try parser.mulExpr(.R, true)).?;
+            parser.skipNl();
+            const rhs = (try parser.mulExpr(.R, skip_nl)).?;
             lhs = try parser.builder.infix(lhs, tok, rhs);
         }
         return lhs;
@@ -223,7 +234,8 @@ pub const Parser = struct {
             parser.eatToken(.SlashSlash, skip_nl) orelse
             parser.eatToken(.Percent, skip_nl)) |tok|
         {
-            const rhs = (try parser.prefixExpr(.R, true)).?;
+            parser.skipNl();
+            const rhs = (try parser.prefixExpr(.R, skip_nl)).?;
             lhs = try parser.builder.infix(lhs, tok, rhs);
         }
 
@@ -231,21 +243,22 @@ pub const Parser = struct {
     }
 
     /// prefix_expr
-    ///     : "try" bool_expr.r
-    ///     | ("-" | "+" | "not" | "~")? primary_expr suffix_expr* [.l assign]?
+    ///     : ("try" | "-" | "+" | "not" | "~") bool_expr.r
+    ///     | primary_expr suffix_expr* [.l assign]?
     fn prefixExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) anyerror!?RegRef {
-        if (parser.eatToken(.Keyword_try, skip_nl)) |tok| {
-            const rhs = (try parser.boolExpr(.R, true)).?;
+        if (parser.eatToken(.Keyword_try, skip_nl) orelse
+            parser.eatToken(.Minus, skip_nl) orelse
+            parser.eatToken(.Plus, skip_nl) orelse
+            parser.eatToken(.Tilde, skip_nl) orelse
+            parser.eatToken(.Keyword_not, skip_nl)) |tok|
+        {
+            parser.skipNl();
+            const rhs = (try parser.boolExpr(.R, skip_nl)).?;
             return try parser.builder.prefix(tok, rhs);
         }
-        const prefix_op = parser.eatToken(.Minus, skip_nl) orelse parser.eatToken(.Plus, skip_nl) orelse
-            parser.eatToken(.Tilde, skip_nl) orelse parser.eatToken(.Keyword_not, skip_nl);
         var primary = try parser.primaryExpr(lr_value, skip_nl);
         primary = try parser.suffixExpr(primary, skip_nl);
-        if (prefix_op) |some| {
-            primary = try parser.builder.prefix(some, primary);
-        }
-        return try parser.assign(lr_value, primary);
+        return try parser.assign(lr_value, primary, skip_nl);
     }
 
     /// suffix_expr
@@ -269,7 +282,7 @@ pub const Parser = struct {
     /// assign
     ///     : "=" expr.r
     ///     | ("+=" | "-=" | "*=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") bit_expr.r
-    fn assign(parser: *Parser, lr_value: LRValue, lhs: RegRef) anyerror!?RegRef {
+    fn assign(parser: *Parser, lr_value: LRValue, lhs: RegRef, skip_nl: bool) anyerror!?RegRef {
         // assignment cannot happen in places where NL is not necessary
         if (parser.eatToken(.Equal, false) orelse
             parser.eatToken(.MinusEqual, false) orelse
@@ -287,10 +300,11 @@ pub const Parser = struct {
                 // TODO assignment does not produce value
                 return error.ParseError;
             }
+            std.debug.assert(!skip_nl);
             const rhs = if (tok.id == .Equal)
-                (try parser.expr(.R, true)).?
+                (try parser.expr(.R, false)).?
             else
-                (try parser.bitExpr(.R, true)).?;
+                (try parser.bitExpr(.R, false)).?;
             try parser.builder.assign(lhs, tok, rhs);
             return null;
         }
@@ -372,13 +386,14 @@ pub const Parser = struct {
         return error.ParseError;
     }
 
+    fn skipNl(parser: *Parser) void {
+        _ = parser.eatToken(.Nl, true);
+    }
+
     fn eatToken(parser: *Parser, id: @TagType(Token.Id), skip_nl: bool) ?*Token {
         var next = parser.token_it.next().?;
-        if (skip_nl) {
-            while (next.id == .Nl) {
-                next = parser.token_it.next().?;
-            }
-        }
+        if (skip_nl and next.id == .Nl)
+            next = parser.token_it.next().?;
         if (next.id == id) {
             return next;
         } else {

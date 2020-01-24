@@ -188,6 +188,7 @@ pub const Tokenizer = struct {
     start_index: usize = 0,
     level: u32 = 0,
     string: bool = false,
+    prev_nl: bool = true,
     repl: bool,
 
     pub fn init(allocator: *Allocator, repl: bool) Tokenizer {
@@ -275,8 +276,12 @@ pub const Tokenizer = struct {
                         state = .LineComment;
                     },
                     '\n' => {
-                        res.id = .Nl;
-                        break;
+                        if (self.prev_nl) {
+                            self.start_index = self.it.i;
+                        } else {
+                            res.id = .Nl;
+                            break;
+                        }
                     },
                     '\r' => {
                         state = .Cr;
@@ -391,7 +396,6 @@ pub const Tokenizer = struct {
                     else => {
                         if (isWhiteSpace(c)) {
                             self.start_index = self.it.i;
-                            res.start = self.start_index;
                         } else if (isIdentifier(c)) {
                             state = .Identifier;
                         } else {
@@ -402,8 +406,12 @@ pub const Tokenizer = struct {
                 },
                 .Cr => switch (c) {
                     '\n' => {
-                        res.id = .Nl;
-                        break;
+                        if (self.prev_nl) {
+                            self.start_index = self.it.i;
+                        } else {
+                            res.id = .Nl;
+                            break;
+                        }
                     },
                     else => {
                         res.id = .{ .Invalid = "invalid character" };
@@ -857,7 +865,6 @@ pub const Tokenizer = struct {
 
                 .String => {
                     if (self.repl) {
-                        res.start = self.it.i;
                         self.it.i = self.start_index;
                         res.id = .Eof;
                     } else
@@ -884,6 +891,8 @@ pub const Tokenizer = struct {
                 },
             }
         }
+        res.start = self.start_index;
+        self.prev_nl = res.id == .Nl or res.id == .Eof;
         return res;
     }
 };

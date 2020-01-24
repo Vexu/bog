@@ -15,7 +15,8 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     defer tokenizer.deinit();
 
     while (true) {
-        const begin_index = tokenizer.tokens.len;
+        var begin_index = tokenizer.tokens.len;
+        if (begin_index != 0) begin_index -= 1;
         readLine(&buffer, ">>> ", in_stream, out_stream) catch |err| switch (err) {
             error.EndOfStream => return,
             else => |e| return e,
