@@ -131,18 +131,20 @@ pub const Builder = struct {
     syms: SymbolList,
     cur_func: *FuncState,
 
-    pub fn init(allocator: *Allocator) !Builder {
-        var funcs = FuncList.init(allocator);
-        const first = try funcs.addOne();
-        first.* = FuncState.init(allocator);
-        return Builder{
-            .funcs = funcs,
-            .cur_func = first,
-            .syms = SymbolList.init(allocator),
-        };
+    pub fn init(builder: *Builder, allocator: *Allocator) !void {
+        // https://github.com/ziglang/zig/issues/2765 pls
+        builder.funcs = FuncList.init(allocator);
+        builder.cur_func = try builder.funcs.addOne();
+        builder.cur_func.* = FuncState.init(allocator);
+        builder.syms = SymbolList.init(allocator);
     }
 
-    pub fn deinit(self: *Builder) void {}
+    pub fn deinit(self: *Builder) void {
+        self.syms.deinit();
+        var it = self.funcs.iterator(0);
+        while (it.next()) |f| f.deinit();
+        self.funcs.deinit();
+    }
 
     pub fn discard(self: *Builder, reg: RegRef) anyerror!void {
         defer self.registerFree(reg);

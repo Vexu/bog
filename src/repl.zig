@@ -2,35 +2,50 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const Parser = @import("parser.zig").Parser;
+const Tokenizer = @import("tokenizer.zig").Tokenizer;
+const Builder = @import("bytecode.zig").Builder;
 
 pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     var buffer = try ArrayList(u8).initCapacity(allocator, std.mem.page_size);
     defer buffer.deinit();
-    var parser = try Parser.init(allocator);
-    defer parser.deinit();
-    parser.tokenizer.repl = true;
+    var builder: Builder = undefined;
+    try builder.init(allocator);
+    defer builder.deinit();
+    var tokenizer = Tokenizer.init(allocator, true);
+    defer tokenizer.deinit();
 
     while (true) {
-        try out_stream.write("<<< ");
-        readLine(&buffer, in_stream) catch |e| switch (e) {
-            error.EndOfStream => return out_stream.write(std.cstr.line_sep),
-            else => |err| return err,
+        const begin_index = tokenizer.tokens.len;
+        readLine(&buffer, ">>> ", in_stream, out_stream) catch |err| switch (err) {
+            error.EndOfStream => return,
+            else => |e| return e,
         };
-        try parser.parse(buffer.toSliceConst());
+        while (!(try tokenizer.tokenize(buffer.toSliceConst()))) {
+            readLine(&buffer, "... ", in_stream, out_stream) catch |err| switch (err) {
+                error.EndOfStream => return,
+                else => |e| return e,
+            };
+        }
+        try Parser.parse(&builder, &tokenizer.tokens.iterator(begin_index));
 
         // TODO
-        // executor.exec(parser.builder)
-        while (parser.token_it.next()) |tok| {
+        // vm.exec(parser.builder)
+        var token_it = tokenizer.tokens.iterator(begin_index);
+        while (token_it.next()) |tok| {
             try out_stream.print("{}\n", .{tok});
         }
     }
 }
 
-fn readLine(buffer: *ArrayList(u8), in_stream: var) !void {
+fn readLine(buffer: *ArrayList(u8), prompt: []const u8, in_stream: var, out_stream: var) !void {
+    try out_stream.write(prompt);
     const start_len = buffer.len;
     while (true) {
         var byte: u8 = in_stream.readByte() catch |e| switch (e) {
-            error.EndOfStream => if (start_len == buffer.len) return error.EndOfStream else continue,
+            error.EndOfStream => if (start_len == buffer.len) {
+                try out_stream.write(std.cstr.line_sep);
+                return error.EndOfStream;
+            } else continue,
             else => |err| return err,
         };
         try buffer.append(byte);
@@ -39,8 +54,8 @@ fn readLine(buffer: *ArrayList(u8), in_stream: var) !void {
             return;
         }
 
-        // if (buffer.len() == std.mem.page_size) {
-        //     return error.StreamTooLong;
-        // }
+        if (buffer.len - start_len == 1024) {
+            return error.StreamTooLong;
+        }
     }
 }

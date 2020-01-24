@@ -2,7 +2,6 @@ const std = @import("std");
 const mem = std.mem;
 const testing = std.testing;
 const tokenizer = @import("tokenizer.zig");
-const Tokenizer = tokenizer.Tokenizer;
 const Token = tokenizer.Token;
 const TokenList = tokenizer.TokenList;
 const Allocator = mem.Allocator;
@@ -11,48 +10,15 @@ const Builder = bytecode.Builder;
 const RegRef = bytecode.RegRef;
 
 pub const Parser = struct {
-    builder: Builder,
-    tokenizer: Tokenizer,
-    tokens: TokenList,
-    token_it: TokenList.Iterator,
+    builder: *Builder,
+    token_it: *TokenList.Iterator,
 
-    pub fn init(allocator: *Allocator) !Parser {
-        return Parser{
-            .builder = try Builder.init(allocator),
-            .tokenizer = .{
-                .it = .{
-                    .i = 0,
-                    .bytes = "",
-                },
-            },
-            .tokens = TokenList.init(allocator),
-            .token_it = undefined, // set in `tokenize`
+    pub fn parse(builder: *Builder, tokens: *TokenList.Iterator) !void {
+        var parser = Parser{
+            .builder = builder,
+            .token_it = tokens,
         };
-    }
-
-    pub fn deinit(parser: *Parser) void {
-        parser.tokens.deinit();
-    }
-
-    pub fn parse(parser: *Parser, input: []const u8) !void {
-        try parser.tokenize(input);
         try parser.root();
-    }
-
-    fn tokenize(parser: *Parser, input: []const u8) !void {
-        parser.tokenizer.it.bytes = input;
-        const new_len = if (parser.tokens.len != 0) blk: {
-            const len = parser.tokens.len - 1; // pop .Eof
-            parser.tokens.len = len;
-            break :blk len;
-        } else 0;
-        parser.token_it = parser.tokens.iterator(new_len);
-        while (true) {
-            const tok = try parser.tokens.addOne();
-            tok.* = parser.tokenizer.next();
-            if (tok.id == .Eof)
-                break;
-        }
     }
 
     const LRValue = enum {
@@ -68,7 +34,7 @@ pub const Parser = struct {
             if (res) |some|
                 try parser.builder.discard(some);
             if (parser.eatToken(.Nl, false)) |_| continue;
-            _ = try parser.expectToken(.Eof, false);
+            _ = try parser.expectToken(.Eof, true);
             return;
         }
     }
@@ -83,7 +49,8 @@ pub const Parser = struct {
 
     /// let : "let" unwrap "=" expr.r
     fn let(parser: *Parser) anyerror!bool {
-        unreachable;
+        const tok = parser.eatToken(.Keyword_let, false) orelse return false;
+        return error.Unimplemented;
     }
 
     /// expr

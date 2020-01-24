@@ -1,5 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
+const Allocator = mem.Allocator;
 const testing = std.testing;
 const unicode = std.unicode;
 
@@ -183,10 +184,43 @@ pub const TokenList = std.SegmentedList(Token, 64);
 
 pub const Tokenizer = struct {
     it: unicode.Utf8Iterator,
+    tokens: TokenList,
     start_index: usize = 0,
-    repl: bool = false,
+    level: u32 = 0,
+    string: bool = false,
+    repl: bool,
 
-    pub fn next(self: *Tokenizer) Token {
+    pub fn init(allocator: *Allocator, repl: bool) Tokenizer {
+        return .{
+            .it = .{
+                .i = 0,
+                .bytes = "",
+            },
+            .tokens = TokenList.init(allocator),
+            .repl = repl,
+        };
+    }
+
+    pub fn deinit(self: *Tokenizer) void {
+        self.tokens.deinit();
+    }
+
+    pub fn tokenize(self: *Tokenizer, input: []const u8) !bool {
+        self.it.bytes = input;
+        _ = self.tokens.pop();
+        while (true) {
+            const tok = try self.tokens.addOne();
+            tok.* = self.next();
+            if (tok.id == .Eof) {
+                return if (self.repl and (self.level != 0 or self.string))
+                    false
+                else
+                    true;
+            }
+        }
+    }
+
+    fn next(self: *Tokenizer) Token {
         self.start_index = self.it.i;
         var state: enum {
             Start,
@@ -248,6 +282,7 @@ pub const Tokenizer = struct {
                         state = .Cr;
                     },
                     '"', '\'' => {
+                        self.string = true;
                         str_delimit = c;
                         state = .String;
                     },
@@ -261,18 +296,30 @@ pub const Tokenizer = struct {
                         state = .Pipe;
                     },
                     '(' => {
+                        self.level += 1;
                         res.id = .LParen;
                         break;
                     },
                     ')' => {
+                        if (self.level == 0) {
+                            res.id = .{ .Invalid = "unmatched ')'" };
+                            break;
+                        }
+                        self.level -= 1;
                         res.id = .RParen;
                         break;
                     },
                     '[' => {
+                        self.level += 1;
                         res.id = .LBracket;
                         break;
                     },
                     ']' => {
+                        if (self.level == 0) {
+                            res.id = .{ .Invalid = "unmatched ']'" };
+                            break;
+                        }
+                        self.level -= 1;
                         res.id = .RBracket;
                         break;
                     },
@@ -299,10 +346,16 @@ pub const Tokenizer = struct {
                         state = .Caret;
                     },
                     '{' => {
+                        self.level += 1;
                         res.id = .LBrace;
                         break;
                     },
                     '}' => {
+                        if (self.level == 0) {
+                            res.id = .{ .Invalid = "unmatched '}'" };
+                            break;
+                        }
+                        self.level -= 1;
                         res.id = .RBrace;
                         break;
                     },
@@ -390,6 +443,7 @@ pub const Tokenizer = struct {
                     },
                     else => {
                         if (c == str_delimit) {
+                            self.string = false;
                             res.id = .{ .String = self.it.bytes[self.start_index..self.it.i] };
                             break;
                         }
