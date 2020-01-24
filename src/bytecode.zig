@@ -142,7 +142,7 @@ const FuncState = struct {
         self.cur_regs -= 1;
     }
 
-    fn emitInstruction(self: *FuncState, inst: Instruction, arg: ?u32) anyerror!void {
+    fn emitInstruction(self: *FuncState, inst: Instruction, arg: ?u32) !void {
         try self.code.append(@bitCast(u32, inst));
         if (arg) |some| {
             try self.code.append(some);
@@ -180,7 +180,7 @@ pub const Builder = struct {
         self.funcs.deinit();
     }
 
-    pub fn discard(self: *Builder, reg: RegRef) anyerror!void {
+    pub fn discard(self: *Builder, reg: RegRef) !void {
         defer self.cur_func.registerFree(reg);
         try self.cur_func.emitInstruction(.{
             .op = .Discard,
@@ -188,7 +188,7 @@ pub const Builder = struct {
         }, null);
     }
 
-    pub fn move(self: *Builder, from: RegRef, to: RegRef) anyerror!void {
+    pub fn move(self: *Builder, from: RegRef, to: RegRef) !void {
         defer self.cur_func.registerFree(from);
         try self.cur_func.emitInstruction(.{
             .op = .Move,
@@ -197,21 +197,23 @@ pub const Builder = struct {
         }, null);
     }
 
-    pub fn jumpFalse(self: *Builder, reg: RegRef) anyerror!usize {
+    pub fn jumpFalse(self: *Builder, reg: RegRef) !usize {
         std.debug.warn("jumpFalse #{}\n", .{reg});
-        return 1;
+        return error.Unimplemented;
+        // return 1;
     }
 
-    pub fn jumpNotErr(self: *Builder, reg: RegRef) anyerror!usize {
+    pub fn jumpNotErr(self: *Builder, reg: RegRef) !usize {
         std.debug.warn("jumpNotErr #{}\n", .{reg});
-        return 1;
+        return error.Unimplemented;
+        // return 1;
     }
 
     pub fn finishJump(self: *Builder, jump: usize) void {
         std.debug.warn("#finishJump #{}\n", .{jump});
     }
 
-    pub fn constant(self: *Builder, tok: *Token) anyerror!RegRef {
+    pub fn constant(self: *Builder, tok: *Token) !RegRef {
         const reg = try self.cur_func.registerAlloc();
         var arg: ?u32 = null;
         const op: Op = switch (tok.id) {
@@ -236,7 +238,7 @@ pub const Builder = struct {
         return reg;
     }
 
-    pub fn declRef(self: *Builder, tok: *Token) anyerror!RegRef {
+    pub fn declRef(self: *Builder, tok: *Token) !RegRef {
         const name = tok.id.Identifier;
         var it = self.syms.iterator(self.syms.len);
         const found = while (it.prev()) |sym| {
@@ -253,47 +255,52 @@ pub const Builder = struct {
         }
     }
 
-    pub fn buildErr(self: *Builder, tok: *Token, val: RegRef) anyerror!RegRef {
-        const reg = self.registerAlloc();
-        std.debug.warn("buildErr {}\n", .{ val });
-        return reg;
+    pub fn buildErr(self: *Builder, tok: *Token, val: RegRef) !RegRef {
+        const reg = 1; //self.registerAlloc();
+        std.debug.warn("buildErr {}\n", .{val});
+        return error.Unimplemented;
+        // return reg;
     }
 
-    pub fn buildList(self: *Builder, tok: *Token) anyerror!usize {
+    pub fn buildList(self: *Builder, tok: *Token) !usize {
         // todo allocate register here?
         const list = 1;
-        std.debug.warn("buildList {}\n", .{ list });
-        return list;
+        std.debug.warn("buildList {}\n", .{list});
+        return error.Unimplemented;
+        // return list;
     }
 
-    pub fn finishList(self: *Builder, tok: *Token, list: usize) anyerror!RegRef {
-        const reg = self.registerAlloc();
-        std.debug.warn("#finishList {}\n", .{ list });
-        return reg;
+    pub fn finishList(self: *Builder, tok: *Token, list: usize) !RegRef {
+        const reg = 1; //self.registerAlloc();
+        std.debug.warn("#finishList {}\n", .{list});
+        return error.Unimplemented;
+        // return reg;
     }
 
-    pub fn listPush(self: *Builder, val: RegRef) anyerror!void {
-        defer self.registerFree(val);
-        std.debug.warn("listPush {}\n", .{ val });
+    pub fn listPush(self: *Builder, val: RegRef) !void {
+        // defer self.registerFree(val);
+        std.debug.warn("listPush {}\n", .{val});
+        return error.Unimplemented;
     }
 
-    pub fn import(self: *Builder, tok: *Token, str: RegRef) anyerror!RegRef {
-        const reg = self.registerAlloc();
-        std.debug.warn("import {}\n", .{ str });
-        return reg;
+    pub fn import(self: *Builder, tok: *Token, str: RegRef) !RegRef {
+        const reg = 1; //self.registerAlloc();
+        std.debug.warn("import {}\n", .{str});
+        return error.Unimplemented;
+        // return reg;
     }
 
-    pub fn prefix(self: *Builder, tok: *Token, rhs: RegRef) anyerror!RegRef {
+    pub fn prefix(self: *Builder, tok: *Token, rhs: RegRef) !RegRef {
         std.debug.warn("{} {}\n", .{ tok, rhs });
-        return rhs;
+        return error.Unimplemented;
     }
 
-    pub fn cast(self: *Builder, lhs: RegRef, tok: *Token) anyerror!RegRef {
+    pub fn cast(self: *Builder, lhs: RegRef, tok: *Token) !RegRef {
         std.debug.warn("#{} as {}\n", .{ lhs, tok.id.Identifier });
-        return lhs;
+        return error.Unimplemented;
     }
 
-    pub fn infix(self: *Builder, lhs: RegRef, tok: *Token, rhs: RegRef) anyerror!RegRef {
+    pub fn infix(self: *Builder, lhs: RegRef, tok: *Token, rhs: RegRef) !RegRef {
         defer self.cur_func.registerFree(rhs);
         try self.cur_func.emitInstruction(.{
             .op = switch (tok.id) {
@@ -326,9 +333,10 @@ pub const Builder = struct {
         return lhs;
     }
 
-    pub fn assign(self: *Builder, lhs: RegRef, tok: *Token, rhs: RegRef) anyerror!void {
-        defer self.registerFree(rhs);
-        defer self.registerFree(lhs);
+    pub fn assign(self: *Builder, lhs: RegRef, tok: *Token, rhs: RegRef) !void {
+        // defer self.registerFree(rhs);
+        // defer self.registerFree(lhs);
         std.debug.warn("#{} {} #{}\n", .{ lhs, tok, rhs });
+        return error.Unimplemented;
     }
 };

@@ -5,7 +5,6 @@ const ValueList = std.ArrayList(*Ref);
 
 pub const Value = struct {
     ref: u32 = 0,
-    mut: bool = false,
     kind: union(enum) {
         Tuple: []*Ref,
         Map: ValueMap,

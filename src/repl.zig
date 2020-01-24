@@ -14,6 +14,8 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     defer builder.deinit();
     var tokenizer = Tokenizer.init(allocator, true);
     defer tokenizer.deinit();
+    var parser = Parser.init(allocator, &builder);
+    defer parser.deinit();
     var vm = Vm.init(allocator);
     defer vm.deinit();
 
@@ -30,7 +32,23 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
                 else => |e| return e,
             };
         }
-        try Parser.parse(&builder, &tokenizer.tokens.iterator(begin_index));
+        parser.parse(&tokenizer.tokens.iterator(begin_index)) catch |err| switch (err) {
+            error.ParseError => {
+                const RED = "\x1b[31;1m";
+                const BOLD = "\x1b[0;1m";
+                const RESET = "\x1b[0m";
+
+                var it = parser.errors.iterator(0);
+                while (it.next()) |e| {
+                    try out_stream.write(RED ++ "error: " ++ BOLD);
+                    try e.render(out_stream);
+                    try out_stream.write("\n" ++ RESET);
+                    // TODO print location
+                }
+                return;
+            },
+            else => |e| return e,
+        };
 
         vm.code = builder.cur_func.code.toSliceConst(); // TODO
         try vm.exec();
