@@ -20,6 +20,9 @@ pub const Op = enum(u8) {
     /// A = BOOL(B)
     ConstBool,
 
+    /// A = ()
+    ConstNone,
+
     /// A = A // B
     DivFloor,
 
@@ -76,6 +79,9 @@ pub const Op = enum(u8) {
 
     Return,
 
+    /// A = error(A)
+    BuildError,
+
     // all ops below have args
     const HasArg = 120;
 
@@ -96,6 +102,9 @@ pub const Op = enum(u8) {
 
     /// A = NUM(arg1)
     ConstNum,
+
+    /// A = IMPORT(arg1)
+    Import,
 
     // _,
 
@@ -192,6 +201,10 @@ pub const Builder = struct {
         self.funcs.deinit();
     }
 
+    fn putString(builder: *Builder, tok: *Token) !u32 {
+        return error.Unimplemented;
+    }
+
     pub fn discard(self: *Builder, reg: RegRef) !void {
         defer self.cur_func.registerFree(reg);
         try self.cur_func.emitInstruction(.{
@@ -230,9 +243,11 @@ pub const Builder = struct {
         var arg: ?u32 = null;
         var breg: RegRef = 0;
         const op: Op = switch (tok.id) {
-            .String,
-            .Number,
-            => return error.Unimplemented,
+            .String => blk: {
+                arg = try self.putString(tok);
+                break :blk .ConstString;
+            },
+            .Number => return error.Unimplemented,
             .Keyword_false, .Keyword_true => blk: {
                 breg = @boolToInt(tok.id == .Keyword_true);
                 break :blk .ConstBool;
@@ -244,6 +259,7 @@ pub const Builder = struct {
             } else {
                 return error.Unimplemented;
             },
+            .RParen => .ConstNone,
             else => unreachable,
         };
         try self.cur_func.emitInstruction(.{
@@ -272,10 +288,11 @@ pub const Builder = struct {
     }
 
     pub fn buildErr(self: *Builder, tok: *Token, val: RegRef) !RegRef {
-        const reg = 1; //self.registerAlloc();
-        std.debug.warn("buildErr {}\n", .{val});
-        return error.Unimplemented;
-        // return reg;
+        try self.cur_func.emitInstruction(.{
+            .op = .BuildError,
+            .A = val,
+        }, null);
+        return val;
     }
 
     pub fn buildList(self: *Builder, tok: *Token) !usize {
@@ -299,16 +316,29 @@ pub const Builder = struct {
         return error.Unimplemented;
     }
 
-    pub fn import(self: *Builder, tok: *Token, str: RegRef) !RegRef {
-        const reg = 1; //self.registerAlloc();
-        std.debug.warn("import {}\n", .{str});
-        return error.Unimplemented;
-        // return reg;
+    pub fn import(self: *Builder, tok: *Token, str: *Token) !RegRef {
+        const reg = try self.cur_func.registerAlloc();
+        try self.cur_func.emitInstruction(.{
+            .op = .Import,
+            .A = reg,
+        }, try self.putString(str));
+        return reg;
     }
 
     pub fn prefix(self: *Builder, tok: *Token, rhs: RegRef) !RegRef {
-        std.debug.warn("{} {}\n", .{ tok, rhs });
-        return error.Unimplemented;
+        try self.cur_func.emitInstruction(.{
+            .op = switch (tok.id) {
+                .Keyword_not => .Not,
+                .Tilde => .BinNot,
+                .Minus => .Negate,
+                .Keyword_try => .Try,
+                // TODO maybe don't no-op this
+                .Plus => return rhs,
+                else => unreachable,
+            },
+            .A = rhs,
+        }, null);
+        return rhs;
     }
 
     pub fn cast(self: *Builder, lhs: RegRef, tok: *Token) !RegRef {

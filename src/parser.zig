@@ -324,7 +324,7 @@ pub const Parser = struct {
 
     /// power_expr : primary_expr suffix_expr*  ([.l assign?] | ("**" power_expr.r)?)
     fn powerExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!?RegRef {
-        var primary = try parser.primaryExpr(lr_value, skip_nl);
+        var primary = (try parser.primaryExpr(lr_value, skip_nl)) orelse return null;
         primary = try parser.suffixExpr(primary, skip_nl);
         if (parser.eatToken(.AsteriskAsterisk, skip_nl)) |tok| {
             parser.skipNl();
@@ -401,7 +401,7 @@ pub const Parser = struct {
     ///     | while
     ///     | for
     ///     | match
-    fn primaryExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!RegRef {
+    fn primaryExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!?RegRef {
         if (parser.eatToken(.Number, skip_nl) orelse
             parser.eatToken(.Integer, skip_nl) orelse
             parser.eatToken(.String, skip_nl) orelse
@@ -423,22 +423,28 @@ pub const Parser = struct {
             _ = try parser.expectToken(.LParen, true);
             const val = (try parser.expr(.R, true)).?;
             _ = try parser.expectToken(.RParen, true);
-            return parser.builder.buildErr(tok, val);
+            return try parser.builder.buildErr(tok, val);
         }
         if (parser.eatToken(.Keyword_import, skip_nl)) |tok| {
             _ = try parser.expectToken(.LParen, true);
-            const str = parser.builder.constant(try parser.expectToken(.String, true)) catch |e| switch (e) {
+            const str = try parser.expectToken(.String, true);
+            _ = try parser.expectToken(.RParen, true);
+            return parser.builder.import(tok, str) catch |e| switch (e) {
                 error.StackOverflow => return parser.reportErr(.StackOverflow, tok),
                 else => |err| return err,
             };
-            _ = try parser.expectToken(.RParen, true);
-            return parser.builder.import(tok, str);
         }
         if (parser.eatToken(.LParen, skip_nl)) |tok| {
             if (parser.eatToken(.Nl, false)) |_| {
                 // block
-                return error.Unimplemented;
+                return try parser.block(lr_value);
+            } else if (parser.eatToken(.RParen, false)) |t| {
+                return parser.builder.constant(t) catch |e| switch (e) {
+                    error.StackOverflow => return parser.reportErr(.StackOverflow, tok),
+                    else => |err| return err,
+                };
             } else {
+                return error.Unimplemented;
                 // const start = parser.builder.maybeTuple();
                 // var val = try parser.expr(.R);
                 // tuple or grouped expr
@@ -446,6 +452,7 @@ pub const Parser = struct {
         }
         if (parser.eatToken(.LBrace, skip_nl)) |tok| {
             //     | "{" ((IDENTIFIER | STRING) ":" expr.r ",")* "}"
+            return error.Unimplemented;
         }
         if (parser.eatToken(.LBracket, skip_nl)) |tok| {
             //     | "[" (expr.r ",")* "]"
@@ -469,6 +476,25 @@ pub const Parser = struct {
         if (try parser.forExpr(lr_value, skip_nl)) |res| return res;
         if (try parser.matchExpr(lr_value, skip_nl)) |res| return res;
         return parser.reportErr(.PrimaryExpr, parser.token_it.peek().?);
+    }
+
+    /// block : "(" (NL stmt)+ ")"
+    fn block(parser: *Parser, lr_value: LRValue) ParseError!?RegRef {
+        var last: ?RegRef = null;
+        while (true) {
+            const res = try parser.stmt();
+            if (last) |some|
+                try parser.builder.discard(some);
+            last = res;
+            _ = try parser.expectToken(.Nl, false);
+            if (parser.eatToken(.RParen, true)) |tok| {
+                if (lr_value == .L and last == null) {
+                    // TODO expression has no result
+                    return error.Unimplemented;
+                }
+                return last;
+            }
+        }
     }
 
     /// if : "if" "(" bool_expr.r ")" expr ("else" "if" "(" bool_expr.r ")" expr)* ("else" expr)?
