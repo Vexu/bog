@@ -75,7 +75,7 @@ pub const Vm = struct {
                     // TODO check numeric
                     frame.stack[inst.A] = .{
                         .kind = .{
-                            .Int = frame.stack[inst.A].kind.Int + frame.stack[inst.B].kind.Int,
+                            .Int = frame.stack[inst.B].kind.Int + frame.stack[inst.C].kind.Int,
                         },
                     };
                 },

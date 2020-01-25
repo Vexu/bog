@@ -23,58 +23,58 @@ pub const Op = enum(u8) {
     /// A = ()
     ConstNone,
 
-    /// A = A // B
+    /// A = B // C
     DivFloor,
 
-    /// A = A / B
+    /// A = B / C
     Div,
 
-    /// A = A * B
+    /// A = B * C
     Mul,
 
-    /// A = A ** B
+    /// A = B ** C
     Pow,
 
-    /// A = A % B
+    /// A = B % C
     Mod,
 
-    /// A = A + B
+    /// A = B + C
     Add,
 
-    /// A = A - B
+    /// A = B - C
     Sub,
 
-    /// A = A << B
+    /// A = B << C
     LShift,
 
-    /// A = A << B
+    /// A = B << C
     RShift,
 
-    /// A = A & B
+    /// A = B & C
     BinAnd,
 
-    /// A = A | B
+    /// A = B | C
     BinOr,
 
-    /// A = A and B
+    /// A = B and C
     And,
 
-    /// A = A or B
+    /// A = B or C
     Or,
 
-    /// A = not A
+    /// A = not B
     Not,
 
-    /// A = ~A
+    /// A = ~B
     BinNot,
 
-    /// A = -A
+    /// A = -B
     Negate,
 
     /// IF (A==error) RET A
     Try,
 
-    /// A as B
+    /// A = B as TYPEID(C)
     Cast,
 
     Return,
@@ -128,14 +128,19 @@ pub const Module = struct {
     sect_strings: []const u8,
 };
 
-pub const MaxStack = 250;
 pub const RegRef = u8;
 
 const FuncState = struct {
     frame_size: u8 = 0,
-    cur_regs: u8 = 0,
+    regs: [250]RegState = [_]RegState{.Free} ** 250,
     // parent_ref: ?u8,
     code: Code,
+
+    const RegState = enum {
+        Free,
+        Local,
+        Temp,
+    };
 
     fn init(allocator: *Allocator) FuncState {
         return .{
@@ -147,20 +152,23 @@ const FuncState = struct {
         self.code.deinit();
     }
 
-    fn registerAlloc(self: *FuncState) !RegRef {
-        const reg = self.cur_regs;
-        self.cur_regs += 1;
-        if (self.cur_regs > self.frame_size) {
-            if (self.cur_regs >= MaxStack)
-                return error.StackOverflow;
-            self.frame_size = self.cur_regs;
+    fn registerAlloc(self: *FuncState, kind: RegState) !RegRef {
+        for (self.regs) |r,i| {
+            if (r == .Free) {
+                self.regs[i] = kind;
+                if (i > self.frame_size) {
+                    self.frame_size = @truncate(u8, i);
+                }
+                return @truncate(RegRef, i);
+            }
         }
-        return reg;
+        return error.StackOverflow;
+
     }
 
-    fn registerFree(self: *FuncState, reg: RegRef) void {
-        std.debug.assert(self.cur_regs != 0);
-        self.cur_regs -= 1;
+    fn freeRegisterIfTemp(self: *FuncState, reg: RegRef) void {
+        if (self.regs[reg] == .Temp)
+            self.regs[reg] = .Free;
     }
 
     fn emitInstruction(self: *FuncState, inst: Instruction, arg: ?u32) !void {
@@ -206,7 +214,7 @@ pub const Builder = struct {
     }
 
     pub fn discard(self: *Builder, reg: RegRef) !void {
-        defer self.cur_func.registerFree(reg);
+        defer self.cur_func.freeRegisterIfTemp(reg);
         try self.cur_func.emitInstruction(.{
             .op = .Discard,
             .A = reg,
@@ -214,7 +222,7 @@ pub const Builder = struct {
     }
 
     pub fn move(self: *Builder, from: RegRef, to: RegRef) !void {
-        defer self.cur_func.registerFree(from);
+        defer self.cur_func.freeRegisterIfTemp(from);
         try self.cur_func.emitInstruction(.{
             .op = .Move,
             .A = to,
@@ -239,7 +247,7 @@ pub const Builder = struct {
     }
 
     pub fn constant(self: *Builder, tok: *Token) !RegRef {
-        const reg = try self.cur_func.registerAlloc();
+        const reg = try self.cur_func.registerAlloc(.Temp);
         var arg: ?u32 = null;
         var breg: RegRef = 0;
         const op: Op = switch (tok.id) {
@@ -317,7 +325,7 @@ pub const Builder = struct {
     }
 
     pub fn import(self: *Builder, tok: *Token, str: *Token) !RegRef {
-        const reg = try self.cur_func.registerAlloc();
+        const reg = try self.cur_func.registerAlloc(.Temp);
         try self.cur_func.emitInstruction(.{
             .op = .Import,
             .A = reg,
@@ -326,6 +334,7 @@ pub const Builder = struct {
     }
 
     pub fn prefix(self: *Builder, tok: *Token, rhs: RegRef) !RegRef {
+        const loc = try self.cur_func.registerAlloc(.Temp);
         try self.cur_func.emitInstruction(.{
             .op = switch (tok.id) {
                 .Keyword_not => .Not,
@@ -336,8 +345,10 @@ pub const Builder = struct {
                 .Plus => return rhs,
                 else => unreachable,
             },
-            .A = rhs,
+            .A = loc,
+            .B = rhs,
         }, null);
+        self.cur_func.freeRegisterIfTemp(rhs);
         return rhs;
     }
 
@@ -347,7 +358,7 @@ pub const Builder = struct {
     }
 
     pub fn infix(self: *Builder, lhs: RegRef, tok: *Token, rhs: RegRef) !RegRef {
-        defer self.cur_func.registerFree(rhs);
+        const loc = try self.cur_func.registerAlloc(.Temp);
         try self.cur_func.emitInstruction(.{
             .op = switch (tok.id) {
                 .SlashSlash => .DivFloor,
@@ -373,10 +384,13 @@ pub const Builder = struct {
                 // .Keyword_is,
                 else => unreachable,
             },
-            .A = lhs,
-            .B = rhs,
+            .A = loc,
+            .B = lhs,
+            .C = rhs,
         }, null);
-        return lhs;
+        self.cur_func.freeRegisterIfTemp(rhs);
+        self.cur_func.freeRegisterIfTemp(lhs);
+        return loc;
     }
 
     pub fn assign(self: *Builder, lhs: RegRef, tok: *Token, rhs: RegRef) !void {
