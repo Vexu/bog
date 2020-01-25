@@ -3,9 +3,23 @@ const std = @import("std");
 const ValueMap = std.StringHashMap(*Ref);
 const ValueList = std.ArrayList(*Ref);
 
+pub const TypeId = enum {
+    None,
+    Int,
+    Float,
+    Bool,
+    String,
+    Tuple,
+    Map,
+    List,
+    Error,
+    Range,
+    Fn,
+};
+
 pub const Value = struct {
     ref: u32 = 0,
-    kind: union(enum) {
+    kind: union(TypeId) {
         Tuple: []*Ref,
         Map: ValueMap,
         List: *ValueList,
@@ -16,6 +30,7 @@ pub const Value = struct {
             begin: *Ref,
             end: *Ref,
         },
+        String: []const u8,
         Fn: struct {
             arg_count: u8,
         },
@@ -25,7 +40,7 @@ pub const Value = struct {
         None,
     },
 
-    pub var none = Value{
+    pub var None = Value{
         .kind = .None,
     };
     pub var True = Value{
@@ -34,8 +49,13 @@ pub const Value = struct {
     pub var False = Value{
         .kind = .{ .Bool = false },
     };
+};
 
-    pub fn dump(value: *Value, stream: var, level: u32) !void {
+pub const Ref = struct {
+    value: ?*Value,
+
+    pub fn dump(ref: Ref, stream: var, level: u32) !void {
+        const value = ref.value.?;
         switch (value.kind) {
             .Int => |val| try stream.print("{}", .{val}),
             .Float => |val| try stream.print("{}", .{val}),
@@ -53,14 +73,14 @@ pub const Value = struct {
             },
             .Tuple => {
                 if (level == 0) {
-                try stream.write("(...)");
+                    try stream.write("(...)");
                 } else {
                     return error.Unimplemented;
                 }
             },
             .Map => {
                 if (level == 0) {
-                try stream.write("{...}");
+                    try stream.write("{...}");
                 } else {
                     return error.Unimplemented;
                 }
@@ -83,13 +103,26 @@ pub const Value = struct {
                     try stream.writeByte(')');
                 }
             },
+            .String => |val| {
+                try stream.writeByte('"');
+                for (val) |c| {
+                    switch (c) {
+                        '\n' => try stream.write("\\n"),
+                        '\t' => try stream.write("\\t"),
+                        '\r' => try stream.write("\\r"),
+                        '\'' => try stream.write("\\'"),
+                        '"' => try stream.write("\\\""),
+                        else => if (std.ascii.isCntrl(c))
+                            try stream.print("\\x{x:0<2}", .{c})
+                        else
+                            try stream.print("{c}", .{c}),
+                    }
+                }
+                try stream.writeByte('"');
+            },
             .Fn => |val| {
                 try stream.print("fn({})", .{val.arg_count});
             },
         }
     }
-};
-
-pub const Ref = struct {
-    value: *Value,
 };

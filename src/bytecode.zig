@@ -153,7 +153,7 @@ const FuncState = struct {
     }
 
     fn registerAlloc(self: *FuncState, kind: RegState) !RegRef {
-        for (self.regs) |r,i| {
+        for (self.regs) |r, i| {
             if (r == .Free) {
                 self.regs[i] = kind;
                 if (i > self.frame_size) {
@@ -163,7 +163,6 @@ const FuncState = struct {
             }
         }
         return error.StackOverflow;
-
     }
 
     fn freeRegisterIfTemp(self: *FuncState, reg: RegRef) void {

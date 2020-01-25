@@ -6,22 +6,22 @@ const Instruction = bytecode.Instruction;
 const value = @import("value.zig");
 const Value = value.Value;
 const Ref = value.Ref;
+const Gc = @import("gc.zig").Gc;
 
 pub const Vm = struct {
     /// Instruction pointer
     ip: usize,
     call_stack: CallStack,
-    stack: Stack,
+    gc: Gc,
     repl: bool,
-    result: ?*Value = null, // TODO
+    result: ?Ref = null,
 
-    const Stack = std.ArrayList(Value); // TODO *Ref once gc is made
     const CallStack = std.SegmentedList(FunctionFrame, 16);
 
     const FunctionFrame = struct {
         return_ip: ?usize,
         result_reg: u8,
-        stack: []Value, // slice of vm.stack
+        stack: []Ref, // slice of vm.gc.stack
     };
 
     pub const ExecError = error{
@@ -35,20 +35,19 @@ pub const Vm = struct {
     pub fn init(allocator: *Allocator, repl: bool) Vm {
         return Vm{
             .ip = 0,
-            .stack = Stack.init(allocator),
+            .gc = Gc.init(allocator),
             .call_stack = CallStack.init(allocator),
             .repl = repl,
         };
     }
 
     pub fn deinit(vm: *Vm) void {
-        vm.stack.deinit();
         vm.call_stack.deinit();
+        vm.gc.deinit();
     }
 
     // TODO some safety
     pub fn exec(vm: *Vm, code: []const u32) ExecError!void {
-        vm.result = null;
         const frame = vm.call_stack.uncheckedAt(0);
         while (vm.ip < code.len) : (vm.ip += 1) {
             const inst = @bitCast(Instruction, code[vm.ip]);
@@ -58,32 +57,35 @@ pub const Vm = struct {
             } else undefined;
             switch (inst.op) {
                 .ConstSmallInt => {
-                    frame.stack[inst.A] = .{
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
                         .kind = .{
                             .Int = arg,
                         },
                     };
+                    frame.stack[inst.A] = ref;
+                },
+                .ConstNone => {
+                    frame.stack[inst.A].value.? = &Value.None;
                 },
                 .ConstBool => {
-                    frame.stack[inst.A] = .{
-                        .kind = .{
-                            .Bool = inst.B != 0,
-                        },
-                    };
+                    frame.stack[inst.A].value.? = if (inst.B != 0) &Value.True else &Value.False;
                 },
                 .Add => {
                     // TODO check numeric
-                    frame.stack[inst.A] = .{
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
                         .kind = .{
-                            .Int = frame.stack[inst.B].kind.Int + frame.stack[inst.C].kind.Int,
+                            .Int = frame.stack[inst.B].value.?.kind.Int + frame.stack[inst.C].value.?.kind.Int,
                         },
                     };
+                    frame.stack[inst.A] = ref;
                 },
                 .Discard => {
                     if (vm.repl and vm.call_stack.len == 1) {
-                        vm.result = &frame.stack[inst.A];
+                        vm.result = frame.stack[inst.A];
                     } else {
-                        const val = frame.stack[inst.A];
+                        const val = frame.stack[inst.A].value.?;
                         if (val.kind == .Error) {
                             // TODO error discarded
                         }

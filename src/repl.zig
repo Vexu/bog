@@ -20,11 +20,10 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     defer vm.deinit();
 
     // TODO move this
-    try vm.stack.resize(250);
     try vm.call_stack.push(.{
         .return_ip = null,
         .result_reg = undefined,
-        .stack = vm.stack.toSliceConst()[0..250], // TODO
+        .stack = try vm.gc.stackAlloc(250),
     });
 
     while (true) {
@@ -65,6 +64,8 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
         if (vm.result) |some| {
             try some.dump(out_stream, 2);
             try out_stream.writeByte('\n');
+            // vm.result.deref();
+            vm.result = null;
         }
         // var token_it = tokenizer.tokens.iterator(begin_index);
         // while (token_it.next()) |tok| {
