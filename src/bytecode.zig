@@ -4,6 +4,7 @@ const Allocator = mem.Allocator;
 const tokenizer = @import("tokenizer.zig");
 const Token = tokenizer.Token;
 
+// TODO give these numbers once they are more stable
 pub const Op = enum(u8) {
     /// A <- B
     Move,
@@ -56,6 +57,39 @@ pub const Op = enum(u8) {
     /// A = B | C
     BinOr,
 
+    /// A //= B
+    DirectDivFloor,
+
+    /// A /= B
+    DirectDiv,
+
+    /// A *= B
+    DirectMul,
+
+    /// A **= B
+    DirectPow,
+
+    /// A %= B
+    DirectMod,
+
+    /// A += B
+    DirectAdd,
+
+    /// A -= B
+    DirectSub,
+
+    /// A <<= B
+    DirectLShift,
+
+    /// A >>= B
+    DirectRShift,
+
+    /// A &= B
+    DirectBinAnd,
+
+    /// A |= B
+    DirectBinOr,
+
     /// A = B and C
     And,
 
@@ -93,6 +127,9 @@ pub const Op = enum(u8) {
 
     /// if (not A) ip = arg1
     JumpFalse,
+
+    /// if (not A is error) ip = arg1
+    JumpNotErr,
 
     /// A = arg1
     ConstSmallInt,
@@ -180,18 +217,20 @@ const FuncState = struct {
 
 const FuncList = std.SegmentedList(FuncState, 4);
 
-const Symbol = struct {
-    name: []const u8,
-    func: *FuncState,
-    reg: RegRef,
-};
-
-const SymbolList = std.SegmentedList(Symbol, 8);
-
 pub const Builder = struct {
     funcs: FuncList,
     syms: SymbolList,
+    jumps: JumpList,
     cur_func: *FuncState,
+
+    const Symbol = struct {
+        name: []const u8,
+        func: *FuncState,
+        reg: RegRef,
+    };
+
+    const SymbolList = std.SegmentedList(Symbol, 8);
+    const JumpList = std.SegmentedList(usize, 8);
 
     pub fn init(builder: *Builder, allocator: *Allocator) !void {
         // https://github.com/ziglang/zig/issues/2765 pls
@@ -199,6 +238,7 @@ pub const Builder = struct {
         builder.cur_func = try builder.funcs.addOne();
         builder.cur_func.* = FuncState.init(allocator);
         builder.syms = SymbolList.init(allocator);
+        builder.jumps = JumpList.init(allocator);
     }
 
     pub fn deinit(self: *Builder) void {
@@ -229,20 +269,34 @@ pub const Builder = struct {
         }, null);
     }
 
-    pub fn jumpFalse(self: *Builder, reg: RegRef) !usize {
-        std.debug.warn("jumpFalse #{}\n", .{reg});
-        return error.Unimplemented;
-        // return 1;
+    pub fn jumpFalse(self: *Builder, reg: RegRef) !void {
+        try self.cur_func.emitInstruction(.{
+            .op = .JumpFalse,
+        }, 0);
+        try self.jumps.push(self.cur_func.code.len - 1);
     }
 
-    pub fn jumpNotErr(self: *Builder, reg: RegRef) !usize {
-        std.debug.warn("jumpNotErr #{}\n", .{reg});
-        return error.Unimplemented;
-        // return 1;
+    pub fn jumpTrue(self: *Builder, reg: RegRef) !void {
+        try self.cur_func.emitInstruction(.{
+            .op = .JumpTrue,
+        }, 0);
+        try self.jumps.push(self.cur_func.code.len - 1);
     }
 
-    pub fn finishJump(self: *Builder, jump: usize) void {
-        std.debug.warn("#finishJump #{}\n", .{jump});
+    pub fn jumpNotErr(self: *Builder, reg: RegRef) !void {
+        try self.cur_func.emitInstruction(.{
+            .op = .JumpNotErr,
+        }, 0);
+        try self.jumps.push(self.cur_func.code.len - 1);
+    }
+
+    pub fn finishJumps(self: *Builder, count: u32) void {
+        var i = count;
+        while (i != 0) : (i -= 1) {
+            const index = self.jumps.pop().?;
+            const diff = @truncate(u32, self.cur_func.code.len - index);
+            self.cur_func.code.toSlice()[index] = diff;
+        }
     }
 
     pub fn constant(self: *Builder, tok: *Token) !RegRef {

@@ -111,6 +111,14 @@ pub const Parser = struct {
             try parser.boolExpr(lr_value, skip_nl);
     }
 
+    // TODO const expr folding
+    const ExprRes = union(enum) {
+        None,
+        Rt: RegRef,
+        Int: i64,
+        Num: f64,
+    };
+
     /// fn : "fn" "(" (unwrap ",")* ")" expr
     fn func(parser: *Parser, skip_nl: bool) ParseError!?RegRef {
         const tok = parser.eatToken(.Keyword_fn, skip_nl) orelse return null;
@@ -140,9 +148,12 @@ pub const Parser = struct {
         var lhs = (try parser.comparisionExpr(lr_value, skip_nl)) orelse return null;
 
         // TODO improve
+        var jump_count: u32 = 0;
         if (parser.eatToken(.Keyword_or, skip_nl)) |t| {
             var tok = t;
             while (true) {
+                try parser.builder.jumpFalse(lhs);
+                jump_count += 1;
                 parser.skipNl();
                 const rhs = (try parser.comparisionExpr(.R, skip_nl)).?;
                 lhs = try parser.infix(lhs, tok, rhs);
@@ -150,11 +161,14 @@ pub const Parser = struct {
             }
         } else {
             while (parser.eatToken(.Keyword_and, skip_nl)) |tok| {
+                try parser.builder.jumpFalse(lhs);
+                jump_count += 1;
                 parser.skipNl();
                 const rhs = (try parser.comparisionExpr(.R, skip_nl)).?;
                 lhs = try parser.infix(lhs, tok, rhs);
             }
         }
+        parser.builder.finishJumps(jump_count);
         return lhs;
     }
 
@@ -224,8 +238,8 @@ pub const Parser = struct {
             }
         } else if (parser.eatToken(.Keyword_catch, skip_nl)) |_| {
             // catch
-            const jump = try parser.builder.jumpNotErr(lhs);
-            defer parser.builder.finishJump(jump);
+            try parser.builder.jumpNotErr(lhs);
+            defer parser.builder.finishJumps(1);
             if (parser.eatToken(.Pipe, true)) |_| {
                 @panic("TODO");
                 // const unwrap = try parser.unwrap();
