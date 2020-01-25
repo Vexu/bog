@@ -20,9 +20,16 @@ jump_expr : "return" expr.r | "break" | "continue"
 
 fn : "fn" "(" (unwrap ",")* ")" expr
 
-bool_expr : comparision_expr (("or" comparision_expr.r)* | ("and" comparision_expr.r)*)
+bool_expr
+    : "not" comparision_expr.r
+    | comparision_expr ("or" comparision_expr.r)* 
+    | comparision_expr ("and" comparision_expr.r)*
 
-comparision_expr : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in"  | "is") range_expr.r)
+comparision_expr 
+    : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in") range_expr.r)?
+    | range_expr ("is" type_name)?
+
+type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
 
 range_expr : bit_expr ("..." bit_expr.r)?
 
@@ -34,10 +41,10 @@ add_expr : mul_expr (("-" | "+") mul_expr.r)*
 
 mul_expr : cast_expr (("*" | "/" | "//" | "%") cast_expr.r)*
 
-cast_expr : prefix_expr ("as" IDENTIFIER)
+cast_expr : prefix_expr ("as" type_name)?
 
 prefix_expr
-    : ("try" | "-" | "+" | "not" | "~") power_expr.r
+    : ("try" | "-" | "+" | "~") power_expr.r
     | power_expr
 
 power_expr : primary_expr suffix_expr*  ([.l assign?] | ("**" power_expr.r)?)

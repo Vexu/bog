@@ -6,9 +6,9 @@ const ValueList = std.ArrayList(*Ref);
 pub const TypeId = enum {
     None,
     Int,
-    Float,
+    Num,
     Bool,
-    String,
+    Str,
     Tuple,
     Map,
     List,
@@ -25,12 +25,12 @@ pub const Value = struct {
         List: *ValueList,
         Error: *Ref,
         Int: i64,
-        Float: f64,
+        Num: f64,
         Range: struct {
             begin: *Ref,
             end: *Ref,
         },
-        String: []const u8,
+        Str: []const u8,
         Fn: struct {
             arg_count: u8,
         },
@@ -54,21 +54,20 @@ pub const Value = struct {
 pub const Ref = struct {
     value: ?*Value,
 
-    pub fn dump(ref: Ref, stream: var, level: u32) !void {
+    pub fn dump(ref: Ref, stream: var, level: u32) (@TypeOf(stream.*).Error || error{Unimplemented})!void {
         const value = ref.value.?;
         switch (value.kind) {
             .Int => |val| try stream.print("{}", .{val}),
-            .Float => |val| try stream.print("{}", .{val}),
+            .Num => |val| try stream.print("{}", .{val}),
             .Bool => |val| try stream.write(if (val) "true" else "false"),
             .None => try stream.write("()"),
             .Range => |val| {
                 if (level == 0) {
                     try stream.write("(range)");
                 } else {
-                    return error.Unimplemented;
-                    // try val.begin.dump(stream, level - 1);
-                    // try stream.write("...");
-                    // try val.end.dump(stream, level - 1);
+                    try val.begin.dump(stream, level - 1);
+                    try stream.write("...");
+                    try val.end.dump(stream, level - 1);
                 }
             },
             .Tuple => {
@@ -86,24 +85,23 @@ pub const Ref = struct {
                 }
             },
             .List => {
-                try stream.write("[...]");
                 if (level == 0) {
-                    try stream.write("(range)");
+                    try stream.write("[...]");
                 } else {
                     return error.Unimplemented;
                 }
             },
-            .Error => {
+            .Error => |val| {
                 try stream.write("error(...)");
                 if (level == 0) {
                     try stream.write("(range)");
                 } else {
                     try stream.write("error(");
-                    // try val.end.dump(stream, level - 1);
+                    try val.dump(stream, level - 1);
                     try stream.writeByte(')');
                 }
             },
-            .String => |val| {
+            .Str => |val| {
                 try stream.writeByte('"');
                 for (val) |c| {
                     switch (c) {

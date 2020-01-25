@@ -3,6 +3,7 @@ const mem = std.mem;
 const Allocator = mem.Allocator;
 const tokenizer = @import("tokenizer.zig");
 const Token = tokenizer.Token;
+const TypeId = @import("value.zig").TypeId;
 
 // TODO give these numbers once they are more stable
 pub const Op = enum(u8) {
@@ -405,8 +406,13 @@ pub const Builder = struct {
         return rhs;
     }
 
-    pub fn cast(self: *Builder, lhs: RegRef, tok: *Token) !RegRef {
-        std.debug.warn("#{} as {}\n", .{ lhs, tok.id.Identifier });
+    pub fn isType(self: *Builder, lhs: RegRef, tok: *Token, id: TypeId) !RegRef {
+        std.debug.warn("#{} is {}\n", .{ lhs, id });
+        return error.Unimplemented;
+    }
+
+    pub fn cast(self: *Builder, lhs: RegRef, tok: *Token, id: TypeId) !RegRef {
+        std.debug.warn("#{} as {}\n", .{ lhs, id });
         return error.Unimplemented;
     }
 
@@ -434,7 +440,6 @@ pub const Builder = struct {
                 // .EqualEqual,
                 // .BangEqual,
                 // .Keyword_in,
-                // .Keyword_is,
                 else => unreachable,
             },
             .A = loc,

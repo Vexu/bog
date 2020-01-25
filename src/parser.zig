@@ -8,6 +8,7 @@ const Allocator = mem.Allocator;
 const bytecode = @import("bytecode.zig");
 const Builder = bytecode.Builder;
 const RegRef = bytecode.RegRef;
+const TypeId = @import("value.zig").TypeId;
 
 pub const Error = struct {
     tok: *Token,
@@ -20,6 +21,7 @@ pub const Error = struct {
         PrimaryExpr,
         UndeclaredIdentifier,
         StackOverflow,
+        TypeName,
     };
 
     pub fn render(err: Error, stream: var) !void {
@@ -29,7 +31,8 @@ pub const Error = struct {
             .UnexpectedToken => try stream.print("unexpected token '{}'", .{err.tok.string()}),
             .PrimaryExpr => try stream.print("expected Identifier, String, Number, true, false, '(', '{{', '[', error, import, if, while, for, match. found '{}'", .{err.tok.string()}),
             .UndeclaredIdentifier => try stream.print("use of undeclared identifier '{}'", .{err.tok.id.Identifier}),
-            .StackOverflow => try stream.write("operation caused stack of 250 to run out, try assigning to an intermediate value"),
+            .StackOverflow => try stream.write("operation caused stack of 250 to run out"),
+            .TypeName => try stream.write("expected type name"),
         }
     }
 };
@@ -143,8 +146,19 @@ pub const Parser = struct {
         // return true;
     }
 
-    /// bool_expr : comparision_expr (("or" comparision_expr.r)* | ("and" comparision_expr.r)*)
+    /// bool_expr
+    ///     : "not" comparision_expr.r
+    ///     | comparision_expr ("or" comparision_expr.r)*
+    ///     | comparision_expr ("and" comparision_expr.r)*
     fn boolExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!?RegRef {
+        if (parser.eatToken(.Keyword_not, skip_nl)) |tok| {
+            parser.skipNl();
+            const rhs = (try parser.comparisionExpr(.R, skip_nl)).?;
+            return parser.builder.prefix(tok, rhs) catch |e| switch (e) {
+                error.StackOverflow => return parser.reportErr(.StackOverflow, tok),
+                else => |err| return err,
+            };
+        }
         var lhs = (try parser.comparisionExpr(lr_value, skip_nl)) orelse return null;
 
         // TODO improve
@@ -172,7 +186,9 @@ pub const Parser = struct {
         return lhs;
     }
 
-    /// comparision_expr : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in"  | "is") range_expr.r)
+    /// comparision_expr
+    ///     : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in") range_expr.r)?
+    ///     | range_expr ("is" type_name)?
     fn comparisionExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!?RegRef {
         var lhs = (try parser.rangeExpr(lr_value, skip_nl)) orelse return null;
 
@@ -182,14 +198,47 @@ pub const Parser = struct {
             parser.eatToken(.RArrEqual, skip_nl) orelse
             parser.eatToken(.EqualEqual, skip_nl) orelse
             parser.eatToken(.BangEqual, skip_nl) orelse
-            parser.eatToken(.Keyword_in, skip_nl) orelse
-            parser.eatToken(.Keyword_is, skip_nl)) |tok|
+            parser.eatToken(.Keyword_in, skip_nl)) |tok|
         {
             parser.skipNl();
             const rhs = (try parser.rangeExpr(.R, skip_nl)).?;
             lhs = try parser.infix(lhs, tok, rhs);
+        } else if (parser.eatToken(.Keyword_is, skip_nl)) |tok| {
+            const id = try parser.typeName();
+            lhs = try parser.builder.isType(lhs, tok, id);
         }
         return lhs;
+    }
+
+    /// type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
+    fn typeName(parser: *Parser) ParseError!TypeId {
+        return if (parser.eatToken(.Keyword_error, true)) |_|
+            .Error
+        else if (parser.eatToken(.Keyword_fn, true)) |_|
+            .Fn
+        else if (parser.eatToken(.Identifier, true)) |tok|
+            if (mem.eql(u8, tok.id.Identifier, "none"))
+                .None
+            else if (mem.eql(u8, tok.id.Identifier, "int"))
+                .Int
+            else if (mem.eql(u8, tok.id.Identifier, "num"))
+                .Num
+            else if (mem.eql(u8, tok.id.Identifier, "bool"))
+                .Bool
+            else if (mem.eql(u8, tok.id.Identifier, "str"))
+                .Str
+            else if (mem.eql(u8, tok.id.Identifier, "tuple"))
+                .Tuple
+            else if (mem.eql(u8, tok.id.Identifier, "map"))
+                .Map
+            else if (mem.eql(u8, tok.id.Identifier, "list"))
+                .List
+            else if (mem.eql(u8, tok.id.Identifier, "range"))
+                TypeId.Range
+            else
+                return parser.reportErr(.TypeName, tok)
+        else
+            return parser.reportErr(.TypeName, parser.token_it.peek().?);
     }
 
     /// range_expr : bit_expr ("..." bit_expr.r)?
@@ -299,27 +348,26 @@ pub const Parser = struct {
         return lhs;
     }
 
-    /// cast_expr : prefix_expr ("as" IDENTIFIER)
+    /// cast_expr : prefix_expr ("as" type_name)?
     fn castExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!?RegRef {
         var lhs = (try parser.prefixExpr(lr_value, skip_nl)) orelse return null;
 
-        if (parser.eatToken(.Keyword_as, skip_nl)) |_| {
-            const tok = try parser.expectToken(.Identifier, skip_nl);
-            lhs = try parser.builder.cast(lhs, tok);
+        if (parser.eatToken(.Keyword_as, skip_nl)) |tok| {
+            const id = try parser.typeName();
+            lhs = try parser.builder.cast(lhs, tok, id);
         }
 
         return lhs;
     }
 
     /// prefix_expr
-    ///     : ("try" | "-" | "+" | "not" | "~") power_expr.r
+    ///     : ("try" | "-" | "+" | "~") power_expr.r
     ///     | power_expr
     fn prefixExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!?RegRef {
         if (parser.eatToken(.Keyword_try, skip_nl) orelse
             parser.eatToken(.Minus, skip_nl) orelse
             parser.eatToken(.Plus, skip_nl) orelse
-            parser.eatToken(.Tilde, skip_nl) orelse
-            parser.eatToken(.Keyword_not, skip_nl)) |tok|
+            parser.eatToken(.Tilde, skip_nl)) |tok|
         {
             parser.skipNl();
             const rhs = (try parser.powerExpr(.R, skip_nl)).?;
