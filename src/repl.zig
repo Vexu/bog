@@ -16,7 +16,7 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     defer tokenizer.deinit();
     var parser = Parser.init(allocator, &builder);
     defer parser.deinit();
-    var vm = Vm.init(allocator);
+    var vm = Vm.init(allocator, true);
     defer vm.deinit();
 
     // TODO move this
@@ -62,6 +62,10 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
         };
 
         try vm.exec(builder.cur_func.code.toSliceConst());
+        if (vm.result) |some| {
+            try some.dump(out_stream, 2);
+            try out_stream.writeByte('\n');
+        }
         // var token_it = tokenizer.tokens.iterator(begin_index);
         // while (token_it.next()) |tok| {
         //     try out_stream.print("{}\n", .{tok});

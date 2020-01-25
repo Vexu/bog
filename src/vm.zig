@@ -12,6 +12,8 @@ pub const Vm = struct {
     ip: usize,
     call_stack: CallStack,
     stack: Stack,
+    repl: bool,
+    result: ?*Value = null, // TODO
 
     const Stack = std.ArrayList(Value); // TODO *Ref once gc is made
     const CallStack = std.SegmentedList(FunctionFrame, 16);
@@ -25,13 +27,17 @@ pub const Vm = struct {
     pub const ExecError = error{
         MalformedByteCode,
         OtherError, // TODO
+
+        // TODO remove possibility
+        Unimplemented,
     } || Allocator.Error;
 
-    pub fn init(allocator: *Allocator) Vm {
+    pub fn init(allocator: *Allocator, repl: bool) Vm {
         return Vm{
             .ip = 0,
             .stack = Stack.init(allocator),
             .call_stack = CallStack.init(allocator),
+            .repl = repl,
         };
     }
 
@@ -42,6 +48,7 @@ pub const Vm = struct {
 
     // TODO some safety
     pub fn exec(vm: *Vm, code: []const u32) ExecError!void {
+        vm.result = null;
         const frame = vm.call_stack.uncheckedAt(0);
         while (vm.ip < code.len) : (vm.ip += 1) {
             const inst = @bitCast(Instruction, code[vm.ip]);
@@ -73,8 +80,16 @@ pub const Vm = struct {
                     };
                 },
                 .Discard => {
-                    const val = frame.stack[inst.A];
-                    std.debug.warn("discarded value: {}\n", .{val});
+                    if (vm.repl and vm.call_stack.len == 1) {
+                        vm.result = &frame.stack[inst.A];
+                    } else {
+                        const val = frame.stack[inst.A];
+                        if (val.kind == .Error) {
+                            // TODO error discarded
+                        }
+                        // val.deref();
+                        return error.Unimplemented;
+                    }
                 },
                 else => {
                     std.debug.warn("Unimplemented: {}\n", .{inst.op});
