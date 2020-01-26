@@ -48,7 +48,7 @@ pub fn parse(arena: *heap.ArenaAllocator, it: *TokenList.Iterator, errors: *Erro
     };
     var list = NodeList.init(parser.arena);
     while (true) {
-        try list.push((try next) orelse break);
+        try list.push((try parser.next()) orelse break);
     }
     return list;
 }
@@ -802,25 +802,59 @@ pub const Parser = struct {
     /// if : "if" "(" bool_expr.r ")" expr ("else" expr)?
     fn ifExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!*Node {
         const tok = parser.eatToken(.Keyword_if, skip_nl) orelse return null;
-        return error.Unimplemented;
+        _ = try parser.expectToken(.LParen, true);
+        const node = try parser.arena.create(Node.If);
+        node.* = .{
+            .if_tok = tok,
+            .cond = try parser.boolExpr(.R, true),
+            .r_paren = try parser.expectToken(.RParen, true),
+            .if_body = try parser.expr(lr_value, skip_nl),
+            .else_tok = try parser.eatToken(.Keyword_else, skip_nl),
+            .else_body = null,
+        };
+        if (node.else_tok) {
+            node.else_body = try parser.expr(lr_value, skip_nl);
+        }
+        return &node.base;
     }
 
     /// while : "while" "(" bool_expr.r ")" expr
     fn whileExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!*Node {
         const tok = parser.eatToken(.Keyword_while, skip_nl) orelse return null;
-        return error.Unimplemented;
+        _ = try parser.expectToken(.LParen, true);
+        const node = try parser.arena.create(Node.While);
+        node.* = .{
+            .while_tok = tok,
+            .cond = try parser.boolExpr(.R, true),
+            .r_paren = try parser.expectToken(.RParen, true),
+            .body = try parser.expr(lr_value, skip_nl),
+        };
+        return &node.base;
     }
 
     /// for : "for" "(" ("let" unwrap "in") range_expr.r ")" expr
     fn forExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!*Node {
         const tok = parser.eatToken(.Keyword_for, skip_nl) orelse return null;
-        return error.Unimplemented;
+        _ = try parser.expectToken(.LParen, true);
+        const unwrap = if (parser.eatToken(.Keyword_let, true)) |_| 
+            try parser.unwrap()
+        else null;
+        const node = try parser.arena.create(Node.For);
+        node.* = .{
+            .for_tok = tok,
+            .unwrap = unwrap,
+            .in_tok = if (unwrap != null) try parser.expectToken(.Keyword_in, true) else null,
+            .cond = try parser.rangeExpr(.R, true),
+            .r_paren = try parser.expectToken(.RParen, true),
+            .body = try parser.expr(lr_value, skip_nl),
+        };
+        return &node.base;
     }
 
     /// match : "match" "(" bool_expr.r ")" "{" (NL match_case ",")+ "}"
     fn matchExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!*Node {
         const tok = parser.eatToken(.Keyword_match, skip_nl) orelse return null;
-        return error.Unimplemented;
+        return error.Unimplemented; // TODO
     }
 
     fn reportErr(parser: *Parser, kind: Error.Kind, tok: *Token) ParseError {
