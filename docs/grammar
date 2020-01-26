@@ -9,7 +9,7 @@ unwrap
     | "{" ((expr.r ":")? (unwrap | "_") ",")* "}"
     | "(" ("..." ",")? ((unwrap | "_") ",")* ("," "...")? ")"
     | "[" ("..." ",")? ((unwrap | "_") ",")* ("," "...")? "]"
-    | "error" "(" unwrap ")"
+    | "error" "(" (unwrap | "_") ")"
 
 expr
     : fn 
@@ -87,4 +87,5 @@ match : "match" "(" bool_expr.r ")" "{" (NL match_case ",")+ "}"
 
 match_case
     : "let" unwrap ":" expr
-    | (bool_expr.r ",")+ ":" expr
+    | "_" ":" expr
+    | (expr.r ",")+ ":" expr

@@ -29,6 +29,7 @@ pub const Node = struct {
         For,
         While,
         Match,
+        MatchCatchAll,
         MatchLet,
         MatchCase,
         Jump,
@@ -255,21 +256,25 @@ pub const Node = struct {
         body: NodeList,
         match_tok: TokenIndex,
         r_paren: TokenIndex,
-        body_r_paren: TokenIndex,
+        body_r_brace: TokenIndex,
+    };
+
+    pub const MatchCatchAll = struct {
+        base: Node = Node{ .id = .MatchCatchAll },
+        tok: TokenIndex,
+        expr: *Node,
     };
 
     pub const MatchLet = struct {
         base: Node = Node{ .id = .MatchLet },
-        tok: TokenIndex,
-        lhs: *Node,
-        rhs: *Node,
-        colon: TokenIndex,
+        unwrap: *Node.Unwrap,
+        expr: *Node,
     };
 
     pub const MatchCase = struct {
         base: Node = Node{ .id = .MatchCase },
         lhs: NodeList,
-        rhs: *Node,
+        expr: *Node,
         colon: TokenIndex,
     };
 

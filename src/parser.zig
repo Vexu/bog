@@ -101,7 +101,7 @@ pub const Parser = struct {
     ///     | "{" ((expr.r ":")? (unwrap | "_") ",")* "}"
     ///     | "(" ("..." ",")? ((unwrap | "_") ",")* ("," "...")? ")"
     ///     | "[" ("..." ",")? ((unwrap | "_") ",")* ("," "...")? "]"
-    ///     | "error" "(" unwrap ")"
+    ///     | "error" "(" (unwrap | "_") ")"
     fn unwrap(parser: *Parser) ParseError!*Node {
         if (parser.eatToken(.Identifier, true)) |tok| {
             const node = try parser.arena.create(Node.SingleToken);
@@ -120,14 +120,10 @@ pub const Parser = struct {
             node.l_tok = try parser.expectToken(.RBrace, true);
         } else if (parser.eatToken(.LParen)) |tok| {
             node.r_tok = tok;
-            return error.ParseError; // TODO
-
-            node.l_tok = try parser.expectToken(.RParen, true);
+            try parser.unwrapList(node, .RParen);
         } else if (parser.eatToken(.LBracket)) |tok| {
             node.r_tok = tok;
-            return error.ParseError; // TODO
-
-            node.l_tok = try parser.expectToken(.RBracket, true);
+            try parser.unwrapList(node, .RBracket);
         } else if (parser.eatToken(.Keyword_error)) |tok| {
             node.r_tok = tok;
             _ = try parser.expectToken(.LParen, true);
@@ -137,7 +133,7 @@ pub const Parser = struct {
         return &node.base;
     }
 
-    fn unwrapDiscard(parser: *Parser) ParseError!?*Node {
+    fn discard(parser: *Parser) ParseError!?*Node {
         const tok = parser.eatToken(.Underscore, true) orelse return null;
         const node = try parser.arena.create(Node.SingleToken);
         node.* = .{
@@ -145,6 +141,11 @@ pub const Parser = struct {
             .tok = tok,
         };
         return &node.base;
+    }
+
+    /// ("..." ",")? ((unwrap | "_") ",")* ("," "...")?
+    fn unwrapList(parser: *Parser, node: *Node.Unwrap, l_tok_id: Token.Id) ParseError!void {
+        return error.ParseError; // TODO
     }
 
     /// expr
@@ -728,12 +729,36 @@ pub const Parser = struct {
                 return &node.base;
             } else {
                 const first = try parser.expr(.R, true);
-                return error.ParseError; // TODO
-                // if (parser.eatToken(.Comma, true)) {
-
-                // } else {
-
-                // }
+                if (parser.eatToken(.RParen, true)) |r_tok| {
+                    const node = try parser.arena.create(Node.Grouped);
+                    node.* = .{
+                        .l_tok = tok,
+                        .expr = first,
+                        .r_tok = r_tok,
+                    };
+                    return &node.base;
+                }
+                const node = try parser.arena.create(Node.ListTupleMapBlock);
+                node.* = .{
+                    .l_tok = tok,
+                    .values = NodeList.init(parser.arena),
+                    .r_tok = undefined,
+                };
+                var last = first;
+                while (true) {
+                    const comma = try parer.expectToken(.Comma, true);
+                    const item = try parser.arena.create(Node.ListTupleCallItem);
+                    item.* = .{
+                        .value = last,
+                        .comma = comma,
+                    };
+                    try node.values.push(&item.base);
+                    if (parser.eatToken(.RParen)) |r_tok| {
+                        node.r_tok = r_tok;
+                        return &node.base;
+                    }
+                    last = try parser.expr(.R, true);
+                }
             }
         }
         if (parser.eatToken(.LBrace, skip_nl)) |tok| {
@@ -741,12 +766,44 @@ pub const Parser = struct {
                 // block
                 return try parser.block(lr_value, tok);
             } else {
-                //     | "{" ((IDENTIFIER | STRING) ":" expr.r ",")* "}"
-                return error.ParseError; // TODO
+                // map
+                const node = try parser.arena.create(Node.ListTupleMapBlock);
+                node.* = .{
+                    .l_tok = tok,
+                    .values = NodeList.init(parser.arena),
+                    .r_tok = undefined,
+                };
+                var last = first;
+                var end = false;
+                while (true) {
+                    if (parser.eatToken(.RBrace, true)) |tok| {
+                        parser.r_tok = tok;
+                    } else if (end) {
+                        parser.r_tok = try parser.expectToken(.RBrace, true);
+                        break;
+                    }
+                    var key: ?*Node = null;
+                    var value = try parser.expr(.R, true);
+                    var colon: ?TokenIndex = null;
+                    if (parser.eatToken(.Colon, true)) |col| {
+                        colon = col;
+                        key = value;
+                        value = try parser.expr(.R, true);
+                    }
+                    const item = try parser.arena.create(Node.MapItem);
+                    item.* = .{
+                        .key = key,
+                        .colon = colon,
+                        .value = value,
+                        .comma = try parer.expectToken(.Comma, true),
+                    };
+                    try node.values.push(&item.base);
+                    if (item.comma == null) end = true;
+                }
             }
         }
         if (parser.eatToken(.LBracket, skip_nl)) |tok| {
-            //     | "[" (expr.r ",")* "]"
+            // list
             parser.skipNl();
             const node = try parser.arena.create(Node.ListTupleMapBlock);
             node.* = .{
@@ -768,8 +825,8 @@ pub const Parser = struct {
                     .value = try parser.expr(.R, true),
                     .comma = parser.eatToken(.Comma),
                 };
-                try node.values.push(&param.base);
-                if (param.comma == null) end = true;
+                try node.values.push(&val.base);
+                if (val.comma == null) end = true;
             }
             return &node.base;
         }
@@ -836,9 +893,10 @@ pub const Parser = struct {
     fn forExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!*Node {
         const tok = parser.eatToken(.Keyword_for, skip_nl) orelse return null;
         _ = try parser.expectToken(.LParen, true);
-        const unwrap = if (parser.eatToken(.Keyword_let, true)) |_| 
+        const unwrap = if (parser.eatToken(.Keyword_let, true)) |_|
             try parser.unwrap()
-        else null;
+        else
+            null;
         const node = try parser.arena.create(Node.For);
         node.* = .{
             .for_tok = tok,
@@ -854,7 +912,78 @@ pub const Parser = struct {
     /// match : "match" "(" bool_expr.r ")" "{" (NL match_case ",")+ "}"
     fn matchExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!*Node {
         const tok = parser.eatToken(.Keyword_match, skip_nl) orelse return null;
-        return error.Unimplemented; // TODO
+        _ = try parser.expectToken(.LParen, true);
+        const node = try parser.arena.create(Node.Match);
+        node.* = .{
+            .match_tok = tok,
+            .expr = try parser.boolExpr(.R, true),
+            .r_paren = try parser.expectToken(.RParen, true),
+            .body = NodeList.init(parser.arena),
+            .body_r_brace = undefined,
+        };
+        _ = try parser.expectToken(.LBrace, true);
+        _ = try parser.expectToken(.Nl, false);
+        while (true) {
+            try node.body.push(try parser.matchCase(lr_value));
+            _ = try parser.expectToken(.Nl, false);
+            if (parser.eatToken(.RBrace, true)) |r_tok| {
+                node.body_r_brace = r_Tok;
+                break;
+            }
+        }
+        return &node.base;
+    }
+
+    /// match_case
+    ///     : "let" unwrap ":" expr
+    ///     | "_" ":" expr
+    ///     | (expr.r ",")+ ":" expr
+    fn matchCase(parser: *Parser, lr_value: LRValue) ParseError!*Node {
+        if (parser.eatToken(.Underscore, false)) |tok| {
+            return parser.finishCatchAll(lr_value, tok);
+        } else if (parser.eatToken(.Keyword_let, false)) |_| {
+            if (parser.eatToken(.Identifier, true)) |tok| {
+                return parser.finishCatchAll(lr_value, tok);
+            }
+            const unwrap = try parser.unwrap();
+            std.debug.assert(unwrap.id == .Unwrap);
+            _ = try parser.expectToken(.Colon, true);
+            const node = try parser.arena.create(Node.MatchLet);
+            node.* = .{
+                .unwrap = @fieldParentPtr(Node.Unwrap, "base", unwrap),
+                .expr = try parser.expr(lr_value, false),
+            };
+            return &node.base;
+        } else {
+            const node = try parser.arena.create(Node.MatchCase);
+            node.* = .{
+                .lhs = NodeList.init(parser.arena),
+                .colon = undefined,
+                .expr = undefined,
+            };
+            while (true) {
+                const val = try parser.arena.create(Node.ListTupleCallItem);
+                val.* = .{
+                    .value = try parser.expr(.R, true),
+                    .comma = parser.eatToken(.Comma),
+                };
+                try node.lhs.push(&val.base);
+                if (val.comma == null) break;
+            }
+            node.colon = try parser.expectToken(.Colon, true);
+            node.expr = try parser.expr(lr_value, false);
+            return &node.base;
+        }
+    }
+
+    fn finishCatchAll(parser: *Parser, lr_value: LRValue, tok: TokenIndex) ParseError!*Node {
+        _ = try parser.expectToken(.Colon, true);
+        const node = try parser.arena.create(Node.MatchCatchAll);
+        node.* = .{
+            .tok = tok,
+            .expr = try parser.expr(lr_value, false),
+        };
+        return &node.base;
     }
 
     fn reportErr(parser: *Parser, kind: Error.Kind, tok: *Token) ParseError {
@@ -877,6 +1006,8 @@ pub const Parser = struct {
     fn eatTokenId(parser: *Parser, id: Token.Id, skip_nl: bool) ?*TokAndId {
         var next = parser.it.next().?;
         if (skip_nl and next.id == .Nl)
+            next = parser.it.next().?;
+        while (next.id == .Comment)
             next = parser.it.next().?;
         if (next.id == id) {
             return TokAndId{
