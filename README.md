@@ -13,24 +13,24 @@ let x = 0
 x + (true as int)
 assert(x == 1)
 
-let foo = fn(arg) (
-    if (arg == 4) (
+let foo = fn(arg) {
+    if (arg == 4) {
         return error(4)
-    )
-    arg += if (arg == 2) (
+    }
+    arg += if (arg == 2) {
         1
-    ) else 2
-)
+    } else 2
+}
 
 let y = foo(x)
 
 assert(x == 2 and y == x)
 
 # copy on assign
-let baz(x) (
+let baz(x) {
     let z = x
     z += 2
-)
+}
 
 assert(baz(x) == 4 and x == 2)
 

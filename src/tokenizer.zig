@@ -85,17 +85,19 @@ fn parseInt(buf: []const u8, radix: u8) Token.Id {
     return .{ .Integer = x };
 }
 
+pub const TokenIndex = u32;
+
 pub const Token = struct {
-    start: usize,
+    start: u32,
+    end: u32,
     id: Id,
 
-    pub const Id = union(enum) {
-        Invalid: []const u8,
+    pub const Id = enum {
         Eof,
-        Identifier: []const u8,
-        String: []const u8,
-        Integer: u64,
-        Number: []const u8,
+        Identifier,
+        String,
+        Integer,
+        Number,
         Nl,
         Pipe,
         PipeEqual,
@@ -139,6 +141,7 @@ pub const Token = struct {
         RArrArrEqual,
         Tilde,
         Colon,
+        Underscore,
 
         /// keywords
         Keyword_not,
@@ -193,6 +196,7 @@ pub const Token = struct {
         .{ .bytes = "in", .id = .Keyword_in },
         .{ .bytes = "fn", .id = .Keyword_fn },
         .{ .bytes = "as", .id = .Keyword_as },
+        .{ .bytes = "_", .id = .Underscore },
     };
 
     pub fn getKeyword(bytes: []const u8) ?Token.Id {
@@ -204,9 +208,9 @@ pub const Token = struct {
         return null;
     }
 
-    pub fn string(token: Token) []const u8 {
-        return switch (token.id) {
-            .Identifier, .Invalid => |val| val,
+    pub fn string(id: Id) []const u8 {
+        return switch (id) {
+            .Identifier => "Identifier",
             .Eof => "<EOF>",
             .String => "String",
             .Integer => "Integer",
@@ -254,6 +258,7 @@ pub const Token = struct {
             .RArrArrEqual => ">>=",
             .Tilde => "~",
             .Colon => ":",
+            .Underscore => "_",
 
             .Keyword_not => "not",
             .Keyword_and => "and",
@@ -282,16 +287,25 @@ pub const Token = struct {
 };
 
 pub const TokenList = std.SegmentedList(Token, 64);
+pub const ErrorList = std.SegmentedList(Error, 0);
+
+const Error = struct {
+    msg: []const u8,
+    index: u32,
+};
 
 pub const Tokenizer = struct {
     it: unicode.Utf8Iterator,
     tokens: TokenList,
+    errors: ErrorList,
     start_index: usize = 0,
     level: u32 = 0,
     string: bool = false,
     prev_nl: bool = true,
     no_eof: bool = false,
     repl: bool,
+
+    pub const TokenizeError = error{TokenizeError} || Allocator.Error;
 
     pub fn init(allocator: *Allocator, repl: bool) Tokenizer {
         return .{
@@ -308,7 +322,7 @@ pub const Tokenizer = struct {
         self.tokens.deinit();
     }
 
-    pub fn tokenize(self: *Tokenizer, input: []const u8) !bool {
+    pub fn tokenize(self: *Tokenizer, input: []const u8) TokenizeError!bool {
         self.it.bytes = input;
         _ = self.tokens.pop();
         while (true) {
@@ -323,7 +337,15 @@ pub const Tokenizer = struct {
         }
     }
 
-    fn next(self: *Tokenizer) Token {
+    fn err(self: *Tokenizer, msg: []const u8) TokenizeError {
+        try self.errors.push(.{
+            .msg = msg,
+            .index = @truncate(u32, self.it.i),
+        });
+        return error.TokenizeError;
+    }
+
+    fn next(self: *Tokenizer) !Token {
         self.start_index = self.it.i;
         var state: enum {
             Start,
@@ -365,10 +387,7 @@ pub const Tokenizer = struct {
             FloatExponent,
             FloatExponentDigits,
         } = .Start;
-        var res = Token{
-            .id = .Eof,
-            .start = self.start_index,
-        };
+        var res = Token.Id.Eof;
         var str_delimit: u32 = undefined;
         var counter: u32 = 0;
 
@@ -382,7 +401,7 @@ pub const Tokenizer = struct {
                         if (self.prev_nl) {
                             self.start_index = self.it.i;
                         } else {
-                            res.id = .Nl;
+                            res = .Nl;
                             break;
                         }
                     },
@@ -405,34 +424,32 @@ pub const Tokenizer = struct {
                     },
                     '(' => {
                         self.level += 1;
-                        res.id = .LParen;
+                        res = .LParen;
                         break;
                     },
                     ')' => {
                         if (self.level == 0) {
-                            res.id = .{ .Invalid = "unmatched ')'" };
-                            break;
+                            return self.err("unmatched ')'");
                         }
                         self.level -= 1;
-                        res.id = .RParen;
+                        res = .RParen;
                         break;
                     },
                     '[' => {
                         self.level += 1;
-                        res.id = .LBracket;
+                        res = .LBracket;
                         break;
                     },
                     ']' => {
                         if (self.level == 0) {
-                            res.id = .{ .Invalid = "unmatched ']'" };
-                            break;
+                            return self.err("unmatched ']'");
                         }
                         self.level -= 1;
-                        res.id = .RBracket;
+                        res = .RBracket;
                         break;
                     },
                     ',' => {
-                        res.id = .Comma;
+                        res = .Comma;
                         break;
                     },
                     '%' => {
@@ -455,24 +472,23 @@ pub const Tokenizer = struct {
                     },
                     '{' => {
                         self.level += 1;
-                        res.id = .LBrace;
+                        res = .LBrace;
                         break;
                     },
                     '}' => {
                         if (self.level == 0) {
-                            res.id = .{ .Invalid = "unmatched '}'" };
-                            break;
+                            return self.err("unmatched '}'");
                         }
                         self.level -= 1;
-                        res.id = .RBrace;
+                        res = .RBrace;
                         break;
                     },
                     '~' => {
-                        res.id = .Tilde;
+                        res = .Tilde;
                         break;
                     },
                     ':' => {
-                        res.id = .Colon;
+                        res = .Colon;
                         break;
                     },
                     '.' => {
@@ -502,8 +518,7 @@ pub const Tokenizer = struct {
                         } else if (isIdentifier(c)) {
                             state = .Identifier;
                         } else {
-                            res.id = .{ .Invalid = "invalid character" };
-                            break;
+                            return self.err("invalid character");
                         }
                     },
                 },
@@ -512,13 +527,12 @@ pub const Tokenizer = struct {
                         if (self.prev_nl) {
                             self.start_index = self.it.i;
                         } else {
-                            res.id = .Nl;
+                            res = .Nl;
                             break;
                         }
                     },
                     else => {
-                        res.id = .{ .Invalid = "invalid character" };
-                        break;
+                        return self.err("invalid character");
                     },
                 },
                 .BackSlash => switch (c) {
@@ -530,8 +544,7 @@ pub const Tokenizer = struct {
                         state = .BackSlashCr;
                     },
                     else => {
-                        res.id = .{ .Invalid = "invalid character" };
-                        break;
+                        return self.err("invalid character");
                     },
                 },
                 .BackSlashCr => switch (c) {
@@ -540,8 +553,7 @@ pub const Tokenizer = struct {
                         state = .Start;
                     },
                     else => {
-                        res.id = .{ .Invalid = "invalid character" };
-                        break;
+                        return self.err("invalid character");
                     },
                 },
                 .String => switch (c) {
@@ -550,14 +562,13 @@ pub const Tokenizer = struct {
                     },
                     '\n', '\r' => {
                         if (str_delimit == '\'') {
-                            res.id = .{ .Invalid = "invalid newline, use'\"' for multiline strings" };
-                            break;
+                            return self.err("invalid newline, use'\"' for multiline strings");
                         }
                     },
                     else => {
                         if (c == str_delimit) {
                             self.string = false;
-                            res.id = .{ .String = self.it.bytes[self.start_index..self.it.i] };
+                            res = .String;
                             break;
                         }
                     },
@@ -574,8 +585,7 @@ pub const Tokenizer = struct {
                         state = .UnicodeStart;
                     },
                     else => {
-                        res.id = .{ .Invalid = "invalid escape sequence" };
-                        break;
+                        return self.err("invalid escape sequence");
                     },
                 },
                 .HexEscape => switch (c) {
@@ -593,8 +603,7 @@ pub const Tokenizer = struct {
                     counter = 0;
                     state = .UnicodeEscape;
                 } else {
-                    res.id = .{ .Invalid = "invalid escape sequence" };
-                    break;
+                    return self.err("invalid escape sequence");
                 },
                 .UnicodeEscape => switch (c) {
                     '0'...'9', 'a'...'f', 'A'...'F' => {
@@ -607,70 +616,67 @@ pub const Tokenizer = struct {
                         state = .String;
                     },
                     else => {
-                        res.id = .{ .Invalid = "invalid escape sequence" };
-                        break;
+                        return self.err("invalid escape sequence");
                     },
                 },
                 .UnicodeEnd => if (c == '}') {
                     state = .String;
                 } else {
-                    res.id = .{ .Invalid = "invalid escape sequence" };
-                    break;
+                    return self.err("invalid escape sequence");
                 },
                 .Identifier => {
                     if (!isIdentifier(c)) {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         const slice = self.it.bytes[self.start_index..self.it.i];
-                        res.id = Token.getKeyword(slice) orelse .{ .Identifier = slice };
+                        res = Token.getKeyword(slice) orelse .Identifier;
                         break;
                     }
                 },
                 .Equal => switch (c) {
                     '=' => {
-                        res.id = .EqualEqual;
+                        res = .EqualEqual;
                         break;
                     },
                     else => {
                         self.it.i = self.start_index + 1;
-                        res.id = .Equal;
+                        res = .Equal;
                         break;
                     },
                 },
                 .Bang => switch (c) {
                     '=' => {
-                        res.id = .BangEqual;
+                        res = .BangEqual;
                         break;
                     },
                     else => {
-                        res.id = .{ .Invalid = "invalid character, use 'not' for boolean not" };
-                        break;
+                        return self.err("invalid character, use 'not' for boolean not");
                     },
                 },
                 .Pipe => switch (c) {
                     '=' => {
-                        res.id = .PipeEqual;
+                        res = .PipeEqual;
                         break;
                     },
                     else => {
                         self.it.i = self.start_index + 1;
-                        res.id = .Pipe;
+                        res = .Pipe;
                         break;
                     },
                 },
                 .Percent => switch (c) {
                     '=' => {
-                        res.id = .PercentEqual;
+                        res = .PercentEqual;
                         break;
                     },
                     else => {
                         self.it.i = self.start_index + 1;
-                        res.id = .Percent;
+                        res = .Percent;
                         break;
                     },
                 },
                 .Asterisk => switch (c) {
                     '=' => {
-                        res.id = .AsteriskEqual;
+                        res = .AsteriskEqual;
                         break;
                     },
                     '*' => {
@@ -678,29 +684,29 @@ pub const Tokenizer = struct {
                     },
                     else => {
                         self.it.i = self.start_index + 1;
-                        res.id = .Asterisk;
+                        res = .Asterisk;
                         break;
                     },
                 },
                 .AsteriskAsterisk => switch (c) {
                     '=' => {
-                        res.id = .AsteriskAsteriskEqual;
+                        res = .AsteriskAsteriskEqual;
                         break;
                     },
                     else => {
                         self.it.i = self.start_index + 2;
-                        res.id = .AsteriskAsterisk;
+                        res = .AsteriskAsterisk;
                         break;
                     },
                 },
                 .Plus => switch (c) {
                     '=' => {
-                        res.id = .PlusEqual;
+                        res = .PlusEqual;
                         break;
                     },
                     else => {
                         self.it.i = self.start_index + 1;
-                        res.id = .Plus;
+                        res = .Plus;
                         break;
                     },
                 },
@@ -709,23 +715,23 @@ pub const Tokenizer = struct {
                         state = .LArrArr;
                     },
                     '=' => {
-                        res.id = .LArrEqual;
+                        res = .LArrEqual;
                         break;
                     },
                     else => {
                         self.it.i = self.start_index + 1;
-                        res.id = .LArr;
+                        res = .LArr;
                         break;
                     },
                 },
                 .LArrArr => switch (c) {
                     '=' => {
-                        res.id = .LArrArrEqual;
+                        res = .LArrArrEqual;
                         break;
                     },
                     else => {
                         self.it.i = self.start_index + 2;
-                        res.id = .LArrArr;
+                        res = .LArrArr;
                         break;
                     },
                 },
@@ -734,34 +740,34 @@ pub const Tokenizer = struct {
                         state = .RArrArr;
                     },
                     '=' => {
-                        res.id = .RArrEqual;
+                        res = .RArrEqual;
                         break;
                     },
                     else => {
                         self.it.i = self.start_index + 1;
-                        res.id = .RArr;
+                        res = .RArr;
                         break;
                     },
                 },
                 .RArrArr => switch (c) {
                     '=' => {
-                        res.id = .RArrArrEqual;
+                        res = .RArrArrEqual;
                         break;
                     },
                     else => {
                         self.it.i = self.start_index + 2;
-                        res.id = .RArrArr;
+                        res = .RArrArr;
                         break;
                     },
                 },
                 .Caret => switch (c) {
                     '=' => {
-                        res.id = .CaretEqual;
+                        res = .CaretEqual;
                         break;
                     },
                     else => {
                         self.it.i = self.start_index + 1;
-                        res.id = .Caret;
+                        res = .Caret;
                         break;
                     },
                 },
@@ -771,28 +777,27 @@ pub const Tokenizer = struct {
                     },
                     else => {
                         self.it.i = self.start_index + 1;
-                        res.id = .Period;
+                        res = .Period;
                         break;
                     },
                 },
                 .Period2 => switch (c) {
                     '.' => {
-                        res.id = .Ellipsis;
+                        res = .Ellipsis;
                         break;
                     },
                     else => {
-                        res.id = .{ .Invalid = "invalid character" };
-                        break;
+                        return self.err("invalid character");
                     },
                 },
                 .Minus => switch (c) {
                     '=' => {
-                        res.id = .MinusEqual;
+                        res = .MinusEqual;
                         break;
                     },
                     else => {
                         self.it.i = self.start_index + 1;
-                        res.id = .Minus;
+                        res = .Minus;
                         break;
                     },
                 },
@@ -801,34 +806,34 @@ pub const Tokenizer = struct {
                         state = .SlashSlash;
                     },
                     '=' => {
-                        res.id = .SlashEqual;
+                        res = .SlashEqual;
                         break;
                     },
                     else => {
                         self.it.i = self.start_index + 1;
-                        res.id = .Slash;
+                        res = .Slash;
                         break;
                     },
                 },
                 .SlashSlash => switch (c) {
                     '=' => {
-                        res.id = .SlashSlashEqual;
+                        res = .SlashSlashEqual;
                         break;
                     },
                     else => {
                         self.it.i = self.start_index + 2;
-                        res.id = .SlashSlash;
+                        res = .SlashSlash;
                         break;
                     },
                 },
                 .Ampersand => switch (c) {
                     '=' => {
-                        res.id = .AmpersandEqual;
+                        res = .AmpersandEqual;
                         break;
                     },
                     else => {
                         self.it.i = self.start_index + 1;
-                        res.id = .Ampersand;
+                        res = .Ampersand;
                         break;
                     },
                 },
@@ -853,70 +858,63 @@ pub const Tokenizer = struct {
                         state = .FloatFraction;
                     },
                     '0'...'9', 'a', 'c'...'f', 'A'...'F' => {
-                        res.id = .{ .Invalid = "octal literals start with '0o'" };
-                        break;
+                        return self.err("octal literals start with '0o'");
                     },
                     '_' => {
                         state = .Number;
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res.id = .{ .Integer = 0 };
+                        res = .Integer;
                         break;
                     },
                 },
                 .BinaryNumber => switch (c) {
                     '0', '1', '_' => {},
                     '2'...'9', 'a'...'f', 'A'...'F' => {
-                        res.id = .{ .Invalid = "invalid digit in octal number" };
-                        break;
+                        return self.err("invalid digit in octal number");
                     },
                     '.' => {
-                        res.id = .{ .Invalid = "invalid base for floating point number" };
-                        break;
+                        return self.err("invalid base for floating point number");
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res.id = parseInt(self.it.bytes[self.start_index + 2 .. self.it.i], 2);
+                        res = .Integer;
                         break;
                     },
                 },
                 .OctalNumber => switch (c) {
                     '0'...'7', '_' => {},
                     '8'...'9', 'a'...'f', 'A'...'F' => {
-                        res.id = .{ .Invalid = "invalid digit in number" };
-                        break;
+                        return self.err("invalid digit in number");
                     },
                     '.' => {
-                        res.id = .{ .Invalid = "invalid base for floating point number" };
-                        break;
+                        return self.err("invalid base for floating point number");
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res.id = parseInt(self.it.bytes[self.start_index + 2 .. self.it.i], 8);
+                        res = .Integer;
                         break;
                     },
                 },
                 .HexNumber => switch (c) {
                     '0'...'9', 'a'...'f', 'A'...'F', '_' => {},
                     '.' => {
-                        res.id = .{ .Invalid = "invalid base for floating point number" };
-                        break;
+                        return self.err("invalid base for floating point number");
                     },
                     'p', 'P' => {
                         state = .FloatExponent;
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res.id = parseInt(self.it.bytes[self.start_index + 2 .. self.it.i], 16);
+                        res = .Integer;
                         break;
                     },
                 },
                 .Number => switch (c) {
                     '0'...'9', '_' => {},
                     'a'...'d', 'f', 'A'...'F' => {
-                        res.id = .{ .Invalid = "invalid digit in hex number" };
-                        break;
+                        return self.err("invalid digit in hex number");
                     },
                     '.' => {
                         state = .FloatFraction;
@@ -926,7 +924,7 @@ pub const Tokenizer = struct {
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res.id = parseInt(self.it.bytes[self.start_index..self.it.i], 10);
+                        res = .Integer;
                         break;
                     },
                 },
@@ -937,7 +935,7 @@ pub const Tokenizer = struct {
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res.id = .{ .Number = self.it.bytes[self.start_index..self.it.i] };
+                        res = .Number;
                         break;
                     },
                 },
@@ -957,11 +955,10 @@ pub const Tokenizer = struct {
                     '_' => {},
                     else => {
                         if (counter == 0) {
-                            res.id = .{ .Invalid = "invalid exponent digit" };
-                            break;
+                            return self.err("invalid exponent digit");
                         }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res.id = .{ .Number = self.it.bytes[self.start_index..self.it.i] };
+                        res = .Number;
                         break;
                     },
                 },
@@ -971,61 +968,59 @@ pub const Tokenizer = struct {
                 .LineComment, .Start => {},
                 .Identifier => {
                     const slice = self.it.bytes[self.start_index..];
-                    res.id = Token.getKeyword(slice) orelse .{ .Identifier = slice };
+                    res = Token.getKeyword(slice) orelse .Identifier;
                 },
                 .BinaryNumber,
                 .OctalNumber,
                 .HexNumber,
                 .Number,
                 .Zero,
-                => res.id = parseInt(self.it.bytes[self.start_index..], switch (state) {
-                    .BinaryNumber => 2,
-                    .OctalNumber => 8,
-                    .HexEscape => 16,
-                    .Number, .Zero => 10,
-                    else => unreachable,
-                }),
+                => res = .Integer,
 
                 .String => {
                     if (self.repl) {
                         self.it.i = self.start_index;
-                        res.id = .Eof;
+                        res = .Eof;
                     } else
-                        res.id = .{ .Invalid = "unterminated string" };
+                        return self.err("unterminated string");
                 },
 
-                .FloatFraction => res.id = .{ .Number = self.it.bytes[self.start_index..] },
-                .Equal => res.id = .Equal,
-                .Minus => res.id = .Minus,
-                .Slash => res.id = .Slash,
-                .SlashSlash => res.id = .SlashSlash,
-                .Ampersand => res.id = .Ampersand,
-                .Period => res.id = .Period,
-                .Pipe => res.id = .Pipe,
-                .RArr => res.id = .RArr,
-                .RArrArr => res.id = .RArrArr,
-                .LArr => res.id = .LArr,
-                .LArrArr => res.id = .LArrArr,
-                .Plus => res.id = .Plus,
-                .Percent => res.id = .Percent,
-                .Caret => res.id = .Caret,
-                .Asterisk => res.id = .Asterisk,
-                .AsteriskAsterisk => res.id.AsteriskAsterisk,
+                .FloatFraction => res = .Number,
+                .Equal => res = .Equal,
+                .Minus => res = .Minus,
+                .Slash => res = .Slash,
+                .SlashSlash => res = .SlashSlash,
+                .Ampersand => res = .Ampersand,
+                .Period => res = .Period,
+                .Pipe => res = .Pipe,
+                .RArr => res = .RArr,
+                .RArrArr => res = .RArrArr,
+                .LArr => res = .LArr,
+                .LArrArr => res = .LArrArr,
+                .Plus => res = .Plus,
+                .Percent => res = .Percent,
+                .Caret => res = .Caret,
+                .Asterisk => res = .Asterisk,
+                .AsteriskAsterisk => res = .AsteriskAsterisk,
                 else => {
-                    res.id = .{ .Invalid = "unexpected eof" };
+                    return self.err("unexpected eof");
                 },
             }
         }
-        res.start = self.start_index;
-        self.prev_nl = res.id == .Nl or res.id == .Eof;
+        self.prev_nl = res == .Nl or res == .Eof;
         if (state != .Start)
             self.no_eof = false;
-        return res;
+        return Token{
+            .id = res,
+            .start = @truncate(u32, self.start_index),
+            .end = @truncate(u32, self.it.i),
+        };
     }
 };
 
 fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
     var tokenizer = Tokenizer{
+        .errors = undefined, // errors are not supposed to happen
         .tokens = undefined, // not used
         .repl = false,
         .it = .{
@@ -1034,10 +1029,10 @@ fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
         },
     };
     for (expected_tokens) |expected_token| {
-        const token = tokenizer.next();
+        const token = tokenizer.next() catch unreachable;
         std.testing.expectEqual(expected_token, token.id);
     }
-    const last_token = tokenizer.next();
+    const last_token = tokenizer.next() catch unreachable;
     std.testing.expect(last_token.id == .Eof);
 }
 
@@ -1048,7 +1043,7 @@ test "operators" {
         \\^ ^= + += - -=
         \\* *= ** **= % %= / /= // //=
         \\, & &= < <= <<
-        \\<<= > >= >> >>= ~
+        \\<<= > >= >> >>= ~ _
         \\
     , &[_]Token.Id{
         .BangEqual,
@@ -1097,6 +1092,7 @@ test "operators" {
         .RArrArr,
         .RArrArrEqual,
         .Tilde,
+        .Underscore,
         .Nl,
     });
 }

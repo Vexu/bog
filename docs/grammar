@@ -1,15 +1,15 @@
 root : (stmt NL)* EOF
 
-stmt : let | expr.l
+stmt : let | expr.l | "_" "=" expr.r
 
 let : "let" unwrap "=" expr.r
 
 unwrap
     : IDENTIFIER
-    | "{" (IDENTIFIER | STRING) ":" unwrap ("," (IDENTIFIER | STRING) ":" unwrap)* "}"
-    | "(" ("..." ",")?  unwrap ("," unwrap)* ("," "...")? ")"
-    | "[" ("..." ",")?  unwrap ("," unwrap)* ("," "...")? "]"
-    | "error" IDENTIFIER
+    | "{" ((expr.r ":")? (unwrap | "_") ",")* "}"
+    | "(" ("..." ",")? ((unwrap | "_") ",")* ("," "...")? ")"
+    | "[" ("..." ",")? ((unwrap | "_") ",")* ("," "...")? "]"
+    | "error" "(" unwrap ")"
 
 expr
     : fn 
@@ -33,7 +33,7 @@ type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" |
 
 range_expr : bit_expr ("..." bit_expr.r)?
 
-bit_expr : shift_expr (("&" shift_expr.r)* | ("|" shift_expr.r)* | ("^" shift_expr.r)*) | ("catch" ("|" unwrap "|")? expr)
+bit_expr : shift_expr (("&" shift_expr.r)* | ("|" shift_expr.r)* | ("^" shift_expr.r)*) | ("catch" ("let" unwrap ":")? expr)
 
 shift_expr : add_expr (("<<" | ">>") add_expr.r)
 
@@ -65,7 +65,7 @@ primary_expr
     | "true" 
     | "false"
     | "(" (expr.r ",")* ")"
-    | "{" ((IDENTIFIER | STRING) ":" expr.r ",")* "}"
+    | "{" (expr.r ":" expr.r ",")* "}"
     | "[" (expr.r ",")* "]"
     | "error" "(" expr.r ")"
     | "import" "(" STRING ")"
@@ -75,15 +75,15 @@ primary_expr
     | for
     | match
 
-block : "(" (NL stmt)+ ")"
+block : "{" (NL stmt)+ "}"
 
-if : "if" "(" bool_expr.r ")" expr ("else" "if" "(" bool_expr.r ")" expr)* ("else" expr)?
+if : "if" "(" bool_expr.r ")" expr ("else" expr)?
 
 while : "while" "(" bool_expr.r ")" expr
 
 for : "for" "(" unwrap "in" range_expr.r ")" expr
 
-match : "match" "(" bool_expr.r ")" "(" (NL match_case ",")+ ")"
+match : "match" "(" bool_expr.r ")" "{" (NL match_case ",")+ "}"
 
 match_case
     : "let" unwrap ":" expr

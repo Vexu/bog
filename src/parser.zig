@@ -87,7 +87,7 @@ pub const Parser = struct {
         }
     }
 
-    /// stmt : let | expr.l
+    /// stmt : let | expr.l | "_" "=" expr.r
     fn stmt(parser: *Parser) ParseError!?RegRef {
         return if (try parser.let())
             null
@@ -253,7 +253,7 @@ pub const Parser = struct {
         return lhs;
     }
 
-    /// bit_expr : shift_expr (("&" shift_expr.r)* | ("|" shift_expr.r)* | ("|" shift_expr.r)*) | ("catch" ("|" unwrap "|")? expr)
+    /// bit_expr : shift_expr (("&" shift_expr.r)* | ("|" shift_expr.r)* | ("|" shift_expr.r)*) | ("catch" ("let" unwrap ":")? expr)
     fn bitExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!?RegRef {
         var lhs = (try parser.shiftExpr(lr_value, skip_nl)) orelse return null;
 
@@ -449,7 +449,7 @@ pub const Parser = struct {
     ///     | "true"
     ///     | "false"
     ///     | "(" (expr.r ",")* ")"
-    ///     | "{" ((IDENTIFIER | STRING) ":" expr.r ",")* "}"
+    ///     | "{" (expr.r ":" expr.r ",")* "}"
     ///     | "[" (expr.r ",")* "]"
     ///     | "error" "(" expr.r ")"
     ///     | "import" "(" STRING ")"
@@ -535,7 +535,7 @@ pub const Parser = struct {
         return parser.reportErr(.PrimaryExpr, parser.token_it.peek().?);
     }
 
-    /// block : "(" (NL stmt)+ ")"
+    /// block : "{" (NL stmt)+ "}"
     fn block(parser: *Parser, lr_value: LRValue) ParseError!?RegRef {
         var last: ?RegRef = null;
         while (true) {
@@ -554,7 +554,7 @@ pub const Parser = struct {
         }
     }
 
-    /// if : "if" "(" bool_expr.r ")" expr ("else" "if" "(" bool_expr.r ")" expr)* ("else" expr)?
+    /// if : "if" "(" bool_expr.r ")" expr ("else" expr)?
     fn ifExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!?RegRef {
         const tok = parser.eatToken(.Keyword_if, skip_nl) orelse return null;
         return error.Unimplemented;
@@ -572,7 +572,7 @@ pub const Parser = struct {
         return error.Unimplemented;
     }
 
-    /// match : "match" "(" bool_expr.r ")" "(" (NL match_case ",")+ ")"
+    /// match : "match" "(" bool_expr.r ")" "{" (NL match_case ",")+ "}"
     fn matchExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!?RegRef {
         const tok = parser.eatToken(.Keyword_match, skip_nl) orelse return null;
         return error.Unimplemented;
