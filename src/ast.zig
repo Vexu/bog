@@ -123,7 +123,7 @@ pub const Node = struct {
             Sub,
             Mul,
             Div,
-            DivExact,
+            DivFloor,
             Mod,
             Pow,
 
@@ -134,7 +134,7 @@ pub const Node = struct {
             MulAssign,
             PowAssign,
             DivAssign,
-            DivExactAssign,
+            DivFloorAssign,
             ModAssign,
             LShiftAssign,
             RShfitAssign,
@@ -152,7 +152,7 @@ pub const Node = struct {
         lhs: *Node,
         op: union(enum) {
             Call: NodeList,
-            SubScript: *Node,
+            ArrAccess: *Node,
             Member,
         },
         l_tok: TokenIndex,
@@ -166,6 +166,7 @@ pub const Node = struct {
             Num,
             Int,
             Bool,
+            None,
         },
         tok: TokenIndex,
     };

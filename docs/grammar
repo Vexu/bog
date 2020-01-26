@@ -54,8 +54,8 @@ assign
     | ("+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") bit_expr.r
 
 suffix_expr
-    : "[" bool_expr.r "]"
-    | "(" (bool_expr.r ",")* ")"
+    : "[" expr.r "]"
+    | "(" (expr.r ",")* ")"
     | "." IDENTIFIER
 
 primary_expr
