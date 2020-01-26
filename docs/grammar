@@ -81,7 +81,7 @@ if : "if" "(" bool_expr.r ")" expr ("else" expr)?
 
 while : "while" "(" bool_expr.r ")" expr
 
-for : "for" "(" unwrap "in" range_expr.r ")" expr
+for : "for" "(" ("let" unwrap "in") range_expr.r ")" expr
 
 match : "match" "(" bool_expr.r ")" "{" (NL match_case ",")+ "}"
 

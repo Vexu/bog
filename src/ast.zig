@@ -239,11 +239,11 @@ pub const Node = struct {
 
     pub const For = struct {
         base: Node = Node{ .id = .For },
-        unwrap: *Node,
+        unwrap: ?*Node,
         cond: *Node,
         body: *Node,
+        in_tok: ?TokenIndex,
         for_tok: TokenIndex,
-        in_tok: TokenIndex,
         r_paren: TokenIndex,
     };
 
