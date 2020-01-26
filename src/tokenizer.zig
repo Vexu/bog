@@ -94,6 +94,7 @@ pub const Token = struct {
 
     pub const Id = enum {
         Eof,
+        Comment,
         Identifier,
         String,
         Integer,
@@ -210,6 +211,7 @@ pub const Token = struct {
 
     pub fn string(id: Id) []const u8 {
         return switch (id) {
+            .Comment => "<Comment>",
             .Identifier => "Identifier",
             .Eof => "<EOF>",
             .String => "String",
@@ -309,6 +311,7 @@ pub const Tokenizer = struct {
 
     pub fn init(allocator: *Allocator, repl: bool) Tokenizer {
         return .{
+            .errors = ErrorList.init(allocator),
             .it = .{
                 .i = 0,
                 .bytes = "",
@@ -327,7 +330,7 @@ pub const Tokenizer = struct {
         _ = self.tokens.pop();
         while (true) {
             const tok = try self.tokens.addOne();
-            tok.* = self.next();
+            tok.* = try self.next();
             if (tok.id == .Eof) {
                 return if (self.repl and (self.level != 0 or self.string or self.no_eof))
                     false
@@ -840,7 +843,8 @@ pub const Tokenizer = struct {
                 .LineComment => switch (c) {
                     '\n', '\r' => {
                         self.it.i -= 1;
-                        state = .Start;
+                        res = .Comment;
+                        break;
                     },
                     else => {},
                 },
@@ -965,7 +969,7 @@ pub const Tokenizer = struct {
             }
         } else {
             switch (state) {
-                .LineComment, .Start => {},
+                .Start => {},
                 .Identifier => {
                     const slice = self.it.bytes[self.start_index..];
                     res = Token.getKeyword(slice) orelse .Identifier;
@@ -984,7 +988,7 @@ pub const Tokenizer = struct {
                     } else
                         return self.err("unterminated string");
                 },
-
+                .LineComment => res = .Comment,
                 .FloatFraction => res = .Number,
                 .Equal => res = .Equal,
                 .Minus => res = .Minus,
@@ -1044,7 +1048,7 @@ test "operators" {
         \\* *= ** **= % %= / /= // //=
         \\, & &= < <= <<
         \\<<= > >= >> >>= ~ _
-        \\
+        \\#hello world
     , &[_]Token.Id{
         .BangEqual,
         .Pipe,
@@ -1094,6 +1098,7 @@ test "operators" {
         .Tilde,
         .Underscore,
         .Nl,
+        .Comment,
     });
 }
 

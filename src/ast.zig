@@ -1,5 +1,8 @@
 const std = @import("std");
 const TokenIndex = @import("tokenizer.zig").TokenIndex;
+const TypeId = @import("value.zig").TypeId;
+
+pub const NodeList = std.SegmentedList(*Node, 4);
 
 pub const Node = struct {
     id: Id,
@@ -34,8 +37,6 @@ pub const Node = struct {
         MatchCase,
         Jump,
     };
-
-    pub const NodeList = std.SegmentedList(*Node, 4);
 
     pub const Let = struct {
         base: Node = Node{ .id = .Let },
@@ -82,7 +83,7 @@ pub const Node = struct {
         base: Node = Node{ .id = .Prefix },
         op: enum {
             BoolNot,
-            BinNot,
+            BitNot,
             Minus,
             Plus,
             Try,
@@ -97,7 +98,7 @@ pub const Node = struct {
             Is,
             As,
         },
-        type_id = TypeId,
+        type_id: TypeId,
         tok: TokenIndex,
         lhs: *Node,
     };
@@ -119,7 +120,7 @@ pub const Node = struct {
             BitOr,
             BitXor,
             LShift,
-            RShfit,
+            RShift,
             Add,
             Sub,
             Mul,
@@ -208,7 +209,7 @@ pub const Node = struct {
     pub const MapItem = struct {
         base: Node = Node{ .id = .MapItem },
         key: ?*Node,
-        colon: TokenIndex,
+        colon: ?TokenIndex,
         value: *Node,
         comma: ?TokenIndex,
     };
