@@ -6,10 +6,10 @@ pub const Node = struct {
 
     pub const Id = enum {
         Let,
-        Discard,
         Fn,
         Unwrap,
-        UnwrapDiscard,
+        Discard,
+        Identifier,
         Prefix,
         Infix,
         TypeInfix,
@@ -39,15 +39,9 @@ pub const Node = struct {
     pub const Let = struct {
         base: Node = Node{ .id = .Let },
         unwrap: *Node,
-        value: *Node,
+        body: *Node,
         let_tok: TokenIndex,
         eq_tok: TokenIndex,
-    };
-
-    pub const Discard = struct {
-        base: Node = Node{ .id = .Discard },
-        value: *Node,
-        tok: TokenIndex,
     };
 
     pub const Fn = struct {
@@ -78,8 +72,8 @@ pub const Node = struct {
         r_tok: TokenIndex,
     };
 
-    pub const UnwrapDiscard = struct {
-        base: Node = Node{ .id = .UnwrapDiscard },
+    pub const SingleToken = struct {
+        base: Node,
         tok: TokenIndex,
     };
 
@@ -172,7 +166,6 @@ pub const Node = struct {
             Num,
             Int,
             Bool,
-            Identifier,
         },
         tok: TokenIndex,
     };
@@ -198,7 +191,7 @@ pub const Node = struct {
     };
 
     pub const Grouped = struct {
-        base: Node = Node{.id = .Grouped},
+        base: Node = Node{ .id = .Grouped },
         expr: *Node,
         l_tok: TokenIndex,
         r_tok: TokenIndex,

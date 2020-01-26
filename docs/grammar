@@ -1,6 +1,6 @@
 root : (stmt NL)* EOF
 
-stmt : let | expr.l | "_" "=" expr.r
+stmt : let | expr.l
 
 let : "let" unwrap "=" expr.r
 
@@ -18,7 +18,7 @@ expr
 
 jump_expr : "return" expr.r | "break" | "continue"
 
-fn : "fn" "(" (unwrap ",")* ")" expr
+fn : "fn" "(" (unwrap ",")* ")" expr.r
 
 bool_expr
     : "not" comparision_expr.r
