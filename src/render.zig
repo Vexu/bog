@@ -73,6 +73,10 @@ pub const Renderer = struct {
                         // TODO trailing comma
                         var it = params.iterator(0);
                         while (it.next()) |param| {
+                            if (it.peek() == null) {
+                                try self.renderNode(param.*, stream, indent, .None);
+                                break;
+                            }
                             try self.renderNode(param.*, stream, indent, .Space);
                         }
                     },
@@ -80,14 +84,6 @@ pub const Renderer = struct {
                     .Member => {},
                 }
                 return self.renderToken(suffix.r_tok, stream, indent, space);
-            },
-            .ListTupleCallItem => {
-                const item = @fieldParentPtr(Node.ListTupleCallItem, "base", node);
-
-                try self.renderNode(item.value, stream, indent, .None);
-                if (item.comma) |some| {
-                    try self.renderToken(some, stream, indent, space);
-                }
             },
             .Let => {
                 const let = @fieldParentPtr(Node.Let, "base", node);

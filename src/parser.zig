@@ -202,13 +202,8 @@ pub const Parser = struct {
                 node.r_paren = try parser.expectToken(.RParen, true);
                 break;
             }
-            const param = try parser.arena.create(Node.ListTupleCallItem);
-            param.* = .{
-                .value = try parser.unwrap(),
-                .comma = parser.eatToken(.Comma, true),
-            };
-            try node.params.push(&param.base);
-            if (param.comma == null) end = true;
+            try node.params.push(try parser.unwrap());
+            if (parser.eatToken(.Comma, true) == null) end = true;
         }
         node.r_paren = try parser.expectToken(.RParen, true);
         parser.skipNl();
@@ -595,13 +590,8 @@ pub const Parser = struct {
                         node.r_tok = try parser.expectToken(.RParen, true);
                         break;
                     }
-                    const param = try parser.arena.create(Node.ListTupleCallItem);
-                    param.* = .{
-                        .value = try parser.expr(.R, true),
-                        .comma = parser.eatToken(.Comma, true),
-                    };
-                    try node.op.Call.push(&param.base);
-                    if (param.comma == null) end = true;
+                    try node.op.Call.push(try parser.expr(.R, true));
+                    if (parser.eatToken(.Comma, true) == null) end = true;
                 }
                 lhs = &node.base;
             } else if (parser.eatToken(.Period, skip_nl)) |tok| {
@@ -765,20 +755,19 @@ pub const Parser = struct {
                     .values = NodeList.init(parser.arena),
                     .r_tok = undefined,
                 };
-                var last = first;
+                try node.values.push(first);
+                _ = try parser.expectToken(.Comma, true);
+                var end = false;
                 while (true) {
-                    const comma = try parser.expectToken(.Comma, true);
-                    const item = try parser.arena.create(Node.ListTupleCallItem);
-                    item.* = .{
-                        .value = last,
-                        .comma = comma,
-                    };
-                    try node.values.push(&item.base);
                     if (parser.eatToken(.RParen, true)) |r_tok| {
                         node.r_tok = r_tok;
                         return &node.base;
+                    } else if (end) {
+                        node.r_tok = try parser.expectToken(.RBrace, true);
+                        break;
                     }
-                    last = try parser.expr(.R, true);
+                    try node.values.push(try parser.expr(.R, true));
+                    if (parser.eatToken(.Comma, true) == null) end = true;
                 }
             }
         }
@@ -817,10 +806,9 @@ pub const Parser = struct {
                         .key = key,
                         .colon = colon,
                         .value = value,
-                        .comma = try parser.expectToken(.Comma, true),
                     };
                     try node.values.push(&item.base);
-                    if (item.comma == null) end = true;
+                    if (parser.eatToken(.Comma, true) == null) end = true;
                 }
             }
         }
@@ -843,13 +831,8 @@ pub const Parser = struct {
                     node.r_tok = try parser.expectToken(.RBracket, true);
                     break;
                 }
-                const val = try parser.arena.create(Node.ListTupleCallItem);
-                val.* = .{
-                    .value = try parser.expr(.R, true),
-                    .comma = parser.eatToken(.Comma, true),
-                };
-                try node.values.push(&val.base);
-                if (val.comma == null) end = true;
+                try node.values.push(try parser.expr(.R, true));
+                if (parser.eatToken(.Comma, true) == null) end = true;
             }
             return &node.base;
         }
@@ -985,13 +968,8 @@ pub const Parser = struct {
                 .expr = undefined,
             };
             while (true) {
-                const val = try parser.arena.create(Node.ListTupleCallItem);
-                val.* = .{
-                    .value = try parser.expr(.R, true),
-                    .comma = parser.eatToken(.Comma, true),
-                };
-                try node.lhs.push(&val.base);
-                if (val.comma == null) break;
+                try node.lhs.push(try parser.expr(.R, true));
+                if (parser.eatToken(.Comma, true) == null) break;
             }
             node.colon = try parser.expectToken(.Colon, true);
             node.expr = try parser.expr(lr_value, false);

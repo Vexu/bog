@@ -25,7 +25,6 @@ pub const Node = struct {
         Map,
         Block,
         Grouped,
-        ListTupleCallItem,
         MapItem,
         Catch,
         If,
@@ -200,18 +199,11 @@ pub const Node = struct {
         r_tok: TokenIndex,
     };
 
-    pub const ListTupleCallItem = struct {
-        base: Node = Node{ .id = .ListTupleCallItem },
-        value: *Node,
-        comma: ?TokenIndex,
-    };
-
     pub const MapItem = struct {
         base: Node = Node{ .id = .MapItem },
         key: ?*Node,
         colon: ?TokenIndex,
         value: *Node,
-        comma: ?TokenIndex,
     };
 
     pub const Catch = struct {
