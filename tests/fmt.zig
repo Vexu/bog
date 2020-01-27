@@ -1,6 +1,21 @@
-test "basic math" {
+test "suffix ops" {
     try testCanonical(
-        \\123 + 2 * 3
+        \\foo[2].bar(2).baz[5 + 5]
+        \\
+    );
+}
+
+test "prefix ops" {
+    try testCanonical(
+        \\not true
+        \\-2
+        \\
+    );
+}
+
+test "infix ops" {
+    try testCanonical(
+        \\123 + 2 * 3 / (4 as fn)
         \\
     );
 }

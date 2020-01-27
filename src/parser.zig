@@ -197,6 +197,7 @@ pub const Parser = struct {
         while (true) {
             if (parser.eatToken(.RParen, true)) |r_tok| {
                 node.r_paren = r_tok;
+                break;
             } else if (end) {
                 node.r_paren = try parser.expectToken(.RParen, true);
                 break;
@@ -613,6 +614,7 @@ pub const Parser = struct {
                 while (true) {
                     if (parser.eatToken(.RParen, true)) |r_tok| {
                         node.r_tok = r_tok;
+                        break;
                     } else if (end) {
                         node.r_tok = try parser.expectToken(.RParen, true);
                         break;
@@ -821,6 +823,7 @@ pub const Parser = struct {
                 while (true) {
                     if (parser.eatToken(.RBrace, true)) |r_tok| {
                         node.r_tok = r_tok;
+                        break;
                     } else if (end) {
                         node.r_tok = try parser.expectToken(.RBrace, true);
                         break;
@@ -859,6 +862,7 @@ pub const Parser = struct {
             while (true) {
                 if (parser.eatToken(.RBracket, true)) |r_tok| {
                     node.r_tok = r_tok;
+                    break;
                 } else if (end) {
                     node.r_tok = try parser.expectToken(.RBracket, true);
                     break;
