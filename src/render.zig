@@ -113,6 +113,40 @@ pub const Renderer = struct {
                 try self.renderNode(err.value, stream, indent, .None);
                 return self.renderToken(err.r_paren, stream, indent, space);
             },
+            .Jump => {
+                const jump = @fieldParentPtr(Node.Jump, "base", node);
+
+                switch (jump.op) {
+                    .Return => |expr| {
+                        try self.renderToken(jump.tok, stream, indent, .Space);
+                        return self.renderNode(expr, stream, indent, space);
+                    },
+                    .Continue, .Break => try self.renderToken(jump.tok, stream, indent, space),
+                }
+            },
+            .While => {
+                const while_expr = @fieldParentPtr(Node.While, "base", node);
+
+                try self.renderToken(while_expr.while_tok, stream, indent, .Space);
+                try self.renderToken(while_expr.while_tok + 1, stream, indent, .None);
+                try self.renderNode(while_expr.cond, stream, indent, .None);
+                try self.renderToken(while_expr.r_paren, stream, indent, .Space);
+                return self.renderNode(while_expr.body, stream, indent, space);
+            },
+            .For => {
+                const for_expr = @fieldParentPtr(Node.For, "base", node);
+
+                try self.renderToken(for_expr.for_tok, stream, indent, .Space);
+                try self.renderToken(for_expr.for_tok + 1, stream, indent, .None);
+                if (for_expr.unwrap) |some| {
+                    try self.renderToken(for_expr.for_tok + 2, stream, indent, .Space);
+                    try self.renderNode(some, stream, indent, .Space);
+                    try self.renderToken(for_expr.in_tok.?, stream, indent, .Space);
+                }
+                try self.renderNode(for_expr.cond, stream, indent, .None);
+                try self.renderToken(for_expr.r_paren, stream, indent, .Space);
+                return self.renderNode(for_expr.body, stream, indent, space);
+            },
             .Fn,
             .Unwrap,
             .List,
@@ -122,13 +156,10 @@ pub const Renderer = struct {
             .MapItem,
             .Catch,
             .If,
-            .For,
-            .While,
             .Match,
             .MatchCatchAll,
             .MatchLet,
             .MatchCase,
-            .Jump,
             => @panic("TODO"),
         }
     }

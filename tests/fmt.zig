@@ -1,3 +1,13 @@
+test "loops" {
+    try testCanonical(
+        \\while (true) break
+        \\return (123 // 4)
+        \\for (let foo in arr) foo + 2
+        \\for (1 ... 3) continue
+        \\
+    );
+}
+
 test "declarations" {
     try testCanonical(
         \\let bar = import("args")

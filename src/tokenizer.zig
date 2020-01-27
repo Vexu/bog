@@ -859,6 +859,7 @@ pub const Tokenizer = struct {
                         state = .HexNumber;
                     },
                     '.' => {
+                        // TODO might be ...
                         state = .FloatFraction;
                     },
                     '0'...'9', 'a', 'c'...'f', 'A'...'F' => {
@@ -921,6 +922,7 @@ pub const Tokenizer = struct {
                         return self.err("invalid digit in hex number");
                     },
                     '.' => {
+                        // TODO might be ...
                         state = .FloatFraction;
                     },
                     'e' => {
