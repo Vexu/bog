@@ -89,13 +89,32 @@ pub const Renderer = struct {
                     try self.renderToken(some, stream, indent, space);
                 }
             },
-                return self.renderToken(suffix.r_tok, stream, indent, space);
+            .Let => {
+                const let = @fieldParentPtr(Node.Let, "base", node);
+
+                try self.renderToken(let.let_tok, stream, indent, .Space);
+                try self.renderNode(let.unwrap, stream, indent, .Space);
+                try self.renderToken(let.eq_tok, stream, indent, .Space);
+                return self.renderNode(let.body, stream, indent, space);
             },
-            .Let,
+            .Import => {
+                const import = @fieldParentPtr(Node.Import, "base", node);
+
+                try self.renderToken(import.tok, stream, indent, .None);
+                try self.renderToken(import.tok + 1, stream, indent, .None);
+                try self.renderToken(import.str_tok, stream, indent, .None);
+                return self.renderToken(import.str_tok + 1, stream, indent, space);
+            },
+            .Error => {
+                const err = @fieldParentPtr(Node.Error, "base", node);
+
+                try self.renderToken(err.tok, stream, indent, .None);
+                try self.renderToken(err.tok + 1, stream, indent, .None);
+                try self.renderNode(err.value, stream, indent, .None);
+                return self.renderToken(err.r_paren, stream, indent, space);
+            },
             .Fn,
             .Unwrap,
-            .Import,
-            .Error,
             .List,
             .Tuple,
             .Map,

@@ -98,9 +98,9 @@ pub const Node = struct {
             Is,
             As,
         },
-        type_id: TypeId,
-        tok: TokenIndex,
         lhs: *Node,
+        tok: TokenIndex,
+        type_tok: TokenIndex,
     };
 
     pub const Infix = struct {

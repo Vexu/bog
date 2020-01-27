@@ -324,7 +324,7 @@ pub const Parser = struct {
                 .lhs = lhs,
                 .tok = tok + 1,
                 .op = .Is,
-                .type_id = try parser.typeName(),
+                .type_tok = try parser.typeName(),
             };
             lhs = &node.base;
         }
@@ -332,35 +332,11 @@ pub const Parser = struct {
     }
 
     /// type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
-    fn typeName(parser: *Parser) ParseError!TypeId {
-        return if (parser.eatToken(.Keyword_error, true)) |_|
-            .Error
-        else if (parser.eatToken(.Keyword_fn, true)) |_|
-            .Fn
-        else if (parser.eatTokenId(.Identifier, true)) |tok|
-            // TODO
-            // if (mem.eql(u8, tok.tok.id.Identifier, "none"))
-            //     .None
-            // else if (mem.eql(u8, tok.tok.id.Identifier, "int"))
-            //     .Int
-            // else if (mem.eql(u8, tok.tok.id.Identifier, "num"))
-            //     .Num
-            // else if (mem.eql(u8, tok.tok.id.Identifier, "bool"))
-            //     .Bool
-            // else if (mem.eql(u8, tok.tok.id.Identifier, "str"))
-            //     .Str
-            // else if (mem.eql(u8, tok.tok.id.Identifier, "tuple"))
-            //     .Tuple
-            // else if (mem.eql(u8, tok.tok.id.Identifier, "map"))
-            //     .Map
-            // else if (mem.eql(u8, tok.tok.id.Identifier, "list"))
-            //     .List
-            // else if (mem.eql(u8, tok.tok.id.Identifier, "range"))
-            //     TypeId.Range
-            // else
-                return parser.reportErr(.TypeName, tok.tok)
-        else
-            return parser.reportErr(.TypeName, parser.it.peek().?);
+    fn typeName(parser: *Parser) ParseError!TokenIndex {
+        return parser.eatToken(.Keyword_error, true) orelse
+            parser.eatToken(.Keyword_fn, true) orelse
+            parser.eatToken(.Identifier, true) orelse
+            parser.reportErr(.TypeName, parser.it.peek().?);
     }
 
     /// range_expr : bit_expr ("..." bit_expr.r)?
@@ -531,7 +507,7 @@ pub const Parser = struct {
                 .lhs = lhs,
                 .tok = tok + 1,
                 .op = .As,
-                .type_id = try parser.typeName(),
+                .type_tok = try parser.typeName(),
             };
             lhs = &node.base;
         }
@@ -760,7 +736,7 @@ pub const Parser = struct {
                 .tok = tok,
                 .str_tok = try parser.expectToken(.String, true),
             };
-            _ = try parser.expectToken(.LParen, true);
+            _ = try parser.expectToken(.RParen, true);
             return &node.base;
         }
         if (parser.eatToken(.LParen, skip_nl)) |tok| {
@@ -1053,9 +1029,9 @@ pub const Parser = struct {
 
     fn eatTokenId(parser: *Parser, id: Token.Id, skip_nl: bool) ?TokAndId {
         var next_tok = parser.it.next().?;
-        if (skip_nl and next_tok.id == .Nl)
-            next_tok = parser.it.next().?;
         while (next_tok.id == .Comment)
+            next_tok = parser.it.next().?;
+        if (skip_nl and next_tok.id == .Nl)
             next_tok = parser.it.next().?;
         if (next_tok.id == id) {
             return TokAndId{

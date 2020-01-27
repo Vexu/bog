@@ -1,3 +1,12 @@
+test "declarations" {
+    try testCanonical(
+        \\let bar = import("args")
+        \\let foo = bar + 2
+        \\let err = error(foo)
+        \\
+    );
+}
+
 test "suffix ops" {
     try testCanonical(
         \\foo[2].bar(2).baz[5 + 5]
@@ -15,7 +24,7 @@ test "prefix ops" {
 
 test "infix ops" {
     try testCanonical(
-        \\123 + 2 * 3 / (4 as fn)
+        \\123 + 2 * 3 / (4 as num)
         \\
     );
 }
