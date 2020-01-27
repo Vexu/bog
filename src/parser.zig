@@ -1055,7 +1055,7 @@ pub const Parser = struct {
             next_tok = parser.it.next().?;
         if (next_tok.id == id) {
             return TokAndId{
-                .index = @intCast(TokenIndex, parser.it.index),
+                .index = @intCast(TokenIndex, parser.it.index - 1),
                 .id = id,
                 .tok = next_tok,
             };

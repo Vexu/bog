@@ -1,6 +1,7 @@
-test "integer" {
+test "basic math" {
     try testCanonical(
-        \\123
+        \\123 + 2 * 3
+        \\
     );
 }
 
