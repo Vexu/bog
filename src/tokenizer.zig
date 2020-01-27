@@ -64,27 +64,6 @@ fn isIdentifier(c: u32) bool {
     };
 }
 
-fn parseInt(buf: []const u8, radix: u8) Token.Id {
-    var x: u64 = 0;
-
-    for (buf) |c| {
-        const digit = switch (c) {
-            '0'...'9' => c - '0',
-            'A'...'Z' => c - 'A' + 10,
-            'a'...'z' => c - 'a' + 10,
-            '_' => continue,
-            else => unreachable,
-        };
-
-        x = math.mul(u64, x, radix) catch return .{
-            .Invalid = "integer too big",
-        };
-        x += digit;
-    }
-
-    return .{ .Integer = x };
-}
-
 pub const TokenIndex = u32;
 
 pub const Token = struct {

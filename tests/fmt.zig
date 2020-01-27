@@ -59,7 +59,7 @@ fn fmt(source: []const u8) ![]u8 {
     
     var out_buf = try std.Buffer.initSize(alloc, 0);
     var out_stream = std.io.BufferOutStream.init(&out_buf);
-    try render.render(source, tokenizer.tokens, &nodes, &out_stream.stream);
+    try render.render(source, &tokenizer.tokens, &nodes, &out_stream.stream);
     return out_buf.toOwnedSlice();
 }
 

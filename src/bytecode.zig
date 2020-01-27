@@ -300,36 +300,43 @@ pub const Builder = struct {
         }
     }
 
-    pub fn constant(self: *Builder, tok: *Token) !RegRef {
-        const reg = try self.cur_func.registerAlloc(.Temp);
-        var arg: ?u32 = null;
-        var breg: RegRef = 0;
-        const op: Op = switch (tok.id) {
-            .String => blk: {
-                arg = try self.putString(tok);
-                break :blk .ConstString;
-            },
-            .Number => return error.Unimplemented,
-            .Keyword_false, .Keyword_true => blk: {
-                breg = @boolToInt(tok.id == .Keyword_true);
-                break :blk .ConstBool;
-            },
-            .Integer => |val| if (val <= std.math.maxInt(u32)) blk: {
-                // fits in u32
-                arg = @truncate(u32, val);
-                break :blk .ConstSmallInt;
-            } else {
-                return error.Unimplemented;
-            },
-            .RParen => .ConstNone,
-            else => unreachable,
-        };
+    pub fn constNone(self: *Builder, res_loc: RegRef) !void {
         try self.cur_func.emitInstruction(.{
-            .op = op,
-            .A = reg,
-            .B = breg,
-        }, arg);
-        return reg;
+            .op = .ConstNone,
+            .A = res_loc,
+        }, null);
+    }
+
+    pub fn constBool(self: *Builder, res_loc: RegRef, val: bool) !RegRef {
+        try self.cur_func.emitInstruction(.{
+            .op = .ConstNone,
+            .A = res_loc,
+            .B = @boolToInt(val),
+        }, null);
+    }
+
+    pub fn constInt(self: *Builder, res_loc: RegRef, val: i64) !RegRef {
+        if (val <= std.math.maxInt(u32)) blk: {
+            // fits in u32
+            try self.cur_func.emitInstruction(.{
+                .op = .ConstSmallInt,
+                .A = res_loc,
+            }, @truncate(u32, val));
+        } else {
+            @panic("TODO: > 2**32 ints");
+        }
+    }
+
+    pub fn constNum(self: *Builder, res_loc: RegRef, val: f64) !void {
+        @panic("TODO: constNum");
+    }
+
+    pub fn constStr(self: *Builder, res_loc: RegRef, val: []const u8) !void {
+        try self.cur_func.emitInstruction(.{
+            .op = .ConstNone,
+            .A = res_loc,
+            .B = @boolToInt(val),
+        }, try self.putString(tok));
     }
 
     pub fn declRef(self: *Builder, tok: *Token) !RegRef {

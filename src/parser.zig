@@ -695,7 +695,8 @@ pub const Parser = struct {
                     .Number => .Num,
                     .Integer => .Int,
                     .String => .Str,
-                    .Keyword_true, .Keyword_false => .Bool,
+                    .Keyword_true => .True,
+                    .Keyword_false => .False,
                     else => unreachable,
                 },
             };

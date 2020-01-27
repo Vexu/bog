@@ -6,7 +6,7 @@ const tokenizer = @import("tokenizer.zig");
 const TokenIndex = tokenizer.TokenIndex;
 const TokenList = tokenizer.TokenList;
 
-pub fn render(source: []const u8, tokens: TokenList, nodes: *NodeList, stream: var) @TypeOf(stream).Child.Error!void {
+pub fn render(source: []const u8, tokens: *TokenList, nodes: *NodeList, stream: var) @TypeOf(stream).Child.Error!void {
     var it = nodes.iterator(0);
     var renderer = Renderer{
         .source = source,
@@ -19,7 +19,7 @@ pub fn render(source: []const u8, tokens: TokenList, nodes: *NodeList, stream: v
 
 pub const Renderer = struct {
     source: []const u8,
-    tokens: TokenList,
+    tokens: *TokenList,
 
     fn renderNode(self: *Renderer, node: *Node, stream: var, indent: u32, space: Space) @TypeOf(stream).Child.Error!void {
         switch (node.id) {
