@@ -394,23 +394,21 @@ pub const Builder = struct {
         return reg;
     }
 
-    pub fn prefix(self: *Builder, tok: *Token, rhs: RegRef) !RegRef {
-        const loc = try self.cur_func.registerAlloc(.Temp);
+    pub fn prefix(self: *Builder, res_loc: RegRef, op: var, val: RegRef) !void {
+        defer self.cur_func.freeRegisterIfTemp(rhs);
         try self.cur_func.emitInstruction(.{
-            .op = switch (tok.id) {
-                .Keyword_not => .Not,
-                .Tilde => .BinNot,
+            .op = switch (op) {
+                .BoolNot => .Not,
+                .BitNot => .BinNot,
                 .Minus => .Negate,
-                .Keyword_try => .Try,
+                .Try => .Try,
                 // TODO maybe don't no-op this
-                .Plus => return rhs,
+                .Plus => return res_loc,
                 else => unreachable,
             },
-            .A = loc,
-            .B = rhs,
+            .A = res_loc,
+            .B = val,
         }, null);
-        self.cur_func.freeRegisterIfTemp(rhs);
-        return rhs;
     }
 
     pub fn isType(self: *Builder, lhs: RegRef, tok: *Token, id: TypeId) !RegRef {
