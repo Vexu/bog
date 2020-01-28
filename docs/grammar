@@ -16,7 +16,7 @@ expr
     | [.l jump_expr]
     | bool_expr
 
-jump_expr : "return" expr.r | "break" | "continue"
+jump_expr : "return" expr.r? | "break" expr.r? | "continue"
 
 fn : "fn" "(" (unwrap ",")* ")" expr.r
 
@@ -77,13 +77,13 @@ primary_expr
 
 block : "{" (NL stmt)+ "}"
 
-if : "if" "(" bool_expr.r ")" expr ("else" expr)?
+if : "if" "(" ("let" unwrap "=") bool_expr.r ")" expr ("else" expr)?
 
-while : "while" "(" bool_expr.r ")" expr
+while : "while" "(" ("let" unwrap "=") bool_expr.r ")" expr
 
 for : "for" "(" ("let" unwrap "in") range_expr.r ")" expr
 
-match : "match" "(" bool_expr.r ")" "{" (NL match_case ",")+ "}"
+match : "match" "(" bool_expr.r ")" "{" (NL match_case)+ NL "}"
 
 match_case
     : "let" unwrap ":" expr

@@ -211,7 +211,7 @@ pub const Parser = struct {
         return &node.base;
     }
 
-    /// jump_expr : "return" expr.r | "break" | "continue"
+    /// jump_expr : "return" expr.r? | "break" expr.r? | "continue"
     fn jumpExpr(parser: *Parser, lr_value: LRValue) ParseError!?*Node {
         const tok = parser.eatTokenId(.Keyword_return, false) orelse
             parser.eatTokenId(.Keyword_break, false) orelse
@@ -220,12 +220,17 @@ pub const Parser = struct {
         if (lr_value != .L) {
             return parser.reportErr(.JumpRValue, tok.tok);
         }
+        const peek = parser.it.peek().?;
+        const res = if (tok.id != .Keyword_continue and peek.id != .Nl and peek.id != .Keyword_else)
+            try parser.expr(.R, false)
+        else
+            null;
         const node = try parser.arena.create(Node.Jump);
         node.* = .{
             .tok = tok.index,
             .op = switch (tok.id) {
-                .Keyword_return => .{ .Return = try parser.expr(.R, false) },
-                .Keyword_break => .Break,
+                .Keyword_return => .{ .Return = res },
+                .Keyword_break => .{ .Break = res },
                 .Keyword_continue => .Continue,
                 else => unreachable,
             },
@@ -863,13 +868,19 @@ pub const Parser = struct {
         }
     }
 
-    /// if : "if" "(" bool_expr.r ")" expr ("else" expr)?
+    /// if : "if" "(" ("let" unwrap "=") bool_expr.r ")" expr ("else" expr)?
     fn ifExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!?*Node {
         const tok = parser.eatToken(.Keyword_if, skip_nl) orelse return null;
         _ = try parser.expectToken(.LParen, true);
+        const unwrapped = if (parser.eatToken(.Keyword_let, true)) |_|
+            try parser.unwrap()
+        else
+            null;
         const node = try parser.arena.create(Node.If);
         node.* = .{
             .if_tok = tok,
+            .unwrap = unwrapped,
+            .eq_tok = if (unwrapped != null) try parser.expectToken(.Equal, true) else null,
             .cond = try parser.boolExpr(.R, true),
             .r_paren = try parser.expectToken(.RParen, true),
             .if_body = try parser.expr(lr_value, skip_nl),
@@ -882,13 +893,19 @@ pub const Parser = struct {
         return &node.base;
     }
 
-    /// while : "while" "(" bool_expr.r ")" expr
+    /// while : "while" "(" ("let" unwrap "=") bool_expr.r ")" expr
     fn whileExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!?*Node {
         const tok = parser.eatToken(.Keyword_while, skip_nl) orelse return null;
         _ = try parser.expectToken(.LParen, true);
+        const unwrapped = if (parser.eatToken(.Keyword_let, true)) |_|
+            try parser.unwrap()
+        else
+            null;
         const node = try parser.arena.create(Node.While);
         node.* = .{
             .while_tok = tok,
+            .unwrap = unwrapped,
+            .eq_tok = if (unwrapped != null) try parser.expectToken(.Equal, true) else null,
             .cond = try parser.boolExpr(.R, true),
             .r_paren = try parser.expectToken(.RParen, true),
             .body = try parser.expr(lr_value, skip_nl),
@@ -916,7 +933,7 @@ pub const Parser = struct {
         return &node.base;
     }
 
-    /// match : "match" "(" bool_expr.r ")" "{" (NL match_case ",")+ "}"
+    /// match : "match" "(" bool_expr.r ")" "{" (NL match_case)+ NL "}"
     fn matchExpr(parser: *Parser, lr_value: LRValue, skip_nl: bool) ParseError!?*Node {
         const tok = parser.eatToken(.Keyword_match, skip_nl) orelse return null;
         _ = try parser.expectToken(.LParen, true);

@@ -218,11 +218,13 @@ pub const Node = struct {
 
     pub const If = struct {
         base: Node = Node{ .id = .If },
-        if_tok: TokenIndex,
         cond: *Node,
         if_body: *Node,
         else_body: ?*Node,
+        unwrap: ?*Node,
+        eq_tok: ?TokenIndex,
         else_tok: ?TokenIndex,
+        if_tok: TokenIndex,
         r_paren: TokenIndex,
     };
 
@@ -240,6 +242,8 @@ pub const Node = struct {
         base: Node = Node{ .id = .While },
         cond: *Node,
         body: *Node,
+        unwrap: ?*Node,
+        eq_tok: ?TokenIndex,
         while_tok: TokenIndex,
         r_paren: TokenIndex,
     };
@@ -276,9 +280,9 @@ pub const Node = struct {
         base: Node = Node{ .id = .Jump },
         tok: TokenIndex,
         op: union(enum) {
-            Break,
+            Break: ?*Node,
             Continue,
-            Return: *Node,
+            Return: ?*Node,
         },
     };
 };
