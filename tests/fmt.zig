@@ -1,3 +1,32 @@
+test "trailing comma in call" {
+    try testCanonical(
+        \\foo(2, 3)
+        \\bar(
+        \\    2,
+        \\    3,
+        \\)
+        \\
+    );
+    try testTransform(
+        \\foo(2,3,)
+        \\bar(
+        \\    2,
+        \\    3
+        \\)
+        \\
+    ,
+        \\foo(
+        \\    2,
+        \\    3,
+        \\)
+        \\bar(
+        \\    2,
+        \\    3,
+        \\)
+        \\
+    );
+}
+
 test "loops" {
     try testCanonical(
         \\while (true) break
@@ -34,7 +63,7 @@ test "prefix ops" {
 
 test "infix ops" {
     try testCanonical(
-        \\123 + 2 * 3 / (4 as num)
+        \\123 + 2 * 3 / (4 as num) + ()
         \\
     );
 }
@@ -55,8 +84,8 @@ fn fmt(source: []const u8) ![]u8 {
     var tokenizer = Tokenizer.init(alloc, false);
     _ = try tokenizer.tokenize(source);
     var arena = std.heap.ArenaAllocator.init(alloc);
-    var nodes = try parser.parse(&arena, tokenizer.tokens.iterator(0), undefined);// TODO
-    
+    var nodes = try parser.parse(&arena, tokenizer.tokens.iterator(0), undefined); // TODO
+
     var out_buf = try std.Buffer.initSize(alloc, 0);
     var out_stream = std.io.BufferOutStream.init(&out_buf);
     try render.render(source, &tokenizer.tokens, &nodes, &out_stream.stream);
@@ -66,7 +95,7 @@ fn fmt(source: []const u8) ![]u8 {
 fn testTransform(source: []const u8, expected: []const u8) !void {
     const result = try fmt(source);
     if (!mem.eql(u8, result, expected)) {
-        warn("\nexpected:\n{}\nfound:\n{}\n", .{expected, result});
+        warn("\nexpected:\n{}\nfound:\n{}\n", .{ expected, result });
         return error.TestFailed;
     }
 }

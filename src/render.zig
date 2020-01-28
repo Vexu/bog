@@ -21,10 +21,15 @@ pub const Renderer = struct {
     source: []const u8,
     tokens: *TokenList,
 
+    const indent_delta = 4;
+
     fn renderNode(self: *Renderer, node: *Node, stream: var, indent: u32, space: Space) @TypeOf(stream).Child.Error!void {
         switch (node.id) {
             .Literal => {
                 const literal = @fieldParentPtr(Node.Literal, "base", node);
+                if (literal.kind == .None) {
+                    try self.renderToken(literal.tok - 1, stream, indent, .None);
+                }
 
                 return self.renderToken(literal.tok, stream, indent, space);
             },
@@ -70,14 +75,25 @@ pub const Renderer = struct {
                 try self.renderToken(suffix.l_tok, stream, indent, .None);
                 switch (suffix.op) {
                     .Call => |*params| {
-                        // TODO trailing comma
                         var it = params.iterator(0);
-                        while (it.next()) |param| {
-                            if (it.peek() == null) {
-                                try self.renderNode(param.*, stream, indent, .None);
-                                break;
+                        const prev = self.tokens.at(suffix.r_tok - 1).id;
+                        if (prev == .Comma or prev == .Nl) {
+                            try stream.writeByte('\n');
+                            const new_indet = indent + indent_delta;
+                            while (it.next()) |param| {
+                                try stream.writeByteNTimes(' ', new_indet);
+                                try self.renderNode(param.*, stream, new_indet, .None);
+                                try stream.write(",\n");
                             }
-                            try self.renderNode(param.*, stream, indent, .Space);
+                        } else {
+                            while (it.next()) |param| {
+                                if (it.peek() == null) {
+                                    try self.renderNode(param.*, stream, indent, .None);
+                                    break;
+                                }
+                                try self.renderNode(param.*, stream, indent, .None);
+                                try stream.write(", ");
+                            }
                         }
                     },
                     .ArrAccess => |arr_node| try self.renderNode(arr_node, stream, indent, .None),
@@ -167,6 +183,7 @@ pub const Renderer = struct {
         Space,
     };
 
+    // TODO keep comments
     fn renderToken(self: *Renderer, token: TokenIndex, stream: var, indent: u32, space: Space) !void {
         const tok = self.tokens.at(token);
         try stream.write(self.source[tok.start..tok.end]);

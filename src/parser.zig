@@ -616,7 +616,6 @@ pub const Parser = struct {
             parser.eatTokenId(.PipeEqual, false) orelse
             parser.eatTokenId(.CaretEqual, false)) |tok|
         {
-            std.debug.assert(!skip_nl);
             parser.skipNl();
             const node = try parser.arena.create(Node.Infix);
             node.* = .{
@@ -639,9 +638,9 @@ pub const Parser = struct {
                     else => unreachable,
                 },
                 .rhs = if (tok.id == .Equal)
-                    try parser.expr(true)
+                    try parser.expr(skip_nl)
                 else
-                    try parser.bitExpr(true),
+                    try parser.bitExpr(skip_nl),
             };
             return &node.base;
         }
@@ -716,10 +715,10 @@ pub const Parser = struct {
             return &node.base;
         }
         if (parser.eatToken(.LParen, skip_nl)) |tok| {
-            if (parser.eatToken(.RParen, true)) |_| {
+            if (parser.eatToken(.RParen, true)) |rparen| {
                 const node = try parser.arena.create(Node.Literal);
                 node.* = .{
-                    .tok = tok,
+                    .tok = rparen,
                     .kind = .None,
                 };
                 return &node.base;
