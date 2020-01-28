@@ -14,10 +14,10 @@ pub const Compiler = struct {
     tokens: TokenList,
 
     const Value = union(enum) {
-        None,
-
-        /// value of `continue`
+        /// value of continue, break, return, and assignmnet; cannot exist at runtime
         Empty,
+
+        None,
         Rt,
         Int: i64,
         Num: f64,
@@ -32,18 +32,24 @@ pub const Compiler = struct {
                 std.debug.assert(v == res);
                 return v;
             },
-            .None => self.builder.constNone(res),
-            .Int => |v| self.builder.constInt(res, v),
-            .Num => |v| self.builder.constNum(res, v),
-            .Bool => |v| self.builder.constBool(res, v),
-            .Str => |v| self.builder.constStr(res, v),
+            .None => try self.builder.constNone(res),
+            .Int => |v| try self.builder.constInt(res, v),
+            .Num => |v| try self.builder.constNum(res, v),
+            .Bool => |v| try self.builder.constBool(res, v),
+            .Str => |v| try self.builder.constStr(res, v),
         };
     }
 
-    fn genNode(self: *Compiler, node: *Node, res: RegRef) !Value {
+    const Result = union(enum) {
+        Lval: RegRef,
+        Some: Value,
+        None,
+    };
+
+    fn genNode(self: *Compiler, node: *Node, res: *Result) !void {
         switch (node.id) {
-            .Grouped => return self.genNode(@fieldParentPtr(Node.Grouped, "base", node).expr, res),
-            .Literal => return self.genLiteral(@fieldParentPtr(Node.Literal, "base", node), res),
+            .Grouped => try self.genNode(@fieldParentPtr(Node.Grouped, "base", node).expr, res),
+            .Literal => try self.genLiteral(@fieldParentPtr(Node.Literal, "base", node), res),
             .Let => @panic("TODO: Let"),
             .Fn => @panic("TODO: Fn"),
             .Discard => @panic("TODO: Discard"),
@@ -74,15 +80,24 @@ pub const Compiler = struct {
         }
     }
 
-    fn genLiteral(self: *Compiler, node: *Node.Literal, _: RegRef) !Value {
-        return switch (node.kind) {
-            .Int => Value{ .Int = try self.parseInt(node.tok) },
-            .True => Value{ .Bool = true },
-            .False => Value{ .Bool = false },
-            .None => Value.None,
-            .Str => @panic("TODO: genStr"),
-            .Num => @panic("TODO: genNum"),
-        };
+    fn genLiteral(self: *Compiler, node: *Node.Literal, res: *Result) !void {
+        switch (res) {
+            .Lval => {
+                // try adderr("cannot assign to literal")
+                return error.CompileError;
+            },
+            .Some => res.Some = switch (node.kind) {
+                .Int => Value{ .Int = try self.parseInt(node.tok) },
+                .True => Value{ .Bool = true },
+                .False => Value{ .Bool = false },
+                .None => Value.None,
+                .Str => @panic("TODO: genStr"),
+                .Num => @panic("TODO: genNum"),
+            },
+            .None => {
+                // literal not used
+            },
+        }
     }
 
     fn tokenSlice(self: *Compiler, token: TokenIndex) Token.Id {
@@ -90,7 +105,7 @@ pub const Compiler = struct {
         return self.source[tok.start..tok.end];
     }
 
-    fn parseInt(self: *Compiler, tok: TokenIndex) Token.Id {
+    fn parseInt(self: *Compiler, tok: TokenIndex) !i64 {
         var buf = self.tokenSlice(tok);
         var radix: u8 = if (buf.len > 2) switch (buf[2]) {
             'x' => 16,
@@ -110,12 +125,13 @@ pub const Compiler = struct {
                 else => unreachable,
             };
 
-            x = math.mul(i64, x, radix) catch return .{
-                .Invalid = "integer too big",
+            x = math.mul(i64, x, radix) catch {
+                // try self.adderr();
+                return error.CompileError;
             };
             x += digit;
         }
 
-        return .{ .Integer = x };
+        return x;
     }
 };
