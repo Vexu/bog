@@ -12,9 +12,9 @@ unwrap
     | "error" "(" (unwrap | "_") ")"
 
 expr
-    : fn 
+    : fn
     | jump_expr
-    | bool_expr
+    | bool_expr assign?
 
 jump_expr : "return" expr? | "break" expr? | "continue"
 
@@ -22,10 +22,10 @@ fn : "fn" "(" (unwrap ",")* unwrap? ")" expr
 
 bool_expr
     : "not" comparision_expr
-    | comparision_expr ("or" comparision_expr)* 
+    | comparision_expr ("or" comparision_expr)*
     | comparision_expr ("and" comparision_expr)*
 
-comparision_expr 
+comparision_expr
     : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in") range_expr)?
     | range_expr ("is" type_name)?
 
@@ -43,11 +43,9 @@ mul_expr : cast_expr (("*" | "/" | "//" | "%") cast_expr)*
 
 cast_expr : prefix_expr ("as" type_name)?
 
-prefix_expr
-    : ("try" | "-" | "+" | "~") power_expr
-    | power_expr
+prefix_expr : ("try" | "-" | "+" | "~")? power_expr
 
-power_expr : primary_expr suffix_expr*  (assign? | ("**" power_expr)?)
+power_expr : primary_expr suffix_expr* ("**" power_expr)?
 
 assign
     : "=" expr
@@ -62,7 +60,7 @@ primary_expr
     : IDENTIFIER
     | STRING
     | NUMBER
-    | "true" 
+    | "true"
     | "false"
     | "(" expr ")"
     | "(" (expr ",")+ expr? ")"

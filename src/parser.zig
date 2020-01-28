@@ -157,11 +157,11 @@ pub const Parser = struct {
     /// expr
     ///     : fn
     ///     | jump_expr
-    ///     | bool_expr
+    ///     | bool_expr assign?
     fn expr(parser: *Parser, skip_nl: bool) ParseError!*Node {
         if (try parser.func(skip_nl)) |node| return node;
         if (try parser.jumpExpr()) |node| return node;
-        return parser.boolExpr(skip_nl);
+        return parser.assign(try parser.boolExpr(skip_nl), skip_nl);
     }
 
     /// fn : "fn" "(" (unwrap ",")* unwrap? ")" expr
@@ -497,9 +497,7 @@ pub const Parser = struct {
         return lhs;
     }
 
-    /// prefix_expr
-    ///     : ("try" | "-" | "+" | "~") power_expr
-    ///     | power_expr
+    /// power_expr : primary_expr suffix_expr* ("**" power_expr)?
     fn prefixExpr(parser: *Parser, skip_nl: bool) ParseError!*Node {
         if (parser.eatTokenId(.Keyword_try, skip_nl) orelse
             parser.eatTokenId(.Minus, skip_nl) orelse
@@ -524,7 +522,7 @@ pub const Parser = struct {
         return try parser.powerExpr(skip_nl);
     }
 
-    /// power_expr : primary_expr suffix_expr*  (assign | ("**" power_expr))?
+    /// power_expr : primary_expr suffix_expr* ("**" power_expr)?
     fn powerExpr(parser: *Parser, skip_nl: bool) ParseError!*Node {
         var primary = try parser.primaryExpr(skip_nl);
         primary = try parser.suffixExpr(primary, skip_nl);
@@ -539,7 +537,7 @@ pub const Parser = struct {
             };
             return &node.base;
         }
-        return try parser.assign(primary, skip_nl);
+        return primary;
     }
 
     /// suffix_expr
