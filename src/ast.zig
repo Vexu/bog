@@ -58,17 +58,9 @@ pub const Node = struct {
         op: union(enum) {
             Error: *Node,
             Map: NodeList,
-            List: ListTuple,
-            Tuple: ListTuple,
+            List: NodeList,
+            Tuple: NodeList,
         },
-        const ListTuple = struct {
-            from: enum {
-                Front,
-                Back,
-                All,
-            },
-            unwraps: NodeList,
-        };
         l_tok: TokenIndex,
         r_tok: TokenIndex,
     };

@@ -6,9 +6,9 @@ let : "let" unwrap "=" expr
 
 unwrap
     : IDENTIFIER
-    | "{" ((expr ":")? (unwrap | "_") ",")* "}"
-    | "(" ("..." ",")? ((unwrap | "_") ",")* ("," "...")? ")"
-    | "[" ("..." ",")? ((unwrap | "_") ",")* ("," "...")? "]"
+    | "{" ((expr ":")? (unwrap | "_") ",")* ((expr ":")? (unwrap | "_"))?"}"
+    | "(" ((unwrap | "_") ",")* (unwrap | "_")? ")"
+    | "[" ((unwrap | "_") ",")* (unwrap | "_")? "]"
     | "error" "(" (unwrap | "_") ")"
 
 expr
@@ -18,7 +18,7 @@ expr
 
 jump_expr : "return" expr? | "break" expr? | "continue"
 
-fn : "fn" "(" (unwrap ",")* ")" expr
+fn : "fn" "(" (unwrap ",")* unwrap? ")" expr
 
 bool_expr
     : "not" comparision_expr
@@ -55,7 +55,7 @@ assign
 
 suffix_expr
     : "[" expr "]"
-    | "(" (expr ",")* ")"
+    | "(" (expr ",")* expr? ")"
     | "." IDENTIFIER
 
 primary_expr
@@ -64,9 +64,10 @@ primary_expr
     | NUMBER
     | "true" 
     | "false"
-    | "(" (expr ",")* ")"
-    | "{" (expr ":" expr ",")* "}"
-    | "[" (expr ",")* "]"
+    | "(" expr ")"
+    | "(" (expr ",")+ expr? ")"
+    | "{" (expr ":" expr ",")* (expr ":" expr)? "}"
+    | "[" (expr ",")* expr? "]"
     | "error" "(" expr ")"
     | "import" "(" STRING ")"
     | block
@@ -88,4 +89,4 @@ match : "match" "(" bool_expr ")" "{" (NL match_case)+ NL "}"
 match_case
     : "let" unwrap ":" expr
     | "_" ":" expr
-    | (expr ",")+ ":" expr
+    | expr ("," expr)* ","? ":" expr

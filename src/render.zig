@@ -113,11 +113,12 @@ pub const Renderer = struct {
                 const jump = @fieldParentPtr(Node.Jump, "base", node);
 
                 switch (jump.op) {
-                    .Return => |expr| {
-                        try self.renderToken(jump.tok, stream, indent, .Space);
-                        return self.renderNode(expr, stream, indent, space);
+                    .Return, .Break => |expr| {
+                        const after_tok_space = if (expr != null) .Space else Space.Newline;
+                        try self.renderToken(jump.tok, stream, indent, after_tok_space);
+                        if (expr) |some| try self.renderNode(some, stream, indent, space);
                     },
-                    .Continue, .Break => try self.renderToken(jump.tok, stream, indent, space),
+                    .Continue => try self.renderToken(jump.tok, stream, indent, space),
                 }
             },
             .While => {
