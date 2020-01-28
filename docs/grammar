@@ -1,61 +1,61 @@
 root : (stmt NL)* EOF
 
-stmt : let | expr.l
+stmt : let | expr
 
-let : "let" unwrap "=" expr.r
+let : "let" unwrap "=" expr
 
 unwrap
     : IDENTIFIER
-    | "{" ((expr.r ":")? (unwrap | "_") ",")* "}"
+    | "{" ((expr ":")? (unwrap | "_") ",")* "}"
     | "(" ("..." ",")? ((unwrap | "_") ",")* ("," "...")? ")"
     | "[" ("..." ",")? ((unwrap | "_") ",")* ("," "...")? "]"
     | "error" "(" (unwrap | "_") ")"
 
 expr
     : fn 
-    | [.l jump_expr]
+    | jump_expr
     | bool_expr
 
-jump_expr : "return" expr.r? | "break" expr.r? | "continue"
+jump_expr : "return" expr? | "break" expr? | "continue"
 
-fn : "fn" "(" (unwrap ",")* ")" expr.r
+fn : "fn" "(" (unwrap ",")* ")" expr
 
 bool_expr
-    : "not" comparision_expr.r
-    | comparision_expr ("or" comparision_expr.r)* 
-    | comparision_expr ("and" comparision_expr.r)*
+    : "not" comparision_expr
+    | comparision_expr ("or" comparision_expr)* 
+    | comparision_expr ("and" comparision_expr)*
 
 comparision_expr 
-    : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in") range_expr.r)?
+    : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in") range_expr)?
     | range_expr ("is" type_name)?
 
 type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
 
-range_expr : bit_expr ("..." bit_expr.r)?
+range_expr : bit_expr ("..." bit_expr)?
 
-bit_expr : shift_expr (("&" shift_expr.r)* | ("|" shift_expr.r)* | ("^" shift_expr.r)*) | ("catch" ("let" unwrap ":")? expr)
+bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)*) | ("catch" ("let" unwrap ":")? expr)
 
-shift_expr : add_expr (("<<" | ">>") add_expr.r)
+shift_expr : add_expr (("<<" | ">>") add_expr)
 
-add_expr : mul_expr (("-" | "+") mul_expr.r)*
+add_expr : mul_expr (("-" | "+") mul_expr)*
 
-mul_expr : cast_expr (("*" | "/" | "//" | "%") cast_expr.r)*
+mul_expr : cast_expr (("*" | "/" | "//" | "%") cast_expr)*
 
 cast_expr : prefix_expr ("as" type_name)?
 
 prefix_expr
-    : ("try" | "-" | "+" | "~") power_expr.r
+    : ("try" | "-" | "+" | "~") power_expr
     | power_expr
 
-power_expr : primary_expr suffix_expr*  ([.l assign?] | ("**" power_expr.r)?)
+power_expr : primary_expr suffix_expr*  (assign? | ("**" power_expr)?)
 
 assign
-    : "=" expr.r
-    | ("+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") bit_expr.r
+    : "=" expr
+    | ("+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") bit_expr
 
 suffix_expr
-    : "[" expr.r "]"
-    | "(" (expr.r ",")* ")"
+    : "[" expr "]"
+    | "(" (expr ",")* ")"
     | "." IDENTIFIER
 
 primary_expr
@@ -64,10 +64,10 @@ primary_expr
     | NUMBER
     | "true" 
     | "false"
-    | "(" (expr.r ",")* ")"
-    | "{" (expr.r ":" expr.r ",")* "}"
-    | "[" (expr.r ",")* "]"
-    | "error" "(" expr.r ")"
+    | "(" (expr ",")* ")"
+    | "{" (expr ":" expr ",")* "}"
+    | "[" (expr ",")* "]"
+    | "error" "(" expr ")"
     | "import" "(" STRING ")"
     | block
     | if
@@ -77,15 +77,15 @@ primary_expr
 
 block : "{" (NL stmt)+ "}"
 
-if : "if" "(" ("let" unwrap "=") bool_expr.r ")" expr ("else" expr)?
+if : "if" "(" ("let" unwrap "=") bool_expr ")" expr ("else" expr)?
 
-while : "while" "(" ("let" unwrap "=") bool_expr.r ")" expr
+while : "while" "(" ("let" unwrap "=") bool_expr ")" expr
 
-for : "for" "(" ("let" unwrap "in") range_expr.r ")" expr
+for : "for" "(" ("let" unwrap "in") range_expr ")" expr
 
-match : "match" "(" bool_expr.r ")" "{" (NL match_case)+ NL "}"
+match : "match" "(" bool_expr ")" "{" (NL match_case)+ NL "}"
 
 match_case
     : "let" unwrap ":" expr
     | "_" ":" expr
-    | (expr.r ",")+ ":" expr
+    | (expr ",")+ ":" expr
