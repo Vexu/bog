@@ -1,8 +1,82 @@
 const std = @import("std");
-const TokenIndex = @import("tokenizer.zig").TokenIndex;
+const Allocator = std.mem.Allocator;
 const TypeId = @import("value.zig").TypeId;
+const Token = @import("tokenizer.zig").Token;
 
+pub const TokenIndex = u32;
+
+pub const TokenList = std.SegmentedList(Token, 64);
 pub const NodeList = std.SegmentedList(*Node, 4);
+pub const ErrorList = std.SegmentedList(ErrorMsg, 0);
+
+pub const Tree = struct {
+    tokens: TokenList,
+    nodes: NodeList,
+    errors: ErrorList,
+
+    pub fn init(allocator: *Allocator) Tree {
+        return .{
+            .tokens = TokenList.init(allocator),
+            .nodes = NodeList.init(allocator),
+            .errors = ErrorList.init(allocator),
+        };
+    }
+
+    pub fn deinit(tree: *Tree) void {
+        tree.tokens.deinit();
+        tree.nodes.deinit();
+        tree.errors.deinit();
+    }
+};
+
+pub const ErrorMsg = struct {
+    index: u32,
+    kind: Kind,
+
+    pub const Kind = enum {
+        UnexpectedToken,
+        PrimaryExpr,
+        TypeName,
+        Unwrap,
+        InvalidBaseReal,
+        InvalidNum,
+        InvalidHex,
+        InvalidOctal,
+        InvalidBinary,
+        InvalidExponent,
+        InvalidCharacter,
+        InvalidMultilineStr,
+        InvalidEscape,
+        InvalidNot,
+        InvalidOctalStart,
+        UnterminatedString,
+        UnexpectedEof,
+        UnmatchedBracket,
+    };
+
+    pub fn string(err: Error) !void {
+        switch (err.kind) {
+            .UnexpectedToken => "unexpected token",
+            .PrimaryExpr => "expected Identifier, String, Number, true, false, '(', '{{', '[', error, import, if, while, for, match.",
+            .TypeName => "expected type name",
+            .Unwrap => "expected identifier, '{', '(', '[' or 'error'",
+            .InvalidBaseReal => "invalid base for floating point number",
+            .InvalidNum => "invalid digit in number",
+            .InvalidHex => "invalid digit in hex number",
+            .InvalidOctal => "invalid digit in octal number",
+            .InvalidBinary => "invalid digit in binary number",
+            .InvalidExponent => "invalid exponent digit",
+            .InvalidCharacter => "invalid character",
+            .InvalidMultilineStr => "invalid newline, use'\"' for multiline strings",
+            .InvalidEscape => "invalid escape sequence",
+            .InvalidNot => "invalid character, use 'not' for boolean not",
+            .InvalidOctalStart => "octal literals start with '0o'",
+            .UnterminatedString => "unterminated string",
+            .UnexpectedEof => "unexpected EOF",
+            .UnmatchedBracket => "unmatched bracket",
+        }
+    }
+};
 
 pub const Node = struct {
     id: Id,

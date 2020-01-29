@@ -1,16 +1,16 @@
 const std = @import("std");
 const ast = @import("ast.zig");
+const Tree = ast.Tree;
 const Node = ast.Node;
 const NodeList = ast.NodeList;
-const tokenizer = @import("tokenizer.zig");
-const TokenIndex = tokenizer.TokenIndex;
-const TokenList = tokenizer.TokenList;
+const TokenList = ast.TokenList;
+const TokenIndex = ast.TokenIndex;
 
-pub fn render(source: []const u8, tokens: *TokenList, nodes: *NodeList, stream: var) @TypeOf(stream).Child.Error!void {
-    var it = nodes.iterator(0);
+pub fn render(source: []const u8, tree: *Tree, stream: var) @TypeOf(stream).Child.Error!void {
+    var it = tree.nodes.iterator(0);
     var renderer = Renderer{
         .source = source,
-        .tokens = tokens,
+        .tokens = &tree.tokens,
     };
     while (it.next()) |node| {
         try renderer.renderNode(node.*, stream, 0, .Newline);

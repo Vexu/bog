@@ -3,70 +3,34 @@ const mem = std.mem;
 const testing = std.testing;
 const tokenizer = @import("tokenizer.zig");
 const Token = tokenizer.Token;
-const TokenList = tokenizer.TokenList;
-const TokenIndex = tokenizer.TokenIndex;
 const Allocator = mem.Allocator;
 const TypeId = @import("value.zig").TypeId;
 const ast = @import("ast.zig");
+const Tree = ast.Tree;
 const Node = ast.Node;
 const NodeList = ast.NodeList;
+const TokenList = ast.TokenList;
+const TokenIndex = ast.TokenIndex;
 
-pub const Error = struct {
-    tok: *Token,
-    kind: Kind,
-
-    const Kind = enum {
-        UnexpectedToken,
-        PrimaryExpr,
-        UndeclaredIdentifier,
-        TypeName,
-        Unwrap,
-    };
-
-    pub fn render(err: Error, stream: var) !void {
-        switch (err.kind) {
-            .UnexpectedToken => try stream.print("unexpected token '{}'", .{err.tok.id.string()}),
-            .PrimaryExpr => try stream.print("expected Identifier, String, Number, true, false, '(', '{{', '[', error, import, if, while, for, match. found '{}'", .{err.tok.id.string()}),
-            .UndeclaredIdentifier => try stream.print("use of undeclared identifier '{}'", .{err.tok.id.Identifier}),
-            .TypeName => try stream.write("expected type name"),
-            .Unwrap => try stream.write("expected identifier, '{', '(', '[' or 'error'"),
-        }
-    }
-};
-
-pub const ErrorList = std.SegmentedList(Error, 0);
-
-pub fn parse(arena: *std.heap.ArenaAllocator, it: TokenList.Iterator, errors: *ErrorList) ParseError!NodeList {
+/// root : (stmt NL)* EOF
+pub fn parse(arena: *std.heap.ArenaAllocator, tree: *Tree) ParseError!void {
     var parser = Parser{
         .arena = &arena.allocator,
-        .it = it,
-        .errors = errors,
+        .it = tree.tokens.iterator(0),
+        .tree = tree,
     };
-    var list = NodeList.init(parser.arena);
     while (true) {
-        try list.push((try parser.next()) orelse break);
+        if (parser.eatToken(.Eof, true)) |_| break;
+        try tree.nodes.push(try parser.stmt());
     }
-    return list;
 }
 
 pub const ParseError = error{ParseError} || Allocator.Error;
 
 pub const Parser = struct {
     it: TokenList.Iterator,
-    errors: *ErrorList,
+    tree: *Tree,
     arena: *Allocator,
-
-    /// root : (stmt NL)* EOF
-    pub fn next(parser: *Parser) ParseError!?*Node {
-        if (parser.eatToken(.Eof, true)) |_| return null;
-        const res = try parser.stmt();
-        _ = parser.eatToken(.Nl, false) orelse {
-            _ = try parser.expectToken(.Eof, true); // TODO
-            _ = parser.it.prev();
-            return res;
-        };
-        return res;
-    }
 
     /// stmt : let | expr.l
     fn stmt(parser: *Parser) ParseError!*Node {
@@ -982,10 +946,10 @@ pub const Parser = struct {
         return &node.base;
     }
 
-    fn reportErr(parser: *Parser, kind: Error.Kind, tok: *Token) ParseError {
-        try parser.errors.push(.{
+    fn reportErr(parser: *Parser, kind: ast.ErrorMsg.Kind, tok: *Token) ParseError {
+        try parser.tree.errors.push(.{
             .kind = kind,
-            .tok = tok,
+            .index = tok.start,
         });
         return error.ParseError;
     }

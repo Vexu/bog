@@ -1,9 +1,10 @@
 const std = @import("std");
 const mem = std.mem;
 const math = std.math;
-const Allocator = mem.Allocator;
 const testing = std.testing;
 const unicode = std.unicode;
+const ast = @import("ast.zig");
+const Tree = ast.Tree;
 
 fn isWhiteSpace(c: u32) bool {
     return switch (c) {
@@ -105,8 +106,6 @@ fn isIdentifier(c: u32) bool {
         else => false,
     };
 }
-
-pub const TokenIndex = u32;
 
 pub const Token = struct {
     start: u32,
@@ -309,18 +308,9 @@ pub const Token = struct {
     }
 };
 
-pub const TokenList = std.SegmentedList(Token, 64);
-pub const ErrorList = std.SegmentedList(Error, 0);
-
-const Error = struct {
-    msg: []const u8,
-    index: u32,
-};
-
 pub const Tokenizer = struct {
+    tree: *Tree,
     it: unicode.Utf8Iterator,
-    tokens: TokenList,
-    errors: ErrorList,
     start_index: usize = 0,
     level: u32 = 0,
     string: bool = false,
@@ -328,29 +318,24 @@ pub const Tokenizer = struct {
     no_eof: bool = false,
     repl: bool,
 
-    pub const TokenizeError = error{TokenizeError} || Allocator.Error;
+    pub const TokenizeError = error{TokenizeError} || mem.Allocator.Error;
 
-    pub fn init(allocator: *Allocator, repl: bool) Tokenizer {
+    pub fn init(tree: *Tree, repl: bool) Tokenizer {
         return .{
-            .errors = ErrorList.init(allocator),
+            .tree = tree,
             .it = .{
                 .i = 0,
                 .bytes = "",
             },
-            .tokens = TokenList.init(allocator),
             .repl = repl,
         };
     }
 
-    pub fn deinit(self: *Tokenizer) void {
-        self.tokens.deinit();
-    }
-
     pub fn tokenize(self: *Tokenizer, input: []const u8) TokenizeError!bool {
         self.it.bytes = input;
-        _ = self.tokens.pop();
+        _ = self.tree.tokens.pop();
         while (true) {
-            const tok = try self.tokens.addOne();
+            const tok = try self.tree.tokens.addOne();
             tok.* = try self.next();
             if (tok.id == .Eof) {
                 return if (self.repl and (self.level != 0 or self.string or self.no_eof))
@@ -361,10 +346,10 @@ pub const Tokenizer = struct {
         }
     }
 
-    fn err(self: *Tokenizer, msg: []const u8) TokenizeError {
-        try self.errors.push(.{
-            .msg = msg,
+    fn err(self: *Tokenizer, kind: ast.ErrorMsg.Kind) TokenizeError {
+        try self.tree.errors.push(.{
             .index = @truncate(u32, self.it.i),
+            .kind = kind,
         });
         return error.TokenizeError;
     }
@@ -447,7 +432,7 @@ pub const Tokenizer = struct {
                     },
                     ')' => {
                         if (self.level == 0) {
-                            return self.err("unmatched ')'");
+                            return self.err(.UnmatchedBracket);
                         }
                         self.level -= 1;
                         res = .RParen;
@@ -460,7 +445,7 @@ pub const Tokenizer = struct {
                     },
                     ']' => {
                         if (self.level == 0) {
-                            return self.err("unmatched ']'");
+                            return self.err(.UnmatchedBracket);
                         }
                         self.level -= 1;
                         res = .RBracket;
@@ -495,7 +480,7 @@ pub const Tokenizer = struct {
                     },
                     '}' => {
                         if (self.level == 0) {
-                            return self.err("unmatched '}'");
+                            return self.err(.UnmatchedBracket);
                         }
                         self.level -= 1;
                         res = .RBrace;
@@ -533,7 +518,7 @@ pub const Tokenizer = struct {
                         } else if (isIdentifier(c)) {
                             state = .Identifier;
                         } else {
-                            return self.err("invalid character");
+                            return self.err(.InvalidCharacter);
                         }
                     },
                 },
@@ -543,7 +528,7 @@ pub const Tokenizer = struct {
                     },
                     '\n', '\r' => {
                         if (str_delimit == '\'') {
-                            return self.err("invalid newline, use'\"' for multiline strings");
+                            return self.err(.InvalidMultilineStr);
                         }
                     },
                     else => {
@@ -566,7 +551,7 @@ pub const Tokenizer = struct {
                         state = .UnicodeStart;
                     },
                     else => {
-                        return self.err("invalid escape sequence");
+                        return self.err(.InvalidEscape);
                     },
                 },
                 .HexEscape => switch (c) {
@@ -584,7 +569,7 @@ pub const Tokenizer = struct {
                     counter = 0;
                     state = .UnicodeEscape;
                 } else {
-                    return self.err("invalid escape sequence");
+                    return self.err(.InvalidEscape);
                 },
                 .UnicodeEscape => switch (c) {
                     '0'...'9', 'a'...'f', 'A'...'F' => {
@@ -597,13 +582,13 @@ pub const Tokenizer = struct {
                         state = .String;
                     },
                     else => {
-                        return self.err("invalid escape sequence");
+                        return self.err(.InvalidEscape);
                     },
                 },
                 .UnicodeEnd => if (c == '}') {
                     state = .String;
                 } else {
-                    return self.err("invalid escape sequence");
+                    return self.err(.InvalidEscape);
                 },
                 .Identifier => {
                     if (!isIdentifier(c)) {
@@ -630,7 +615,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        return self.err("invalid character, use 'not' for boolean not");
+                        return self.err(.InvalidNot);
                     },
                 },
                 .Pipe => switch (c) {
@@ -768,7 +753,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        return self.err("invalid character");
+                        return self.err(.InvalidCharacter);
                     },
                 },
                 .Minus => switch (c) {
@@ -841,7 +826,7 @@ pub const Tokenizer = struct {
                         state = .FloatFraction;
                     },
                     '0'...'9', 'a', 'c'...'f', 'A'...'F' => {
-                        return self.err("octal literals start with '0o'");
+                        return self.err(.InvalidOctalStart);
                     },
                     '_' => {
                         state = .Number;
@@ -855,10 +840,10 @@ pub const Tokenizer = struct {
                 .BinaryNumber => switch (c) {
                     '0', '1', '_' => {},
                     '2'...'9', 'a'...'f', 'A'...'F' => {
-                        return self.err("invalid digit in octal number");
+                        return self.err(.InvalidBinary);
                     },
                     '.' => {
-                        return self.err("invalid base for floating point number");
+                        return self.err(.InvalidBaseReal);
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
@@ -869,10 +854,10 @@ pub const Tokenizer = struct {
                 .OctalNumber => switch (c) {
                     '0'...'7', '_' => {},
                     '8'...'9', 'a'...'f', 'A'...'F' => {
-                        return self.err("invalid digit in number");
+                        return self.err(.InvalidOctal);
                     },
                     '.' => {
-                        return self.err("invalid base for floating point number");
+                        return self.err(.InvalidBaseReal);
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
@@ -883,7 +868,7 @@ pub const Tokenizer = struct {
                 .HexNumber => switch (c) {
                     '0'...'9', 'a'...'f', 'A'...'F', '_' => {},
                     '.' => {
-                        return self.err("invalid base for floating point number");
+                        return self.err(.InvalidBaseReal);
                     },
                     'p', 'P' => {
                         state = .FloatExponent;
@@ -897,7 +882,7 @@ pub const Tokenizer = struct {
                 .Number => switch (c) {
                     '0'...'9', '_' => {},
                     'a'...'d', 'f', 'A'...'F' => {
-                        return self.err("invalid digit in hex number");
+                        return self.err(.InvalidNum);
                     },
                     '.' => {
                         // TODO might be ...
@@ -939,7 +924,7 @@ pub const Tokenizer = struct {
                     '_' => {},
                     else => {
                         if (counter == 0) {
-                            return self.err("invalid exponent digit");
+                            return self.err(.InvalidExponent);
                         }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         res = .Number;
@@ -966,7 +951,7 @@ pub const Tokenizer = struct {
                         self.it.i = self.start_index;
                         res = .Eof;
                     } else
-                        return self.err("unterminated string");
+                        return self.err(.UnterminatedString);
                 },
                 .LineComment => res = .Comment,
                 .FloatFraction => res = .Number,
@@ -987,7 +972,7 @@ pub const Tokenizer = struct {
                 .Asterisk => res = .Asterisk,
                 .AsteriskAsterisk => res = .AsteriskAsterisk,
                 else => {
-                    return self.err("unexpected eof");
+                    return self.err(.UnexpectedEof);
                 },
             }
         }
@@ -1002,10 +987,11 @@ pub const Tokenizer = struct {
     }
 };
 
+var test_tree = Tree.init(std.debug.failing_allocator);
+
 fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
     var tokenizer = Tokenizer{
-        .errors = undefined, // errors are not supposed to happen
-        .tokens = undefined, // not used
+        .tree = &test_tree,
         .repl = false,
         .it = .{
             .i = 0,
