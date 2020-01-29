@@ -1,3 +1,12 @@
+test "unicode identifiers" {
+    try testTransform(
+        \\öäöäö;
+    ,
+        \\öäöäö
+        \\
+    );
+}
+
 test "trailing comma in call" {
     try testCanonical(
         \\foo(2, 3)
