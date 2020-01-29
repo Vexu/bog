@@ -346,11 +346,12 @@ pub const Tokenizer = struct {
         }
     }
 
-    fn err(self: *Tokenizer, kind: ast.ErrorMsg.Kind) TokenizeError {
+    fn err(self: *Tokenizer, kind: ast.ErrorMsg.Kind, c: u21) TokenizeError {
         try self.tree.errors.push(.{
-            .index = @truncate(u32, self.it.i),
+            .index = @truncate(u32, self.it.i - (unicode.utf8CodepointSequenceLength(c) catch unreachable)),
             .kind = kind,
         });
+        self.it.i = self.it.bytes.len;
         return error.TokenizeError;
     }
 
@@ -432,7 +433,7 @@ pub const Tokenizer = struct {
                     },
                     ')' => {
                         if (self.level == 0) {
-                            return self.err(.UnmatchedBracket);
+                            return self.err(.UnmatchedBracket, c);
                         }
                         self.level -= 1;
                         res = .RParen;
@@ -445,7 +446,7 @@ pub const Tokenizer = struct {
                     },
                     ']' => {
                         if (self.level == 0) {
-                            return self.err(.UnmatchedBracket);
+                            return self.err(.UnmatchedBracket, c);
                         }
                         self.level -= 1;
                         res = .RBracket;
@@ -480,7 +481,7 @@ pub const Tokenizer = struct {
                     },
                     '}' => {
                         if (self.level == 0) {
-                            return self.err(.UnmatchedBracket);
+                            return self.err(.UnmatchedBracket, c);
                         }
                         self.level -= 1;
                         res = .RBrace;
@@ -518,7 +519,7 @@ pub const Tokenizer = struct {
                         } else if (isIdentifier(c)) {
                             state = .Identifier;
                         } else {
-                            return self.err(.InvalidCharacter);
+                            return self.err(.InvalidCharacter, c);
                         }
                     },
                 },
@@ -528,7 +529,7 @@ pub const Tokenizer = struct {
                     },
                     '\n', '\r' => {
                         if (str_delimit == '\'') {
-                            return self.err(.InvalidMultilineStr);
+                            return self.err(.InvalidMultilineStr, c);
                         }
                     },
                     else => {
@@ -551,7 +552,7 @@ pub const Tokenizer = struct {
                         state = .UnicodeStart;
                     },
                     else => {
-                        return self.err(.InvalidEscape);
+                        return self.err(.InvalidEscape, c);
                     },
                 },
                 .HexEscape => switch (c) {
@@ -562,6 +563,9 @@ pub const Tokenizer = struct {
                         }
                     },
                     else => {
+                        if (counter != 2) {
+                            return self.err(.InvalidEscape, c);
+                        }
                         state = .String;
                     },
                 },
@@ -569,7 +573,7 @@ pub const Tokenizer = struct {
                     counter = 0;
                     state = .UnicodeEscape;
                 } else {
-                    return self.err(.InvalidEscape);
+                    return self.err(.InvalidEscape, c);
                 },
                 .UnicodeEscape => switch (c) {
                     '0'...'9', 'a'...'f', 'A'...'F' => {
@@ -582,13 +586,13 @@ pub const Tokenizer = struct {
                         state = .String;
                     },
                     else => {
-                        return self.err(.InvalidEscape);
+                        return self.err(.InvalidEscape, c);
                     },
                 },
                 .UnicodeEnd => if (c == '}') {
                     state = .String;
                 } else {
-                    return self.err(.InvalidEscape);
+                    return self.err(.InvalidEscape, c);
                 },
                 .Identifier => {
                     if (!isIdentifier(c)) {
@@ -615,7 +619,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        return self.err(.InvalidNot);
+                        return self.err(.InvalidNot, c);
                     },
                 },
                 .Pipe => switch (c) {
@@ -753,7 +757,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        return self.err(.InvalidCharacter);
+                        return self.err(.InvalidCharacter, c);
                     },
                 },
                 .Minus => switch (c) {
@@ -826,7 +830,7 @@ pub const Tokenizer = struct {
                         state = .FloatFraction;
                     },
                     '0'...'9', 'a', 'c'...'f', 'A'...'F' => {
-                        return self.err(.InvalidOctalStart);
+                        return self.err(.InvalidOctalStart, c);
                     },
                     '_' => {
                         state = .Number;
@@ -840,10 +844,10 @@ pub const Tokenizer = struct {
                 .BinaryNumber => switch (c) {
                     '0', '1', '_' => {},
                     '2'...'9', 'a'...'f', 'A'...'F' => {
-                        return self.err(.InvalidBinary);
+                        return self.err(.InvalidBinary, c);
                     },
                     '.' => {
-                        return self.err(.InvalidBaseReal);
+                        return self.err(.InvalidBaseReal, c);
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
@@ -854,10 +858,10 @@ pub const Tokenizer = struct {
                 .OctalNumber => switch (c) {
                     '0'...'7', '_' => {},
                     '8'...'9', 'a'...'f', 'A'...'F' => {
-                        return self.err(.InvalidOctal);
+                        return self.err(.InvalidOctal, c);
                     },
                     '.' => {
-                        return self.err(.InvalidBaseReal);
+                        return self.err(.InvalidBaseReal, c);
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
@@ -868,7 +872,7 @@ pub const Tokenizer = struct {
                 .HexNumber => switch (c) {
                     '0'...'9', 'a'...'f', 'A'...'F', '_' => {},
                     '.' => {
-                        return self.err(.InvalidBaseReal);
+                        return self.err(.InvalidBaseReal, c);
                     },
                     'p', 'P' => {
                         state = .FloatExponent;
@@ -882,7 +886,7 @@ pub const Tokenizer = struct {
                 .Number => switch (c) {
                     '0'...'9', '_' => {},
                     'a'...'d', 'f', 'A'...'F' => {
-                        return self.err(.InvalidNum);
+                        return self.err(.InvalidNum, c);
                     },
                     '.' => {
                         // TODO might be ...
@@ -924,7 +928,7 @@ pub const Tokenizer = struct {
                     '_' => {},
                     else => {
                         if (counter == 0) {
-                            return self.err(.InvalidExponent);
+                            return self.err(.InvalidExponent, c);
                         }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         res = .Number;
@@ -951,7 +955,7 @@ pub const Tokenizer = struct {
                         self.it.i = self.start_index;
                         res = .Eof;
                     } else
-                        return self.err(.UnterminatedString);
+                        return self.err(.UnterminatedString, 'a');
                 },
                 .LineComment => res = .Comment,
                 .FloatFraction => res = .Number,
@@ -972,7 +976,7 @@ pub const Tokenizer = struct {
                 .Asterisk => res = .Asterisk,
                 .AsteriskAsterisk => res = .AsteriskAsterisk,
                 else => {
-                    return self.err(.UnexpectedEof);
+                    return self.err(.UnexpectedEof, 'a');
                 },
             }
         }

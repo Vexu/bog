@@ -40,7 +40,7 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
                     try out_stream.print(RED ++ "error: " ++ BOLD ++ "{}\n" ++ RESET, .{e.string()});
 
                     const slice = repl.buffer.toSliceConst();
-                    const start = lastIndexOfScalarPos(u8, slice, e.index, '\n') orelse 0;
+                    const start = lineBegin(slice, e.index);
                     const end = std.mem.indexOfScalarPos(u8, slice, e.index, '\n') orelse slice.len;
                     try out_stream.write(slice[start..end]);
                     try out_stream.write(std.cstr.line_sep);
@@ -55,13 +55,13 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     }
 }
 
-pub fn lastIndexOfScalarPos(comptime T: type, slice: []const T, start_index: usize, value: T) ?usize {
+fn lineBegin(slice: []const u8, start_index: usize) usize {
     var i = start_index;
     while (i != 0) {
         i -= 1;
-        if (slice[i] == value) return i + 1;
+        if (slice[i] == '\n') return i + 1;
     }
-    return null;
+    return 0;
 }
 
 const Repl = struct {
