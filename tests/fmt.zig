@@ -94,8 +94,7 @@ fn fmt(source: []const u8) ![]u8 {
 
     var tree = Tree.init(alloc);
     _ = try Tokenizer.init(&tree, false).tokenize(source);
-    var arena = std.heap.ArenaAllocator.init(alloc);
-    try parser.parse(&arena, &tree);
+    try parser.parse(&tree, 0);
 
     var out_buf = try std.Buffer.initSize(alloc, 0);
     var out_stream = std.io.BufferOutStream.init(&out_buf);

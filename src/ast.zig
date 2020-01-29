@@ -13,12 +13,14 @@ pub const Tree = struct {
     tokens: TokenList,
     nodes: NodeList,
     errors: ErrorList,
+    arena_allocator: std.heap.ArenaAllocator,
 
     pub fn init(allocator: *Allocator) Tree {
         return .{
             .tokens = TokenList.init(allocator),
             .nodes = NodeList.init(allocator),
             .errors = ErrorList.init(allocator),
+            .arena_allocator = std.heap.ArenaAllocator.init(allocator),
         };
     }
 
@@ -54,8 +56,8 @@ pub const ErrorMsg = struct {
         UnmatchedBracket,
     };
 
-    pub fn string(err: Error) !void {
-        switch (err.kind) {
+    pub fn string(err: ErrorMsg) []const u8 {
+        return switch (err.kind) {
             .UnexpectedToken => "unexpected token",
             .PrimaryExpr => "expected Identifier, String, Number, true, false, '(', '{{', '[', error, import, if, while, for, match.",
             .TypeName => "expected type name",
@@ -74,7 +76,7 @@ pub const ErrorMsg = struct {
             .UnterminatedString => "unterminated string",
             .UnexpectedEof => "unexpected EOF",
             .UnmatchedBracket => "unmatched bracket",
-        }
+        };
     }
 };
 

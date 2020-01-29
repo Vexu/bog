@@ -13,15 +13,19 @@ const TokenList = ast.TokenList;
 const TokenIndex = ast.TokenIndex;
 
 /// root : (stmt NL)* EOF
-pub fn parse(arena: *std.heap.ArenaAllocator, tree: *Tree) ParseError!void {
+pub fn parse(tree: *Tree, start_index: usize) ParseError!void {
     var parser = Parser{
-        .arena = &arena.allocator,
-        .it = tree.tokens.iterator(0),
+        .arena = &tree.arena_allocator.allocator,
+        .it = tree.tokens.iterator(start_index),
         .tree = tree,
     };
     while (true) {
         if (parser.eatToken(.Eof, true)) |_| break;
         try tree.nodes.push(try parser.stmt());
+        _ = parser.eatToken(.Nl, false) orelse {
+            _ = try parser.expectToken(.Eof, true);
+            break;
+        };
     }
 }
 
