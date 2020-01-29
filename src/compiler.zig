@@ -41,10 +41,18 @@ pub const Compiler = struct {
     }
 
     const Result = union(enum) {
+        /// A runtime value is expected
         Rt: RegRef,
+
+        /// Something assignable is expected
         Lval,
+
+        /// A value, runtime or constant, is expected
         Value,
-        Discarded,
+
+        /// No value is expected and any runtime result will be discarded
+        /// This distinction is mostly important for cases like `2 + (return)`
+        NoVal,
     };
 
     fn genNode(self: *Compiler, node: *Node, res: *Result) !Value {
@@ -91,77 +99,104 @@ pub const Compiler = struct {
             if (it.peek() == null) {
                 return self.genNode(n, res);
             }
-            try self.genNode(n, Result.Discarded);
+            const val = try self.genNode(n, .NoVal);
+            if (val == .Rt) {
+                // discard unused runtime value
+                try self.builder.discard(val.Rt);
+            }
         }
     }
 
-    fn errIfEmpty(self: *Compiler, val: Value) !void {
+    fn assertNotLval(self: *Compiler, res: Result) !void {
+        if (res == .Lval) {
+            // try adderr("invalid left hand side to assignment")
+            return error.CompileError;
+        }
+    }
+
+    fn assertNotEmpty(self: *Compiler, val: Value) !void {
         if (val == .Empty) {
             // try adderr("expected value")
             return error.CompileError;
         }
     }
 
-    fn genPrefix(self: *Compiler, node: *Node.Prefix, res: *Result) !Value {
-        if (res == .Lval) {
-            // try adderr("cannot assign to expression")
+    fn assertBool(self: *Compiler, val: Value) !void {
+        if (val != .Bool) {
+            // try adderr("expected boolean value")
             return error.CompileError;
         }
-        const r_val = try self.genNode(node.rhs, Result.Value);
-        try self.handleEmpty(r_val);
+    }
+
+    fn assertInt(self: *Compiler, val: Value) !void {
+        if (val != .Int) {
+            // try adderr("expected integer value")
+            return error.CompileError;
+        }
+    }
+
+    fn assertNumeric(self: *Compiler, val: Value) !void {
+        if (val != .Int and val != .Num) {
+            // try adderr("expected numeric value")
+            return error.CompileError;
+        }
+    }
+
+    fn genPrefix(self: *Compiler, node: *Node.Prefix, res: *Result) !Value {
+        try self.assertNotLval(res);
+        const r_val = try self.genNode(node.rhs, .Value);
+        try self.assertNotEmpty(r_val);
         if (r_val == .Rt) {
             const result_loc = if (res == .Rt) res.Rt else @panic("TODO: create result loc");
-            return Value{ .Rt = self.builder.prefix(result_loc, node.op, r_val.Rt) };
+            self.builder.prefix(result_loc, node.op, r_val.Rt);
+            return Value{ .Rt = result_loc };
         }
         const ret_val = switch (node.op) {
             .BoolNot => blk: {
-                // TODO try self.ensureBoolean(r_val);
-                break :blk Value{.Bool = !r_val.Bool};
+                try self.assertBool(r_val);
+                break :blk Value{ .Bool = !r_val.Bool };
             },
             .BitNot => blk: {
-                // TODO try self.ensureInteger(r_val);
-                break :blk Value{.Int = ~r_val.Int};
+                try self.assertInt(r_val);
+                break :blk Value{ .Int = ~r_val.Int };
             },
             .Minus => blk: {
-                // TODO try self.ensureNumeric(r_val);
+                try self.assertNumeric(r_val);
                 if (r_val == .Int) {
-                    break :blk Value{.Int -r_val.Int};
+                    break :blk Value{.Int - r_val.Int};
                 } else {
-                    break :blk Value{.Num -r_val.Num};
+                    break :blk Value{.Num - r_val.Num};
                 }
             },
             .Plus => blk: {
-                // TODO try self.ensureNumeric(r_val);
+                try self.assertNumeric(r_val);
                 break :blk r_val;
             },
             // errors are runtime only currently, so ret_val does not need to be checked
             .Try => ret_val,
         };
         if (res == .Rt) {
-            return Value{ .Rt = self.makeRuntime(ret_val) };
+            return Value{ .Rt = self.makeRuntime(res, ret_val) };
         }
-        // if res == .Discard or .Value nothing needs to be done
+        // if res == .NoVal or .Value nothing needs to be done
         return ret_val;
     }
 
     fn genLiteral(self: *Compiler, node: *Node.Literal, res: *Result) !Value {
-        switch (res) {
-            .Lval => {
-                // try adderr("cannot assign to literal")
-                return error.CompileError;
-            },
-            .Some => return switch (node.kind) {
-                .Int => .{ .Int = try self.parseInt(node.tok) },
-                .True => .{ .Bool = true },
-                .False => .{ .Bool = false },
-                .None => Value.None,
-                .Str => @panic("TODO: genStr"),
-                .Num => @panic("TODO: genNum"),
-            },
-            .None => {
-                // literal not used
-            },
+        try self.assertNotLval(res);
+        const ret_val: Value = switch (node.kind) {
+            .Int => .{ .Int = try self.parseInt(node.tok) },
+            .True => .{ .Bool = true },
+            .False => .{ .Bool = false },
+            .None => .None,
+            .Str => @panic("TODO: genStr"),
+            .Num => @panic("TODO: genNum"),
+        };
+        if (res == .Rt) {
+            return Value{ .Rt = self.makeRuntime(res, ret_val) };
         }
+        // if res == .NoVal or .Value nothing needs to be done
+        return ret_val;
     }
 
     fn tokenSlice(self: *Compiler, token: TokenIndex) Token.Id {

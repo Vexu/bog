@@ -1,8 +1,8 @@
 const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
-const tokenizer = @import("tokenizer.zig");
-const Token = tokenizer.Token;
+const ast = @import("ast.zig");
+const Node = ast.Node;
 const TypeId = @import("value.zig").TypeId;
 
 // TODO give these numbers once they are more stable
@@ -394,7 +394,7 @@ pub const Builder = struct {
         return reg;
     }
 
-    pub fn prefix(self: *Builder, res_loc: RegRef, op: var, val: RegRef) !void {
+    pub fn prefix(self: *Builder, res_loc: RegRef, op: Node.Prefix.Op, val: RegRef) !void {
         defer self.cur_func.freeRegisterIfTemp(rhs);
         try self.cur_func.emitInstruction(.{
             .op = switch (op) {
@@ -404,7 +404,6 @@ pub const Builder = struct {
                 .Try => .Try,
                 // TODO maybe don't no-op this
                 .Plus => return res_loc,
-                else => unreachable,
             },
             .A = res_loc,
             .B = val,

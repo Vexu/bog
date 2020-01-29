@@ -72,15 +72,17 @@ pub const Node = struct {
 
     pub const Prefix = struct {
         base: Node = Node{ .id = .Prefix },
-        op: enum {
+        op: Op,
+        tok: TokenIndex,
+        rhs: *Node,
+
+        pub const Op = enum {
             BoolNot,
             BitNot,
             Minus,
             Plus,
             Try,
-        },
-        tok: TokenIndex,
-        rhs: *Node,
+        };
     };
 
     pub const TypeInfix = struct {
