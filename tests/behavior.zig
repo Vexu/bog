@@ -1,3 +1,21 @@
+test "number literals" {
+    try expectOutput(
+        \\12
+    ,
+        \\12
+    );
+    try expectOutput(
+        \\0x12
+    ,
+        \\18
+    );
+    try expectOutput(
+        \\0o12
+    ,
+        \\10
+    );
+}
+
 test "constant values" {
     try expectOutput(
         \\true

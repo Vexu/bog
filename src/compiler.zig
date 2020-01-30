@@ -225,7 +225,7 @@ pub const Compiler = struct {
 
     fn parseInt(self: *Compiler, tok: TokenIndex) !i64 {
         var buf = self.tokenSlice(tok);
-        var radix: u8 = if (buf.len > 2) switch (buf[2]) {
+        var radix: u8 = if (buf.len > 2) switch (buf[1]) {
             'x' => @as(u8, 16),
             'b' => 2,
             'o' => 8,
