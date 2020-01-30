@@ -41,7 +41,6 @@ pub const ErrorMsg = struct {
         UnexpectedToken,
         PrimaryExpr,
         TypeName,
-        Unwrap,
         InvalidBaseReal,
         InvalidNum,
         InvalidHex,
@@ -63,7 +62,6 @@ pub const ErrorMsg = struct {
             .UnexpectedToken => "unexpected token",
             .PrimaryExpr => "expected Identifier, String, Number, true, false, '(', '{{', '[', error, import, if, while, for, match.",
             .TypeName => "expected type name",
-            .Unwrap => "expected identifier, '{', '(', '[' or 'error'",
             .InvalidBaseReal => "invalid base for floating point number",
             .InvalidNum => "invalid digit in number",
             .InvalidHex => "invalid digit in hex number",
@@ -88,7 +86,6 @@ pub const Node = struct {
     pub const Id = enum {
         Let,
         Fn,
-        Unwrap,
         Discard,
         Identifier,
         Prefix,
@@ -117,7 +114,7 @@ pub const Node = struct {
 
     pub const Let = struct {
         base: Node = Node{ .id = .Let },
-        unwrap: *Node,
+        capture: *Node,
         body: *Node,
         let_tok: TokenIndex,
         eq_tok: TokenIndex,
@@ -129,18 +126,6 @@ pub const Node = struct {
         body: *Node,
         fn_tok: TokenIndex,
         r_paren: TokenIndex,
-    };
-
-    pub const Unwrap = struct {
-        base: Node = Node{ .id = .Unwrap },
-        op: union(enum) {
-            Error: *Node,
-            Map: NodeList,
-            List: NodeList,
-            Tuple: NodeList,
-        },
-        l_tok: TokenIndex,
-        r_tok: TokenIndex,
     };
 
     pub const SingleToken = struct {
@@ -283,7 +268,7 @@ pub const Node = struct {
         base: Node = Node{ .id = .Catch },
         tok: TokenIndex,
         lhs: *Node,
-        unwrap: ?*Node,
+        capture: ?*Node,
         colon: ?TokenIndex,
         rhs: *Node,
     };
@@ -293,7 +278,7 @@ pub const Node = struct {
         cond: *Node,
         if_body: *Node,
         else_body: ?*Node,
-        unwrap: ?*Node,
+        capture: ?*Node,
         eq_tok: ?TokenIndex,
         else_tok: ?TokenIndex,
         if_tok: TokenIndex,
@@ -302,7 +287,7 @@ pub const Node = struct {
 
     pub const For = struct {
         base: Node = Node{ .id = .For },
-        unwrap: ?*Node,
+        capture: ?*Node,
         cond: *Node,
         body: *Node,
         in_tok: ?TokenIndex,
@@ -314,7 +299,7 @@ pub const Node = struct {
         base: Node = Node{ .id = .While },
         cond: *Node,
         body: *Node,
-        unwrap: ?*Node,
+        capture: ?*Node,
         eq_tok: ?TokenIndex,
         while_tok: TokenIndex,
         r_paren: TokenIndex,
@@ -337,7 +322,7 @@ pub const Node = struct {
 
     pub const MatchLet = struct {
         base: Node = Node{ .id = .MatchLet },
-        unwrap: *Node.Unwrap,
+        capture: *Node,
         expr: *Node,
     };
 

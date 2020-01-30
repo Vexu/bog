@@ -2,14 +2,7 @@ root : (stmt NL)* EOF
 
 stmt : let | expr
 
-let : "let" unwrap "=" expr
-
-unwrap
-    : IDENTIFIER
-    | "{" ((expr ":")? (unwrap | "_") ",")* ((expr ":")? (unwrap | "_"))?"}"
-    | "(" ((unwrap | "_") ",")* (unwrap | "_")? ")"
-    | "[" ((unwrap | "_") ",")* (unwrap | "_")? "]"
-    | "error" "(" (unwrap | "_") ")"
+let : "let" primary_expr "=" expr
 
 expr
     : fn
@@ -18,7 +11,7 @@ expr
 
 jump_expr : "return" expr? | "break" expr? | "continue"
 
-fn : "fn" "(" (unwrap ",")* unwrap? ")" expr
+fn : "fn" "(" (primary_expr ",")* primary_expr? ")" expr
 
 bool_expr
     : "not" comparision_expr
@@ -33,9 +26,9 @@ type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" |
 
 range_expr : bit_expr ("..." bit_expr)?
 
-bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)*) | ("catch" ("let" unwrap ":")? expr)
+bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)* | ("catch" ("let" expr ":")? expr))?
 
-shift_expr : add_expr (("<<" | ">>") add_expr)
+shift_expr : add_expr (("<<" | ">>") add_expr)?
 
 add_expr : mul_expr (("-" | "+") mul_expr)*
 
@@ -58,6 +51,7 @@ suffix_expr
 
 primary_expr
     : IDENTIFIER
+    | "_"
     | STRING
     | NUMBER
     | "true"
@@ -74,17 +68,17 @@ primary_expr
     | for
     | match
 
-block : "{" (NL stmt)+ "}"
+block : "{" ((NL stmt)+ NL) "}"
 
-if : "if" "(" ("let" unwrap "=") bool_expr ")" expr ("else" expr)?
+if : "if" "(" ("let" primary_expr "=")? bool_expr ")" expr ("else" expr)?
 
-while : "while" "(" ("let" unwrap "=") bool_expr ")" expr
+while : "while" "(" ("let" primary_expr "=")? bool_expr ")" expr
 
-for : "for" "(" ("let" unwrap "in") range_expr ")" expr
+for : "for" "(" ("let" primary_expr "in")? range_expr ")" expr
 
 match : "match" "(" bool_expr ")" "{" (NL match_case)+ NL "}"
 
 match_case
-    : "let" unwrap ":" expr
+    : "let" primary_expr ":" expr
     | "_" ":" expr
     | expr ("," expr)* ","? ":" expr

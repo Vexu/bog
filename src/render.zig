@@ -105,7 +105,7 @@ pub const Renderer = struct {
                 const let = @fieldParentPtr(Node.Let, "base", node);
 
                 try self.renderToken(let.let_tok, stream, indent, .Space);
-                try self.renderNode(let.unwrap, stream, indent, .Space);
+                try self.renderNode(let.capture, stream, indent, .Space);
                 try self.renderToken(let.eq_tok, stream, indent, .Space);
                 return self.renderNode(let.body, stream, indent, space);
             },
@@ -151,7 +151,7 @@ pub const Renderer = struct {
 
                 try self.renderToken(for_expr.for_tok, stream, indent, .Space);
                 try self.renderToken(for_expr.for_tok + 1, stream, indent, .None);
-                if (for_expr.unwrap) |some| {
+                if (for_expr.capture) |some| {
                     try self.renderToken(for_expr.for_tok + 2, stream, indent, .Space);
                     try self.renderNode(some, stream, indent, .Space);
                     try self.renderToken(for_expr.in_tok.?, stream, indent, .Space);
@@ -161,7 +161,6 @@ pub const Renderer = struct {
                 return self.renderNode(for_expr.body, stream, indent, space);
             },
             .Fn,
-            .Unwrap,
             .List,
             .Tuple,
             .Map,
