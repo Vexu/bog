@@ -98,7 +98,6 @@ pub const Compiler = struct {
             .MatchCatchAll,
             .MatchLet,
             .MatchCase,
-            .Unwrap,
             .Discard,
             => unreachable,
         }

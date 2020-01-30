@@ -38,10 +38,10 @@ test "trailing comma in call" {
 
 test "loops" {
     try testCanonical(
-        \\while (true) break
-        \\return (123 // 4)
-        \\for (let foo in arr) foo + 2
-        \\for (1 ... 3) continue
+        \\while true { break }
+        \\return 123 // 4
+        \\for let foo in arr { foo + 2 }
+        \\for 1 ... 3 { continue }
         \\
     );
 }

@@ -51,9 +51,10 @@ pub const Renderer = struct {
             },
             .Grouped => {
                 const grouped = @fieldParentPtr(Node.Grouped, "base", node);
+                const after_tok_space = if (self.tokens.at(grouped.l_tok).id == .LBrace) .Space else Space.None;
 
-                try self.renderToken(grouped.l_tok, stream, indent, .None);
-                try self.renderNode(grouped.expr, stream, indent, .None);
+                try self.renderToken(grouped.l_tok, stream, indent, after_tok_space);
+                try self.renderNode(grouped.expr, stream, indent, after_tok_space);
                 return self.renderToken(grouped.r_tok, stream, indent, space);
             },
             .TypeInfix => {
@@ -130,7 +131,7 @@ pub const Renderer = struct {
 
                 switch (jump.op) {
                     .Return, .Break => |expr| {
-                        const after_tok_space = if (expr != null) .Space else Space.Newline;
+                        const after_tok_space = if (expr != null) .Space else space;
                         try self.renderToken(jump.tok, stream, indent, after_tok_space);
                         if (expr) |some| try self.renderNode(some, stream, indent, space);
                     },
@@ -141,23 +142,24 @@ pub const Renderer = struct {
                 const while_expr = @fieldParentPtr(Node.While, "base", node);
 
                 try self.renderToken(while_expr.while_tok, stream, indent, .Space);
-                try self.renderToken(while_expr.while_tok + 1, stream, indent, .None);
-                try self.renderNode(while_expr.cond, stream, indent, .None);
-                try self.renderToken(while_expr.r_paren, stream, indent, .Space);
+                if (while_expr.capture) |some| {
+                    try self.renderToken(while_expr.while_tok + 1, stream, indent, .Space);
+                    try self.renderNode(some, stream, indent, .Space);
+                    try self.renderToken(while_expr.eq_tok.?, stream, indent, .Space);
+                }
+                try self.renderNode(while_expr.cond, stream, indent, .Space);
                 return self.renderNode(while_expr.body, stream, indent, space);
             },
             .For => {
                 const for_expr = @fieldParentPtr(Node.For, "base", node);
 
                 try self.renderToken(for_expr.for_tok, stream, indent, .Space);
-                try self.renderToken(for_expr.for_tok + 1, stream, indent, .None);
                 if (for_expr.capture) |some| {
-                    try self.renderToken(for_expr.for_tok + 2, stream, indent, .Space);
+                    try self.renderToken(for_expr.for_tok + 1, stream, indent, .Space);
                     try self.renderNode(some, stream, indent, .Space);
                     try self.renderToken(for_expr.in_tok.?, stream, indent, .Space);
                 }
-                try self.renderNode(for_expr.cond, stream, indent, .None);
-                try self.renderToken(for_expr.r_paren, stream, indent, .Space);
+                try self.renderNode(for_expr.cond, stream, indent, .Space);
                 return self.renderNode(for_expr.body, stream, indent, space);
             },
             .Fn,

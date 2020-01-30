@@ -742,9 +742,9 @@ pub const Parser = struct {
         if (l_tok_maybe == null and parser.eatToken(.Nl, false) == null) {
             const node = try parser.arena.create(Node.Grouped);
             node.* = .{
-                .l_tok = tok,
-                .expr = try parser.expr(),
-                .r_tok = try parser.expectToken(.RBrace, false),
+                .l_tok = l_tok,
+                .expr = try parser.expr(true),
+                .r_tok = try parser.expectToken(.RBrace, true),
             };
             return &node.base;
         }
@@ -827,12 +827,10 @@ pub const Parser = struct {
     /// match : "match" bool_expr "{" (NL match_case)+ NL "}"
     fn matchExpr(parser: *Parser, skip_nl: bool) ParseError!?*Node {
         const tok = parser.eatToken(.Keyword_match, skip_nl) orelse return null;
-        _ = try parser.expectToken(.LParen, true);
         const node = try parser.arena.create(Node.Match);
         node.* = .{
             .match_tok = tok,
             .expr = try parser.boolExpr(true),
-            .r_paren = try parser.expectToken(.RParen, true),
             .body = NodeList.init(parser.arena),
             .body_r_brace = undefined,
         };
