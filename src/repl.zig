@@ -4,31 +4,24 @@ const Allocator = std.mem.Allocator;
 const Tree = @import("ast.zig").Tree;
 const parser = @import("parser.zig");
 const Tokenizer = @import("tokenizer.zig").Tokenizer;
-const Compiler = @import("compiler.zig").Compiler;
+const compiler = @import("compiler.zig");
 const Vm = @import("vm.zig").Vm;
 const Builder = @import("bytecode.zig").Builder;
 
 pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
-    // TODO handle this in Compiler.init()
-    var builder: Builder = undefined;
-    try builder.init(allocator);
-    defer builder.deinit();
-
     var repl = Repl{
+        .builder = undefined,
         .tree = Tree.init(allocator),
         .vm = Vm.init(allocator, true),
         .buffer = try ArrayList(u8).initCapacity(allocator, std.mem.page_size),
         .tokenizer = undefined,
-        .compiler = undefined,
     };
     repl.tokenizer = Tokenizer.init(&repl.tree, true);
-    repl.compiler = .{
-        .tree = &repl.tree,
-        .builder = &builder,
-    };
     defer repl.tree.deinit();
     defer repl.vm.deinit();
     defer repl.buffer.deinit();
+    try repl.builder.init(allocator);
+    defer repl.builder.deinit();
 
     // TODO move this
     try repl.vm.call_stack.push(.{
@@ -80,7 +73,7 @@ const Repl = struct {
     tokenizer: Tokenizer,
     tree: Tree,
     buffer: ArrayList(u8),
-    compiler: Compiler,
+    builder: Builder,
 
     fn handleLine(repl: *Repl, in_stream: var, out_stream: var) !void {
         var begin_index = repl.tree.tokens.len;
@@ -91,8 +84,8 @@ const Repl = struct {
         }
         try parser.parse(&repl.tree, begin_index);
 
-        try repl.compiler.compileNode(repl.tree.nodes.at(repl.tree.nodes.len - 1).*);
-        try repl.vm.exec(repl.compiler.builder.cur_func.code.toSliceConst());
+        try compiler.compile(&repl.builder, &repl.tree, repl.tree.nodes.len - 1);
+        try repl.vm.exec(repl.builder.cur_func.code.toSliceConst());
         if (repl.vm.result) |some| {
             try some.dump(out_stream, 2);
             try out_stream.writeByte('\n');

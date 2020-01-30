@@ -9,3 +9,12 @@ pub const render = @import("render.zig");
 
 pub const ast = @import("ast.zig");
 pub const Tree = ast.Tree;
+
+pub const bytecode = @import("bytecode.zig");
+pub const Builder = bytecode.Builder;
+
+pub const compiler = @import("compiler.zig");
+pub const Compiler = compiler.Compiler;
+
+pub const vm = @import("vm.zig");
+pub const Vm = vm.Vm;

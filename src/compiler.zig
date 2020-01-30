@@ -11,6 +11,27 @@ const bytecode = @import("bytecode.zig");
 const Builder = bytecode.Builder;
 const RegRef = bytecode.RegRef;
 
+pub fn compile(builder: *Builder, tree: *Tree, start_index: usize) Error!void {
+    var compiler = Compiler{
+        .builder = builder,
+        .tree = tree,
+    };
+    var it = tree.nodes.iterator(start_index);
+    while (it.next()) |n| {
+        const val = try compiler.genNode(n.*, .Value);
+        if (val == .Rt) {
+            // discard unused runtime value
+            try builder.discard(val.Rt);
+        } else if (it.peek() == null and val != .Empty) {
+            const reg = builder.cur_func.registerAlloc(.Temp) catch return error.CompileError;
+            try compiler.makeRuntime(reg, val);
+            try builder.discard(reg);
+        }
+    }
+}
+
+pub const Error = error{CompileError} || Allocator.Error;
+
 pub const Compiler = struct {
     builder: *Builder,
     tree: *Tree,
@@ -48,24 +69,7 @@ pub const Compiler = struct {
 
         /// A value, runtime or constant, is expected
         Value,
-
-        /// No value is expected and any runtime result will be discarded
-        /// This distinction is mostly important for cases like `2 + (return)`
-        NoVal,
     };
-
-    pub fn compileNode(self: *Compiler, node: *Node) Error!void {
-        // TODO make register allocation less painful
-        const reg = self.builder.cur_func.registerAlloc(.Temp) catch return error.CompileError;
-        defer self.builder.cur_func.freeRegisterIfTemp(reg);
-        const val = try self.genNode(node, Result{
-            .Rt = reg,
-        });
-        std.debug.assert(val == .Rt);
-        try self.builder.discard(val.Rt);
-    }
-
-    pub const Error = error{CompileError} || Allocator.Error;
 
     fn genNode(self: *Compiler, node: *Node, res: Result) Error!Value {
         switch (node.id) {
@@ -110,7 +114,7 @@ pub const Compiler = struct {
             if (it.peek() == null) {
                 return self.genNode(n.*, res);
             }
-            const val = try self.genNode(n.*, .NoVal);
+            const val = try self.genNode(n.*, .Value);
             if (val == .Rt) {
                 // discard unused runtime value
                 try self.builder.discard(val.Rt);
@@ -185,6 +189,7 @@ pub const Compiler = struct {
                 break :blk r_val;
             },
             // errors are runtime only currently, so ret_val does not need to be checked
+            // TODO should this be an error?
             .Try => r_val,
         };
         if (res == .Rt) {

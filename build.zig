@@ -7,15 +7,11 @@ pub fn build(b: *Builder) void {
     // lib.linkSystemLibrary("c");
     // lib.install();
 
-    var tests = b.addTest("src/main.zig");
-    tests.setBuildMode(mode);
-    var fmt_test = b.addTest("tests/fmt.zig");
-    fmt_test.setBuildMode(mode);
-    fmt_test.addPackagePath("lang", "src/lang.zig");
-
-    const test_step = b.step("test", "Run all tests");
-    test_step.dependOn(&tests.step);
-    test_step.dependOn(&fmt_test.step);
+    addTests(b, mode, .{
+        "src/main.zig",
+        "tests/fmt.zig",
+        "tests/behavior.zig",
+    });
 
     var exe = b.addExecutable("lang", "src/main.zig");
     exe.setBuildMode(mode);
@@ -30,4 +26,15 @@ pub fn build(b: *Builder) void {
         "build.zig",
         "src",
     }).step);
+}
+
+fn addTests(b: *Builder, mode: var, tests: var) void {
+    const tests_step = b.step("test", "Run all tests");
+    tests_step.dependOn(b.getInstallStep());
+    inline for (tests) |t| {
+        var test_step = b.addTest(t);
+        test_step.setBuildMode(mode);
+        test_step.addPackagePath("lang", "src/lang.zig");
+        tests_step.dependOn(&test_step.step);
+    }
 }

@@ -105,7 +105,7 @@ fn fmt(source: []const u8) ![]u8 {
 fn testTransform(source: []const u8, expected: []const u8) !void {
     const result = try fmt(source);
     if (!mem.eql(u8, result, expected)) {
-        warn("\nexpected:\n{}\nfound:\n{}\n", .{ expected, result });
+        warn("\n---expected----\n{}\n-----found-----\n{}\n---------------\n", .{ expected, result });
         return error.TestFailed;
     }
 }
