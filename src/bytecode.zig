@@ -191,6 +191,7 @@ const FuncState = struct {
     }
 
     fn registerAlloc(self: *FuncState, kind: RegState) !RegRef {
+        // TODO this is likely overkill
         for (self.regs) |r, i| {
             if (r == .Free) {
                 self.regs[i] = kind;
@@ -249,8 +250,8 @@ pub const Builder = struct {
         self.funcs.deinit();
     }
 
-    fn putString(builder: *Builder, tok: *Token) !u32 {
-        return error.Unimplemented;
+    fn putString(builder: *Builder, val: []const u8) Allocator.Error!u32 {
+        @panic("TODO: putString");
     }
 
     pub fn discard(self: *Builder, reg: RegRef) !void {
@@ -307,27 +308,27 @@ pub const Builder = struct {
         }, null);
     }
 
-    pub fn constBool(self: *Builder, res_loc: RegRef, val: bool) !RegRef {
+    pub fn constBool(self: *Builder, res_loc: RegRef, val: bool) !void {
         try self.cur_func.emitInstruction(.{
-            .op = .ConstNone,
+            .op = .ConstBool,
             .A = res_loc,
             .B = @boolToInt(val),
         }, null);
     }
 
-    pub fn constInt(self: *Builder, res_loc: RegRef, val: i64) !RegRef {
-        if (val <= std.math.maxInt(u32)) blk: {
+    pub fn constInt(self: *Builder, res_loc: RegRef, val: i64) !void {
+        if (val > std.math.minInt(i32) and val < std.math.maxInt(i32)) blk: {
             // fits in u32
             try self.cur_func.emitInstruction(.{
                 .op = .ConstSmallInt,
                 .A = res_loc,
-            }, @truncate(u32, val));
+            }, @bitCast(u32, @truncate(i32, val)));
         } else {
             @panic("TODO: > 2**32 ints");
         }
     }
 
-    pub fn constNum(self: *Builder, res_loc: RegRef, val: f64) !void {
+    pub fn constNum(self: *Builder, res_loc: RegRef, val: f64) Allocator.Error!void {
         @panic("TODO: constNum");
     }
 
@@ -335,8 +336,7 @@ pub const Builder = struct {
         try self.cur_func.emitInstruction(.{
             .op = .ConstNone,
             .A = res_loc,
-            .B = @boolToInt(val),
-        }, try self.putString(tok));
+        }, try self.putString(val));
     }
 
     pub fn declRef(self: *Builder, tok: *Token) !RegRef {
@@ -395,7 +395,7 @@ pub const Builder = struct {
     }
 
     pub fn prefix(self: *Builder, res_loc: RegRef, op: Node.Prefix.Op, val: RegRef) !void {
-        defer self.cur_func.freeRegisterIfTemp(rhs);
+        defer self.cur_func.freeRegisterIfTemp(val);
         try self.cur_func.emitInstruction(.{
             .op = switch (op) {
                 .BoolNot => .Not,
@@ -403,7 +403,7 @@ pub const Builder = struct {
                 .Minus => .Negate,
                 .Try => .Try,
                 // TODO maybe don't no-op this
-                .Plus => return res_loc,
+                .Plus => return,
             },
             .A = res_loc,
             .B = val,

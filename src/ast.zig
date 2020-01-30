@@ -13,10 +13,12 @@ pub const Tree = struct {
     tokens: TokenList,
     nodes: NodeList,
     errors: ErrorList,
+    source: []const u8,
     arena_allocator: std.heap.ArenaAllocator,
 
     pub fn init(allocator: *Allocator) Tree {
         return .{
+            .source = "",
             .tokens = TokenList.init(allocator),
             .nodes = NodeList.init(allocator),
             .errors = ErrorList.init(allocator),

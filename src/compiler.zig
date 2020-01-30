@@ -1,17 +1,19 @@
 const std = @import("std");
 const mem = std.mem;
-const tokenizer = @import("tokenizer.zig");
-const Token = tokenizer.Token;
-const TokenList = tokenizer.TokenList;
-const TokenIndex = tokenizer.TokenIndex;
 const Allocator = mem.Allocator;
 const TypeId = @import("value.zig").TypeId;
 const ast = @import("ast.zig");
 const Node = ast.Node;
+const Tree = ast.Tree;
+const TokenList = ast.TokenList;
+const TokenIndex = ast.TokenIndex;
+const bytecode = @import("bytecode.zig");
+const Builder = bytecode.Builder;
+const RegRef = bytecode.RegRef;
 
 pub const Compiler = struct {
     builder: *Builder,
-    tokens: TokenList,
+    tree: *Tree,
 
     const Value = union(enum) {
         /// result of continue, break, return and assignmnet; cannot exist at runtime
@@ -28,10 +30,7 @@ pub const Compiler = struct {
     fn makeRuntime(self: *Compiler, res: RegRef, val: Value) !void {
         return switch (val) {
             .Empty => unreachable,
-            .Rt => |v| {
-                std.debug.assert(v == res);
-                return v;
-            },
+            .Rt => |v| std.debug.assert(v == res),
             .None => try self.builder.constNone(res),
             .Int => |v| try self.builder.constInt(res, v),
             .Num => |v| try self.builder.constNum(res, v),
@@ -55,16 +54,28 @@ pub const Compiler = struct {
         NoVal,
     };
 
-    fn genNode(self: *Compiler, node: *Node, res: *Result) !Value {
+    pub fn compileNode(self: *Compiler, node: *Node) Error!void {
+        // TODO make register allocation less painful
+        const reg = self.builder.cur_func.registerAlloc(.Temp) catch return error.CompileError;
+        defer self.builder.cur_func.freeRegisterIfTemp(reg);
+        const val = try self.genNode(node, Result{
+            .Rt = reg,
+        });
+        std.debug.assert(val == .Rt);
+        try self.builder.discard(val.Rt);
+    }
+
+    pub const Error = error{CompileError} || Allocator.Error;
+
+    fn genNode(self: *Compiler, node: *Node, res: Result) Error!Value {
         switch (node.id) {
-            .Grouped => try self.genNode(@fieldParentPtr(Node.Grouped, "base", node).expr, res),
-            .Literal => try self.genLiteral(@fieldParentPtr(Node.Literal, "base", node), res),
-            .Block => try self.genBlock(@fieldParentPtr(Node.ListTupleMapBlock, "base", node), res),
-            .Prefix => try self.genPrefix(@fieldParentPtr(Node.Prefix, "base", node), res),
+            .Grouped => return self.genNode(@fieldParentPtr(Node.Grouped, "base", node).expr, res),
+            .Literal => return self.genLiteral(@fieldParentPtr(Node.Literal, "base", node), res),
+            .Block => return self.genBlock(@fieldParentPtr(Node.ListTupleMapBlock, "base", node), res),
+            .Prefix => return self.genPrefix(@fieldParentPtr(Node.Prefix, "base", node), res),
             .Let => @panic("TODO: Let"),
             .Fn => @panic("TODO: Fn"),
             .Identifier => @panic("TODO: Identifier"),
-            .Prefix => @panic("TODO: Prefix"),
             .Infix => @panic("TODO: Infix"),
             .TypeInfix => @panic("TODO: TypeInfix"),
             .Suffix => @panic("TODO: Suffix"),
@@ -97,14 +108,15 @@ pub const Compiler = struct {
         var it = node.values.iterator(0);
         while (it.next()) |n| {
             if (it.peek() == null) {
-                return self.genNode(n, res);
+                return self.genNode(n.*, res);
             }
-            const val = try self.genNode(n, .NoVal);
+            const val = try self.genNode(n.*, .NoVal);
             if (val == .Rt) {
                 // discard unused runtime value
                 try self.builder.discard(val.Rt);
             }
         }
+        unreachable;
     }
 
     fn assertNotLval(self: *Compiler, res: Result) !void {
@@ -142,13 +154,13 @@ pub const Compiler = struct {
         }
     }
 
-    fn genPrefix(self: *Compiler, node: *Node.Prefix, res: *Result) !Value {
+    fn genPrefix(self: *Compiler, node: *Node.Prefix, res: Result) !Value {
         try self.assertNotLval(res);
         const r_val = try self.genNode(node.rhs, .Value);
         try self.assertNotEmpty(r_val);
         if (r_val == .Rt) {
             const result_loc = if (res == .Rt) res.Rt else @panic("TODO: create result loc");
-            self.builder.prefix(result_loc, node.op, r_val.Rt);
+            try self.builder.prefix(result_loc, node.op, r_val.Rt);
             return Value{ .Rt = result_loc };
         }
         const ret_val = switch (node.op) {
@@ -163,9 +175,9 @@ pub const Compiler = struct {
             .Minus => blk: {
                 try self.assertNumeric(r_val);
                 if (r_val == .Int) {
-                    break :blk Value{.Int - r_val.Int};
+                    break :blk Value{ .Int = -r_val.Int };
                 } else {
-                    break :blk Value{.Num - r_val.Num};
+                    break :blk Value{ .Num = -r_val.Num };
                 }
             },
             .Plus => blk: {
@@ -173,16 +185,17 @@ pub const Compiler = struct {
                 break :blk r_val;
             },
             // errors are runtime only currently, so ret_val does not need to be checked
-            .Try => ret_val,
+            .Try => r_val,
         };
         if (res == .Rt) {
-            return Value{ .Rt = self.makeRuntime(res, ret_val) };
+            try self.makeRuntime(res.Rt, ret_val);
+            return Value{ .Rt = res.Rt };
         }
         // if res == .NoVal or .Value nothing needs to be done
         return ret_val;
     }
 
-    fn genLiteral(self: *Compiler, node: *Node.Literal, res: *Result) !Value {
+    fn genLiteral(self: *Compiler, node: *Node.Literal, res: Result) !Value {
         try self.assertNotLval(res);
         const ret_val: Value = switch (node.kind) {
             .Int => .{ .Int = try self.parseInt(node.tok) },
@@ -193,21 +206,22 @@ pub const Compiler = struct {
             .Num => @panic("TODO: genNum"),
         };
         if (res == .Rt) {
-            return Value{ .Rt = self.makeRuntime(res, ret_val) };
+            try self.makeRuntime(res.Rt, ret_val);
+            return Value{ .Rt = res.Rt };
         }
         // if res == .NoVal or .Value nothing needs to be done
         return ret_val;
     }
 
-    fn tokenSlice(self: *Compiler, token: TokenIndex) Token.Id {
-        const tok = self.tokens.at(token);
-        return self.source[tok.start..tok.end];
+    fn tokenSlice(self: *Compiler, token: TokenIndex) []const u8 {
+        const tok = self.tree.tokens.at(token);
+        return self.tree.source[tok.start..tok.end];
     }
 
     fn parseInt(self: *Compiler, tok: TokenIndex) !i64 {
         var buf = self.tokenSlice(tok);
         var radix: u8 = if (buf.len > 2) switch (buf[2]) {
-            'x' => 16,
+            'x' => @as(u8, 16),
             'b' => 2,
             'o' => 8,
             else => 10,
@@ -224,11 +238,12 @@ pub const Compiler = struct {
                 else => unreachable,
             };
 
-            x = math.mul(i64, x, radix) catch {
+            x = std.math.mul(i64, x, radix) catch {
                 // try self.adderr();
                 return error.CompileError;
             };
-            x += digit;
+            // why is this cast needed?
+            x += @intCast(i32, digit);
         }
 
         return x;

@@ -333,6 +333,7 @@ pub const Tokenizer = struct {
 
     pub fn tokenize(self: *Tokenizer, input: []const u8) TokenizeError!bool {
         self.it.bytes = input;
+        self.tree.source = input;
         _ = self.tree.tokens.pop();
         while (true) {
             const tok = try self.tree.tokens.addOne();

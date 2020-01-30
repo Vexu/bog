@@ -60,7 +60,7 @@ pub const Vm = struct {
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
-                            .Int = arg,
+                            .Int = @bitCast(i32, arg),
                         },
                     };
                     frame.stack[inst.A] = ref;
@@ -69,7 +69,15 @@ pub const Vm = struct {
                     frame.stack[inst.A].value.? = &Value.None;
                 },
                 .ConstBool => {
-                    frame.stack[inst.A].value.? = if (inst.B != 0) &Value.True else &Value.False;
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Bool = inst.B != 0,
+                        },
+                    };
+                    frame.stack[inst.A] = ref;
+                    // TODO https://github.com/ziglang/zig/issues/4295
+                    // frame.stack[inst.A].value = if (inst.B != 0) &Value.True else &Value.False;
                 },
                 .Add => {
                     // TODO check numeric
