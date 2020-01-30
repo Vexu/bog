@@ -269,7 +269,6 @@ pub const Node = struct {
         tok: TokenIndex,
         lhs: *Node,
         capture: ?*Node,
-        colon: ?TokenIndex,
         rhs: *Node,
     };
 
@@ -282,7 +281,6 @@ pub const Node = struct {
         eq_tok: ?TokenIndex,
         else_tok: ?TokenIndex,
         if_tok: TokenIndex,
-        r_paren: TokenIndex,
     };
 
     pub const For = struct {
@@ -292,7 +290,6 @@ pub const Node = struct {
         body: *Node,
         in_tok: ?TokenIndex,
         for_tok: TokenIndex,
-        r_paren: TokenIndex,
     };
 
     pub const While = struct {
@@ -302,7 +299,6 @@ pub const Node = struct {
         capture: ?*Node,
         eq_tok: ?TokenIndex,
         while_tok: TokenIndex,
-        r_paren: TokenIndex,
     };
 
     pub const Match = struct {
@@ -310,7 +306,6 @@ pub const Node = struct {
         expr: *Node,
         body: NodeList,
         match_tok: TokenIndex,
-        r_paren: TokenIndex,
         body_r_brace: TokenIndex,
     };
 

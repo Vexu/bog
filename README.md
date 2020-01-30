@@ -4,7 +4,7 @@ Not much is done but this is how it is going to look like
 ```rust
 let {print} = import('io')
 
-let assert = fn(ok) if (not ok) error("assertion failure")
+let assert = fn(ok) if not ok { error("assertion failure") }
 
 let x = 0
 
@@ -14,10 +14,10 @@ x + (true as int)
 assert(x == 1)
 
 let foo = fn(arg) {
-    if (arg == 4) {
+    if arg == 4 {
         return error(4)
     }
-    arg += if (arg == 2) {
+    arg += if arg == 2 {
         1
     } else 2
 }
@@ -27,7 +27,7 @@ let y = foo(x)
 assert(x == 2 and y == x)
 
 # copy on assign
-let baz(x) {
+let baz = fn(x) {
     let z = x
     z += 2
 }
@@ -36,6 +36,12 @@ assert(baz(x) == 4 and x == 2)
 
 # error: error discarded
 # assert(false)
+
+# declarations are order independent for function scopes
+let two = fn() one(1)
+let one = fn(val) val
+
+assert(two() == 1)
 
 # return optional for last value of function (all files are functions)
 return {

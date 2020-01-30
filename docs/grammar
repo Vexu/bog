@@ -26,7 +26,7 @@ type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" |
 
 range_expr : bit_expr ("..." bit_expr)?
 
-bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)* | ("catch" ("let" expr ":")? expr))?
+bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)* | ("catch" ("let" expr )? block))?
 
 shift_expr : add_expr (("<<" | ">>") add_expr)?
 
@@ -68,17 +68,16 @@ primary_expr
     | for
     | match
 
-block : "{" ((NL stmt)+ NL) "}"
+block : "{" (expr | ((NL stmt)+ NL)) "}"
 
-if : "if" "(" ("let" primary_expr "=")? bool_expr ")" expr ("else" expr)?
+if : "if" ("let" primary_expr "=")? bool_expr block ("else" expr)?
 
-while : "while" "(" ("let" primary_expr "=")? bool_expr ")" expr
+while : "while" ("let" primary_expr "=")? bool_expr block
 
-for : "for" "(" ("let" primary_expr "in")? range_expr ")" expr
+for : "for" ("let" primary_expr "in")? range_expr block
 
-match : "match" "(" bool_expr ")" "{" (NL match_case)+ NL "}"
+match : "match" bool_expr "{" (NL match_case)+ NL "}"
 
 match_case
-    : "let" primary_expr ":" expr
-    | "_" ":" expr
-    | expr ("," expr)* ","? ":" expr
+    : "let" primary_expr block
+    | expr ("," expr)* ","? block
