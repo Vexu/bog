@@ -101,13 +101,13 @@ const Renderer = struct {
                 }
                 return self.renderToken(suffix.r_tok, stream, indent, space);
             },
-            .Let => {
-                const let = @fieldParentPtr(Node.Let, "base", node);
+            .Decl => {
+                const decl = @fieldParentPtr(Node.Decl, "base", node);
 
-                try self.renderToken(let.let_tok, stream, indent, .Space);
-                try self.renderNode(let.capture, stream, indent, .Space);
-                try self.renderToken(let.eq_tok, stream, indent, .Space);
-                return self.renderNode(let.body, stream, indent, space);
+                try self.renderToken(decl.let_const, stream, indent, .Space);
+                try self.renderNode(decl.capture, stream, indent, .Space);
+                try self.renderToken(decl.eq_tok, stream, indent, .Space);
+                return self.renderNode(decl.body, stream, indent, space);
             },
             .Import => {
                 const import = @fieldParentPtr(Node.Import, "base", node);

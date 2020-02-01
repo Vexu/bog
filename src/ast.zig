@@ -76,7 +76,7 @@ pub const Node = struct {
     pub const List = std.SegmentedList(*Node, 4);
 
     pub const Id = enum {
-        Let,
+        Decl,
         Fn,
         Discard,
         Identifier,
@@ -104,11 +104,11 @@ pub const Node = struct {
         Jump,
     };
 
-    pub const Let = struct {
-        base: Node = Node{ .id = .Let },
+    pub const Decl = struct {
+        base: Node = Node{ .id = .Decl },
         capture: *Node,
         body: *Node,
-        let_tok: TokenIndex,
+        let_const: TokenIndex,
         eq_tok: TokenIndex,
     };
 

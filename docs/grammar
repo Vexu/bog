@@ -1,8 +1,8 @@
 root : (stmt NL)* EOF
 
-stmt : let | expr
+stmt : decl | expr
 
-let : "let" primary_expr "=" expr
+decl : ("let" | "const") primary_expr "=" expr
 
 expr
     : fn

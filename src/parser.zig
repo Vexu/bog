@@ -71,22 +71,23 @@ pub const Parser = struct {
         return ret;
     }
 
-    /// stmt : let | expr.l
+    /// stmt : decl | expr.l
     fn stmt(parser: *Parser) Error!*Node {
-        if (try parser.let()) |node| return node;
+        if (try parser.decl()) |node| return node;
         return parser.expr(false);
     }
 
-    /// let : "let" primary_expr "=" expr
-    fn let(parser: *Parser) Error!?*Node {
-        const tok = parser.eatToken(.Keyword_let, false) orelse return null;
+    /// decl : ("let" | "const") primary_expr "=" expr
+    fn decl(parser: *Parser) Error!?*Node {
+        const tok = parser.eatToken(.Keyword_let, false) orelse
+            parser.eatToken(.Keyword_const, false) orelse return null;
         const capture = try parser.primaryExpr(true);
         const eq_tok = try parser.expectToken(.Equal, true);
         parser.skipNl();
         const body = try parser.expr(false);
-        const node = try parser.arena.create(Node.Let);
+        const node = try parser.arena.create(Node.Decl);
         node.* = .{
-            .let_tok = tok,
+            .let_const = tok,
             .capture = capture,
             .eq_tok = eq_tok,
             .body = body,

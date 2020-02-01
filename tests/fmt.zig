@@ -49,7 +49,7 @@ test "loops" {
 test "declarations" {
     try testCanonical(
         \\let bar = import("args")
-        \\let foo = bar + 2
+        \\const foo = bar + 2
         \\let err = error(foo)
         \\
     );

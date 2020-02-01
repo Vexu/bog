@@ -37,13 +37,16 @@ assert(baz(x) == 4 and x == 2)
 # error: error discarded
 # assert(false)
 
-# declarations are order independent for function scopes
-let two = fn() one(1)
-let one = fn(val) val
+# constant declarations in module scope can be referenced before they 
+# are declared but using them is an error
+const two = fn() one(1)
+# error: use of undefined value
+# two()
+const one = fn(val) val
 
 assert(two() == 1)
 
-# return optional for last value of function (all files are functions)
+# return optional as last statement of block
 return {
     assert: assert,
 }
