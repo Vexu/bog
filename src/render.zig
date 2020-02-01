@@ -1,15 +1,14 @@
 const std = @import("std");
-const ast = @import("ast.zig");
-const Tree = ast.Tree;
-const Node = ast.Node;
-const NodeList = ast.NodeList;
-const TokenList = ast.TokenList;
-const TokenIndex = ast.TokenIndex;
+const lang = @import("lang.zig");
+const Tree = lang.Tree;
+const Node = lang.Node;
+const TokenList = lang.Token.List;
+const TokenIndex = lang.Token.Index;
 
-pub fn render(source: []const u8, tree: *Tree, stream: var) @TypeOf(stream).Child.Error!void {
+pub fn render(tree: *Tree, stream: var) @TypeOf(stream).Child.Error!void {
     var it = tree.nodes.iterator(0);
     var renderer = Renderer{
-        .source = source,
+        .source = tree.source,
         .tokens = &tree.tokens,
     };
     while (it.next()) |node| {
@@ -17,7 +16,7 @@ pub fn render(source: []const u8, tree: *Tree, stream: var) @TypeOf(stream).Chil
     }
 }
 
-pub const Renderer = struct {
+const Renderer = struct {
     source: []const u8,
     tokens: *TokenList,
 

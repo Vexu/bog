@@ -3,8 +3,8 @@ const mem = std.mem;
 const math = std.math;
 const testing = std.testing;
 const unicode = std.unicode;
-const ast = @import("ast.zig");
-const Tree = ast.Tree;
+const lang = @import("lang.zig");
+const Tree = lang.Tree;
 
 fn isWhiteSpace(c: u32) bool {
     return switch (c) {
@@ -111,6 +111,9 @@ pub const Token = struct {
     start: u32,
     end: u32,
     id: Id,
+
+    pub const List = std.SegmentedList(Token, 64);
+    pub const Index = u32;
 
     pub const Id = enum {
         Eof,
@@ -318,20 +321,27 @@ pub const Tokenizer = struct {
     no_eof: bool = false,
     repl: bool,
 
-    pub const TokenizeError = error{TokenizeError} || mem.Allocator.Error;
+    pub const Error = error{TokenizeError} || mem.Allocator.Error;
 
-    pub fn init(tree: *Tree, repl: bool) Tokenizer {
-        return .{
+    pub fn tokenize(tree: *Tree) Error!void {
+        var tokenizer = Tokenizer{
             .tree = tree,
             .it = .{
                 .i = 0,
-                .bytes = "",
+                .bytes = tree.source,
             },
-            .repl = repl,
+            .repl = false,
         };
+        while (true) {
+            const tok = try tree.tokens.addOne();
+            tok.* = try tokenizer.next();
+            if (tok.id == .Eof) {
+                return;
+            }
+        }
     }
 
-    pub fn tokenize(self: *Tokenizer, input: []const u8) TokenizeError!bool {
+    pub fn tokenizeRepl(self: *Tokenizer, input: []const u8) Error!bool {
         self.it.bytes = input;
         self.tree.source = input;
         _ = self.tree.tokens.pop();
@@ -347,7 +357,7 @@ pub const Tokenizer = struct {
         }
     }
 
-    fn err(self: *Tokenizer, kind: ast.ErrorMsg.Kind, c: u21) TokenizeError {
+    fn err(self: *Tokenizer, kind: lang.ErrorMsg.Kind, c: u21) Error {
         try self.tree.errors.push(.{
             .index = @truncate(u32, self.it.i - (unicode.utf8CodepointSequenceLength(c) catch unreachable)),
             .kind = kind,
@@ -992,7 +1002,14 @@ pub const Tokenizer = struct {
     }
 };
 
-var test_tree = Tree.init(std.debug.failing_allocator);
+var test_tree = Tree{
+    .errors = lang.ErrorMsg.List.init(std.debug.failing_allocator),
+
+    .tokens = undefined,
+    .nodes = undefined,
+    .source = undefined,
+    .arena_allocator = undefined,
+};
 
 fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
     var tokenizer = Tokenizer{

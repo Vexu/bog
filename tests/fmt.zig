@@ -81,10 +81,6 @@ const std = @import("std");
 const mem = std.mem;
 const warn = std.debug.warn;
 const lang = @import("lang");
-const Tree = lang.Tree;
-const Tokenizer = lang.Tokenizer;
-const parser = lang.parser;
-const render = lang.render;
 
 var buffer: [10 * 1024]u8 = undefined;
 
@@ -92,13 +88,11 @@ fn fmt(source: []const u8) ![]u8 {
     var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const alloc = &buf_alloc.allocator;
 
-    var tree = Tree.init(alloc);
-    _ = try Tokenizer.init(&tree, false).tokenize(source);
-    try parser.parse(&tree, 0);
+    var tree = try lang.parse(alloc, source);
 
     var out_buf = try std.Buffer.initSize(alloc, 0);
     var out_stream = std.io.BufferOutStream.init(&out_buf);
-    try render.render(source, &tree, &out_stream.stream);
+    try tree.render(&out_stream.stream);
     return out_buf.toOwnedSlice();
 }
 

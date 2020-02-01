@@ -1,41 +1,31 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const TypeId = @import("value.zig").TypeId;
-const Token = @import("tokenizer.zig").Token;
 
-pub const TokenIndex = u32;
-
-pub const TokenList = std.SegmentedList(Token, 64);
-pub const NodeList = std.SegmentedList(*Node, 4);
-pub const ErrorList = std.SegmentedList(ErrorMsg, 0);
+const lang = @import("lang.zig");
+const Token = lang.Token;
+const TokenIndex = Token.Index;
 
 pub const Tree = struct {
-    tokens: TokenList,
-    nodes: NodeList,
-    errors: ErrorList,
+    tokens: Token.List,
+    nodes: Node.List,
+    errors: ErrorMsg.List,
     source: []const u8,
     arena_allocator: std.heap.ArenaAllocator,
 
-    pub fn init(allocator: *Allocator) Tree {
-        return .{
-            .source = "",
-            .tokens = TokenList.init(allocator),
-            .nodes = NodeList.init(allocator),
-            .errors = ErrorList.init(allocator),
-            .arena_allocator = std.heap.ArenaAllocator.init(allocator),
-        };
+    pub fn deinit(tree: *Tree) void {
+        var arena = tree.arena_allocator;
+        arena.deinit();
     }
 
-    pub fn deinit(tree: *Tree) void {
-        tree.tokens.deinit();
-        tree.nodes.deinit();
-        tree.errors.deinit();
-    }
+    pub const render = @import("render.zig").render;
 };
 
 pub const ErrorMsg = struct {
     index: u32,
     kind: Kind,
+
+    pub const List = std.SegmentedList(ErrorMsg, 0);
 
     pub const Kind = enum {
         UnexpectedToken,
@@ -83,6 +73,8 @@ pub const ErrorMsg = struct {
 pub const Node = struct {
     id: Id,
 
+    pub const List = std.SegmentedList(*Node, 4);
+
     pub const Id = enum {
         Let,
         Fn,
@@ -122,7 +114,7 @@ pub const Node = struct {
 
     pub const Fn = struct {
         base: Node = Node{ .id = .Fn },
-        params: NodeList,
+        params: List,
         body: *Node,
         fn_tok: TokenIndex,
         r_paren: TokenIndex,
@@ -209,7 +201,7 @@ pub const Node = struct {
         base: Node = Node{ .id = .Suffix },
         lhs: *Node,
         op: union(enum) {
-            Call: NodeList,
+            Call: List,
             ArrAccess: *Node,
             Member,
         },
@@ -245,7 +237,7 @@ pub const Node = struct {
 
     pub const ListTupleMapBlock = struct {
         base: Node,
-        values: NodeList,
+        values: List,
         l_tok: TokenIndex,
         r_tok: TokenIndex,
     };
@@ -304,7 +296,7 @@ pub const Node = struct {
     pub const Match = struct {
         base: Node = Node{ .id = .Match },
         expr: *Node,
-        body: NodeList,
+        body: List,
         match_tok: TokenIndex,
         body_r_brace: TokenIndex,
     };
@@ -323,7 +315,7 @@ pub const Node = struct {
 
     pub const MatchCase = struct {
         base: Node = Node{ .id = .MatchCase },
-        lhs: NodeList,
+        lhs: List,
         expr: *Node,
         colon: TokenIndex,
     };

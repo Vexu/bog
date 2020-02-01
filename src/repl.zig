@@ -1,23 +1,37 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
-const Tree = @import("ast.zig").Tree;
-const parser = @import("parser.zig");
-const Tokenizer = @import("tokenizer.zig").Tokenizer;
+const lang = @import("lang.zig");
+const Tree = lang.Tree;
+const Tokenizer = lang.Tokenizer;
+// const parser = @import("parser.zig");lang
 const compiler = @import("compiler.zig");
 const Vm = @import("vm.zig").Vm;
 const Builder = @import("bytecode.zig").Builder;
 
 pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
+    var arena_allocator = std.heap.ArenaAllocator.init(allocator);
+    defer arena_allocator.deinit();
+    const arena = &arena_allocator.allocator;
+    var tree = Tree{
+        .source = undefined,
+        .arena_allocator = undefined,
+        .tokens = lang.Token.List.init(arena),
+        .nodes = lang.Node.List.init(arena),
+        .errors = lang.ErrorMsg.List.init(arena),
+    };
+
     var repl = Repl{
         .builder = undefined,
-        .tree = Tree.init(allocator),
+        .tree = tree,
         .vm = Vm.init(allocator, true),
         .buffer = try ArrayList(u8).initCapacity(allocator, std.mem.page_size),
-        .tokenizer = undefined,
+        .tokenizer = .{
+            .tree = &tree,
+            .it = undefined,
+            .repl = true,
+        },
     };
-    repl.tokenizer = Tokenizer.init(&repl.tree, true);
-    defer repl.tree.deinit();
     defer repl.vm.deinit();
     defer repl.buffer.deinit();
     try repl.builder.init(allocator);
@@ -79,10 +93,10 @@ const Repl = struct {
         var begin_index = repl.tree.tokens.len;
         if (begin_index != 0) begin_index -= 1;
         try repl.readLine(">>> ", in_stream, out_stream);
-        while (!(try repl.tokenizer.tokenize(repl.buffer.toSliceConst()))) {
+        while (!(try repl.tokenizer.tokenizeRepl(repl.buffer.toSliceConst()))) {
             try repl.readLine("... ", in_stream, out_stream);
         }
-        try parser.parse(&repl.tree, begin_index);
+        const node = try lang.Parser.parseRepl(&repl.tree, begin_index);
 
         try compiler.compile(&repl.builder, &repl.tree, repl.tree.nodes.len - 1);
         try repl.vm.exec(repl.builder.cur_func.code.toSliceConst());

@@ -39,9 +39,6 @@ const mem = std.mem;
 const warn = std.debug.warn;
 const testing = std.testing;
 const lang = @import("lang");
-const Tree = lang.Tree;
-const Tokenizer = lang.Tokenizer;
-const parser = lang.parser;
 const compiler = lang.compiler;
 const Builder = lang.Builder;
 const Vm = lang.Vm;
@@ -55,9 +52,7 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
     // TODO compiling anything is really difficult
     var builder: Builder = undefined;
     try builder.init(alloc);
-    var tree = Tree.init(alloc);
     var vm = Vm.init(alloc, true);
-    var tokenizer = Tokenizer.init(&tree, true);
 
     // TODO move this
     try vm.call_stack.push(.{
@@ -65,9 +60,9 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
         .result_reg = undefined,
         .stack = try vm.gc.stackAlloc(250),
     });
-    testing.expect(try tokenizer.tokenize(source));
-    try parser.parse(&tree, 0);
-    try compiler.compile(&builder, &tree, 0);
+
+    var tree = try lang.parse(alloc, source);
+    try compiler.compile(&builder, tree, 0);
 
 
     try vm.exec(builder.cur_func.code.toSliceConst());
