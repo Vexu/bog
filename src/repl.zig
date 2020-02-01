@@ -4,10 +4,7 @@ const Allocator = std.mem.Allocator;
 const lang = @import("lang.zig");
 const Tree = lang.Tree;
 const Tokenizer = lang.Tokenizer;
-// const parser = @import("parser.zig");lang
-const compiler = @import("compiler.zig");
-const Vm = @import("vm.zig").Vm;
-const Builder = @import("bytecode.zig").Builder;
+const Vm = lang.Vm;
 
 pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     var arena_allocator = std.heap.ArenaAllocator.init(allocator);
@@ -22,7 +19,12 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     };
 
     var repl = Repl{
-        .builder = undefined,
+        .module = .{
+            .name = "<stdin>",
+            .code = "",
+            .strings = "",
+            .start_index = 0,
+        },
         .tree = tree,
         .vm = Vm.init(allocator, true),
         .buffer = try ArrayList(u8).initCapacity(allocator, std.mem.page_size),
@@ -34,8 +36,6 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     };
     defer repl.vm.deinit();
     defer repl.buffer.deinit();
-    try repl.builder.init(allocator);
-    defer repl.builder.deinit();
 
     // TODO move this
     try repl.vm.call_stack.push(.{
@@ -87,7 +87,7 @@ const Repl = struct {
     tokenizer: Tokenizer,
     tree: Tree,
     buffer: ArrayList(u8),
-    builder: Builder,
+    module: lang.Module,
 
     fn handleLine(repl: *Repl, in_stream: var, out_stream: var) !void {
         var begin_index = repl.tree.tokens.len;
@@ -96,10 +96,10 @@ const Repl = struct {
         while (!(try repl.tokenizer.tokenizeRepl(repl.buffer.toSliceConst()))) {
             try repl.readLine("... ", in_stream, out_stream);
         }
-        const node = try lang.Parser.parseRepl(&repl.tree, begin_index);
+        const node = (try lang.Parser.parseRepl(&repl.tree, begin_index)) orelse return;
+        try repl.tree.compileRepl(node, &repl.module);
 
-        try compiler.compile(&repl.builder, &repl.tree, repl.tree.nodes.len - 1);
-        try repl.vm.exec(repl.builder.cur_func.code.toSliceConst());
+        try repl.vm.exec(&repl.module);
         if (repl.vm.result) |some| {
             try some.dump(out_stream, 2);
             try out_stream.writeByte('\n');

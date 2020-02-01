@@ -64,10 +64,10 @@ pub const Parser = struct {
             .it = tree.tokens.iterator(start_index),
             .tree = tree,
         };
-        if (parser.eatToken(.Eof, true)) |_| return null;
+        if (parser.eatToken(.Nl, true)) |_| return null;
         const ret = try parser.stmt();
         try tree.nodes.push(ret);
-        _ = try parser.expectToken(.Eof, false);
+        _ = try parser.expectToken(.Nl, false);
         return ret;
     }
 

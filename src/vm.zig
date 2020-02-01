@@ -1,11 +1,10 @@
 const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
-const bytecode = @import("bytecode.zig");
-const Instruction = bytecode.Instruction;
-const value = @import("value.zig");
-const Value = value.Value;
-const Ref = value.Ref;
+const lang = @import("lang.zig");
+const Op = lang.Op;
+const Value = lang.Value;
+const Ref = lang.Ref;
 const Gc = @import("gc.zig").Gc;
 
 pub const Vm = struct {
@@ -47,15 +46,11 @@ pub const Vm = struct {
     }
 
     // TODO some safety
-    pub fn exec(vm: *Vm, code: []const u32) ExecError!void {
+    pub fn exec(vm: *Vm, module: *lang.Module) ExecError!void {
         const frame = vm.call_stack.uncheckedAt(0);
-        while (vm.ip < code.len) : (vm.ip += 1) {
-            const inst = @bitCast(Instruction, code[vm.ip]);
-            const arg = if (inst.op.hasArg()) blk: {
-                vm.ip += 1;
-                break :blk code[vm.ip];
-            } else undefined;
-            switch (inst.op) {
+        while (vm.ip < module.code.len) : (vm.ip += 1) {
+            const op = @intToEnum(Op, module.code[vm.ip]);
+            switch (op) {
                 .ConstSmallInt => {
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{

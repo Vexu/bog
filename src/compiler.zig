@@ -1,40 +1,49 @@
 const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
-const TypeId = @import("value.zig").TypeId;
 const lang = @import("lang.zig");
+const TypeId = lang.Value.TypeId;
 const Node = lang.Node;
 const Tree = lang.Tree;
 const TokenList = lang.Token.List;
 const TokenIndex = lang.Token.Index;
-const bytecode = @import("bytecode.zig");
-const Builder = bytecode.Builder;
-const RegRef = bytecode.RegRef;
-
-pub fn compile(builder: *Builder, tree: *Tree, start_index: usize) Error!void {
-    var compiler = Compiler{
-        .builder = builder,
-        .tree = tree,
-    };
-    var it = tree.nodes.iterator(start_index);
-    while (it.next()) |n| {
-        const val = try compiler.genNode(n.*, .Value);
-        if (val == .Rt) {
-            // discard unused runtime value
-            try builder.discard(val.Rt);
-        } else if (it.peek() == null and val != .Empty) {
-            const reg = builder.cur_func.registerAlloc(.Temp) catch return error.CompileError;
-            try compiler.makeRuntime(reg, val);
-            try builder.discard(reg);
-        }
-    }
-}
 
 pub const Error = error{CompileError} || Allocator.Error;
 
 pub const Compiler = struct {
-    builder: *Builder,
     tree: *Tree,
+    arena: *Allocator,
+    module_scope: Scope,
+
+    const Scope = struct {
+        id: Id,
+        parent: ?*Scope,
+        syms: Symbol.List,
+
+        const Id = enum {
+            Module,
+            Fn,
+            Loop,
+            Block,
+            Capture,
+        };
+
+        const Fn = struct {
+            base: Scope,
+            // code: ArrayList(Code),
+        };
+    };
+
+    const Symbol = struct {
+        name: []const u8,
+        reg: RegRef,
+        mutable: bool,
+
+        const List = std.SegmentedList(Symbol, 4);
+    };
+
+    // TODO optimize size of this
+    const RegRef = u32;
 
     const Value = union(enum) {
         /// result of continue, break, return and assignmnet; cannot exist at runtime
@@ -65,11 +74,65 @@ pub const Compiler = struct {
         Rt: RegRef,
 
         /// Something assignable is expected
-        Lval,
+        Lval: enum {
+            Const,
+            Let,
+            Assign,
+        },
 
         /// A value, runtime or constant, is expected
         Value,
     };
+
+    pub fn compile(tree: *Tree, allocator: *Allocator) (Error || lang.Parser.Error)!lang.Module {
+        const arena = &tree.arena_allocator.allocator;
+        var compiler = Compiler{
+            .tree = tree,
+            .arena = arena,
+            .module_scope = .{
+                .id = .Module,
+                .parent = null,
+                .syms = Symbol.List.init(arena), 
+            },
+        };
+        var it = tree.nodes.iterator(start_index);
+        while (it.next()) |n| {
+            const val = try compiler.genNode(n.*, .Value);
+            if (val == .Rt) {
+                // discard unused runtime value
+                try builder.discard(val.Rt);
+            } else if (it.peek() == null and val != .Empty) {
+                const reg = builder.cur_func.registerAlloc(.Temp) catch return error.CompileError;
+                try compiler.makeRuntime(reg, val);
+                try builder.discard(reg);
+            }
+        }
+        return lang.Module{
+            .name = "",
+            .code = "",
+            .strings = "",
+            .start_index = 0,
+        };
+    }
+
+    pub fn compileRepl(tree: *Tree, node: *Node, module: *lang.Module) Error!void {
+        const arena = &tree.arena_allocator.allocator;
+        var compiler = Compiler{
+            .tree = tree,
+            .arena = arena,
+            .module_scope = .{
+                .id = .Module,
+                .parent = null,
+                .syms = Symbol.List.init(arena), 
+            },
+        };
+        const val = try compiler.genNode(node, .Value);
+        if (val != .Empty) {
+            const reg = builder.cur_func.registerAlloc(.Temp) catch return error.CompileError;
+            try compiler.makeRuntime(reg, val);
+            try builder.discard(reg);
+        }
+    }
 
     fn genNode(self: *Compiler, node: *Node, res: Result) Error!Value {
         switch (node.id) {

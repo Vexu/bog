@@ -19,6 +19,8 @@ pub const Tree = struct {
     }
 
     pub const render = @import("render.zig").render;
+    pub const compile = lang.Compiler.compile;
+    pub const compileRepl = lang.Compiler.compileRepl;
 };
 
 pub const ErrorMsg = struct {

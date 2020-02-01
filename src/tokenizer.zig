@@ -345,17 +345,15 @@ pub const Tokenizer = struct {
 
     pub fn tokenizeRepl(self: *Tokenizer, input: []const u8) Error!bool {
         self.it.bytes = input;
-        self.tree.source = input;
-        _ = self.tree.tokens.pop();
         while (true) {
-            const tok = try self.tree.tokens.addOne();
-            tok.* = try self.next();
+            const tok = try self.next();
             if (tok.id == .Eof) {
                 return if (self.repl and (self.level != 0 or self.string or self.no_eof))
                     false
                 else
                     true;
             }
+            try self.tree.tokens.push(tok);
         }
     }
 

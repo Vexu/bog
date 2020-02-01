@@ -1,28 +1,28 @@
 const std = @import("std");
 
-const ValueMap = std.StringHashMap(*Ref);
-const ValueList = std.ArrayList(*Ref);
-
-pub const TypeId = enum {
-    None,
-    Int,
-    Num,
-    Bool,
-    Str,
-    Tuple,
-    Map,
-    List,
-    Error,
-    Range,
-    Fn,
-};
-
 pub const Value = struct {
+    pub const TypeId = enum {
+        None,
+        Int,
+        Num,
+        Bool,
+        Str,
+        Tuple,
+        Map,
+        List,
+        Error,
+        Range,
+        Fn,
+    };
+
+    pub const Map = std.StringHashMap(*Ref);
+    pub const List = std.ArrayList(*Ref);
+
     ref: u32 = 0,
     kind: union(TypeId) {
         Tuple: []*Ref,
-        Map: ValueMap,
-        List: *ValueList,
+        Map: Map,
+        List: *List,
         Error: *Ref,
         Int: i64,
         Num: f64,

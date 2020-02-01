@@ -39,8 +39,6 @@ const mem = std.mem;
 const warn = std.debug.warn;
 const testing = std.testing;
 const lang = @import("lang");
-const compiler = lang.compiler;
-const Builder = lang.Builder;
 const Vm = lang.Vm;
 
 var buffer: [10 * 1024]u8 = undefined;
@@ -49,9 +47,6 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
     var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const alloc = &buf_alloc.allocator;
 
-    // TODO compiling anything is really difficult
-    var builder: Builder = undefined;
-    try builder.init(alloc);
     var vm = Vm.init(alloc, true);
 
     // TODO move this
@@ -62,10 +57,9 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
     });
 
     var tree = try lang.parse(alloc, source);
-    try compiler.compile(&builder, tree, 0);
+    const module = try tree.compile(alloc);
 
-
-    try vm.exec(builder.cur_func.code.toSliceConst());
+    try vm.exec(module);
     if (vm.result) |some| {
         var out_buf = try std.Buffer.initSize(alloc, 0);
         var out_stream = std.io.BufferOutStream.init(&out_buf);
