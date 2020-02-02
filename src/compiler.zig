@@ -7,6 +7,7 @@ const Node = lang.Node;
 const Tree = lang.Tree;
 const TokenList = lang.Token.List;
 const TokenIndex = lang.Token.Index;
+const RegRef = lang.RegRef;
 
 pub const Error = error{CompileError} || Allocator.Error;
 
@@ -14,6 +15,40 @@ pub const Compiler = struct {
     tree: *Tree,
     arena: *Allocator,
     module_scope: Scope,
+    used_regs: RegRef = 0,
+    code: Code,
+
+    pub const Code = std.ArrayList(u8);
+
+    fn registerAlloc(self: *Compiler) RegRef {
+        const reg = self.used_regs;
+        self.used_regs += 1;
+        return reg;
+    }
+
+    fn registerFree(self: *Compiler, reg: RegRef) void {
+        if (reg == self.used_regs - 1) {
+            self.used_regs -= 1;
+        }
+    }
+
+    // TODO these are really fragile and inefficient
+    fn emitInstruction_1(self: *Compiler, op: lang.Op, reg: RegRef) !void {
+        try self.code.append(@enumToInt(op));
+        try self.code.appendSlice(@sliceToBytes(([_]RegRef{reg})[0..]));
+    }
+
+    fn emitInstruction_1_8(self: *Compiler, op: lang.Op, reg: RegRef, val: u8) !void {
+        try self.code.append(@enumToInt(op));
+        try self.code.appendSlice(@sliceToBytes(([_]RegRef{reg})[0..]));
+        try self.code.append(val);
+    }
+
+    fn emitInstruction_1_32(self: *Compiler, op: lang.Op, reg: RegRef, val: i32) !void {
+        try self.code.append(@enumToInt(op));
+        try self.code.appendSlice(@sliceToBytes(([_]RegRef{reg})[0..]));
+        try self.code.appendSlice(@sliceToBytes(([_]i32{val})[0..]));
+    }
 
     const Scope = struct {
         id: Id,
@@ -34,16 +69,13 @@ pub const Compiler = struct {
         };
     };
 
-    const Symbol = struct {
+    pub const Symbol = struct {
         name: []const u8,
         reg: RegRef,
         mutable: bool,
 
-        const List = std.SegmentedList(Symbol, 4);
+        pub const List = std.SegmentedList(Symbol, 4);
     };
-
-    // TODO optimize size of this
-    const RegRef = u32;
 
     const Value = union(enum) {
         /// result of continue, break, return and assignmnet; cannot exist at runtime
@@ -57,15 +89,19 @@ pub const Compiler = struct {
         Str: []const u8,
     };
 
-    fn makeRuntime(self: *Compiler, res: RegRef, val: Value) !void {
+    fn makeRuntime(self: *Compiler, res: RegRef, val: Value) Error!void {
         return switch (val) {
             .Empty => unreachable,
             .Rt => |v| std.debug.assert(v == res),
-            .None => try self.builder.constNone(res),
-            .Int => |v| try self.builder.constInt(res, v),
-            .Num => |v| try self.builder.constNum(res, v),
-            .Bool => |v| try self.builder.constBool(res, v),
-            .Str => |v| try self.builder.constStr(res, v),
+            .None => try self.emitInstruction_1_8(.ConstPrimitive, res, 0),
+            .Int => |v| {
+                // TODO check size
+                try self.emitInstruction_1_32(.ConstInt32, res, @truncate(i32, v));
+            },
+            // .Num => |v| try self.builder.constNum(res, v),
+            .Bool => |v| try self.emitInstruction_1_8(.ConstPrimitive, res, @as(u8, @boolToInt(v)) + 1),
+            // .Str => |v| try self.builder.constStr(res, v),
+            else => unreachable,
         };
     }
 
@@ -92,46 +128,41 @@ pub const Compiler = struct {
             .module_scope = .{
                 .id = .Module,
                 .parent = null,
-                .syms = Symbol.List.init(arena), 
+                .syms = Symbol.List.init(arena),
             },
+            .code = Code.init(allocator),
         };
-        var it = tree.nodes.iterator(start_index);
+        var it = tree.nodes.iterator(0);
         while (it.next()) |n| {
             const val = try compiler.genNode(n.*, .Value);
             if (val == .Rt) {
                 // discard unused runtime value
-                try builder.discard(val.Rt);
+                try compiler.emitInstruction_1(.Discard, val.Rt);
+                compiler.registerFree(val.Rt);
             } else if (it.peek() == null and val != .Empty) {
-                const reg = builder.cur_func.registerAlloc(.Temp) catch return error.CompileError;
+                const reg = compiler.registerAlloc();
+                defer compiler.registerFree(reg);
                 try compiler.makeRuntime(reg, val);
-                try builder.discard(reg);
+                try compiler.emitInstruction_1(.Discard, reg);
             }
         }
         return lang.Module{
             .name = "",
-            .code = "",
+            .code = compiler.code.toOwnedSlice(),
             .strings = "",
             .start_index = 0,
         };
     }
 
-    pub fn compileRepl(tree: *Tree, node: *Node, module: *lang.Module) Error!void {
-        const arena = &tree.arena_allocator.allocator;
-        var compiler = Compiler{
-            .tree = tree,
-            .arena = arena,
-            .module_scope = .{
-                .id = .Module,
-                .parent = null,
-                .syms = Symbol.List.init(arena), 
-            },
-        };
+    pub fn compileRepl(compiler: *Compiler, node: *Node, module: *lang.Module) Error!void {
         const val = try compiler.genNode(node, .Value);
         if (val != .Empty) {
-            const reg = builder.cur_func.registerAlloc(.Temp) catch return error.CompileError;
+            const reg = compiler.registerAlloc();
+            defer compiler.registerFree(reg);
             try compiler.makeRuntime(reg, val);
-            try builder.discard(reg);
+            try compiler.emitInstruction_1(.Discard, reg);
         }
+        module.code = compiler.code.toSliceConst();
     }
 
     fn genNode(self: *Compiler, node: *Node, res: Result) Error!Value {
@@ -166,7 +197,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn genBlock(self: *Compiler, node: *Node.ListTupleMapBlock, res: Result) !Value {
+    fn genBlock(self: *Compiler, node: *Node.ListTupleMapBlock, res: Result) Error!Value {
         if (res == .Lval) {
             // try adderr("cannot assign to block")
             return error.CompileError;
@@ -179,7 +210,8 @@ pub const Compiler = struct {
             const val = try self.genNode(n.*, .Value);
             if (val == .Rt) {
                 // discard unused runtime value
-                try self.builder.discard(val.Rt);
+                try self.emitInstruction_1(.Discard, val.Rt);
+                self.registerFree(val.Rt);
             }
         }
         unreachable;
@@ -220,14 +252,15 @@ pub const Compiler = struct {
         }
     }
 
-    fn genPrefix(self: *Compiler, node: *Node.Prefix, res: Result) !Value {
+    fn genPrefix(self: *Compiler, node: *Node.Prefix, res: Result) Error!Value {
         try self.assertNotLval(res);
         const r_val = try self.genNode(node.rhs, .Value);
         try self.assertNotEmpty(r_val);
         if (r_val == .Rt) {
-            const result_loc = if (res == .Rt) res.Rt else @panic("TODO: create result loc");
-            try self.builder.prefix(result_loc, node.op, r_val.Rt);
-            return Value{ .Rt = result_loc };
+            @panic("TODO");
+            // const result_loc = if (res == .Rt) res.Rt else @panic("TODO: create result loc");
+            // try self.builder.prefix(result_loc, node.op, r_val.Rt);
+            // return Value{ .Rt = result_loc };
         }
         const ret_val = switch (node.op) {
             .BoolNot => blk: {
@@ -241,6 +274,7 @@ pub const Compiler = struct {
             .Minus => blk: {
                 try self.assertNumeric(r_val);
                 if (r_val == .Int) {
+                    // TODO check for overflow
                     break :blk Value{ .Int = -r_val.Int };
                 } else {
                     break :blk Value{ .Num = -r_val.Num };
@@ -262,7 +296,7 @@ pub const Compiler = struct {
         return ret_val;
     }
 
-    fn genLiteral(self: *Compiler, node: *Node.Literal, res: Result) !Value {
+    fn genLiteral(self: *Compiler, node: *Node.Literal, res: Result) Error!Value {
         try self.assertNotLval(res);
         const ret_val: Value = switch (node.kind) {
             .Int => .{ .Int = try self.parseInt(node.tok) },

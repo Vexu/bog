@@ -117,11 +117,8 @@ pub const Op = enum(u8) {
     /// A = error(A)
     BuildError,
 
-    // all ops below have args
-    const HasArg = 120;
-
     /// ip = arg1
-    Jump = HasArg,
+    Jump,
 
     /// if (A) ip = arg1
     JumpTrue,
@@ -133,7 +130,7 @@ pub const Op = enum(u8) {
     JumpNotErr,
 
     /// A = arg1
-    ConstSmallInt,
+    ConstInt32,
 
     /// A = STRING(arg1)
     ConstString,
@@ -145,11 +142,10 @@ pub const Op = enum(u8) {
     Import,
 
     // _,
-
-    pub fn hasArg(op: Op) bool {
-        return @enumToInt(op) >= HasArg;
-    }
 };
+
+// TODO optimize size of this
+pub const RegRef = u16;
 
 pub const Module = struct {
     name: []const u8,

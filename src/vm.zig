@@ -5,6 +5,7 @@ const lang = @import("lang.zig");
 const Op = lang.Op;
 const Value = lang.Value;
 const Ref = lang.Ref;
+const RegRef = lang.RegRef;
 const Gc = @import("gc.zig").Gc;
 
 pub const Vm = struct {
@@ -48,47 +49,55 @@ pub const Vm = struct {
     // TODO some safety
     pub fn exec(vm: *Vm, module: *lang.Module) ExecError!void {
         const frame = vm.call_stack.uncheckedAt(0);
-        while (vm.ip < module.code.len) : (vm.ip += 1) {
-            const op = @intToEnum(Op, module.code[vm.ip]);
+        while (vm.ip < module.code.len) {
+            const op = @intToEnum(Op, vm.getVal(module, u8));
             switch (op) {
-                .ConstSmallInt => {
+                .ConstInt32 => {
+                    const reg = vm.getVal(module, RegRef);
+                    const val = vm.getVal(module, i32);
+
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
-                            .Int = @bitCast(i32, arg),
+                            .Int = @bitCast(i32, val),
                         },
                     };
-                    frame.stack[inst.A] = ref;
+                    frame.stack[reg] = ref;
                 },
-                .ConstNone => {
-                    frame.stack[inst.A].value.? = &Value.None;
-                },
-                .ConstBool => {
-                    const ref = try vm.gc.alloc();
-                    ref.value.?.* = .{
-                        .kind = .{
-                            .Bool = inst.B != 0,
-                        },
-                    };
-                    frame.stack[inst.A] = ref;
-                    // TODO https://github.com/ziglang/zig/issues/4295
-                    // frame.stack[inst.A].value = if (inst.B != 0) &Value.True else &Value.False;
-                },
-                .Add => {
-                    // TODO check numeric
-                    const ref = try vm.gc.alloc();
-                    ref.value.?.* = .{
-                        .kind = .{
-                            .Int = frame.stack[inst.B].value.?.kind.Int + frame.stack[inst.C].value.?.kind.Int,
-                        },
-                    };
-                    frame.stack[inst.A] = ref;
-                },
-                .Discard => {
-                    if (vm.repl and vm.call_stack.len == 1) {
-                        vm.result = frame.stack[inst.A];
+                .ConstPrimitive => {
+                    const reg = vm.getVal(module, RegRef);
+                    const val = vm.getVal(module, u8);
+
+                    if (vm.ip == 0) {
+                        frame.stack[reg].value.? = &Value.None;
                     } else {
-                        const val = frame.stack[inst.A].value.?;
+                        const ref = try vm.gc.alloc();
+                        ref.value.?.* = .{
+                            .kind = .{
+                                .Bool = (val - 1) != 0,
+                            },
+                        };
+                        frame.stack[reg] = ref;
+                        // TODO https://github.com/ziglang/zig/issues/4295
+                        // frame.stack[inst.A].value = if (inst.B != 0) &Value.True else &Value.False;
+                    }
+                },
+                // .Add => {
+                //     // TODO check numeric
+                //     const ref = try vm.gc.alloc();
+                //     ref.value.?.* = .{
+                //         .kind = .{
+                //             .Int = frame.stack[inst.B].value.?.kind.Int + frame.stack[inst.C].value.?.kind.Int,
+                //         },
+                //     };
+                //     frame.stack[inst.A] = ref;
+                // },
+                .Discard => {
+                    const reg = vm.getVal(module, RegRef);
+                    if (vm.repl and vm.call_stack.len == 1) {
+                        vm.result = frame.stack[reg];
+                    } else {
+                        const val = frame.stack[reg].value.?;
                         if (val.kind == .Error) {
                             // TODO error discarded
                         }
@@ -97,9 +106,15 @@ pub const Vm = struct {
                     }
                 },
                 else => {
-                    std.debug.warn("Unimplemented: {}\n", .{inst.op});
+                    std.debug.warn("Unimplemented: {}\n", .{op});
                 },
             }
         }
+    }
+
+    fn getVal(vm: *Vm, module: *lang.Module, comptime T: type) T {
+        const val = @ptrCast(*const align(1) T, module.code[vm.ip..].ptr).*;
+        vm.ip += @sizeOf(T);
+        return val;
     }
 };

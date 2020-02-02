@@ -25,3 +25,4 @@ pub const Vm = vm.Vm;
 const bytecode = @import("bytecode.zig");
 pub const Op = bytecode.Op;
 pub const Module = bytecode.Module;
+pub const RegRef = bytecode.RegRef;

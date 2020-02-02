@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 const lang = @import("lang.zig");
 const Tree = lang.Tree;
 const Tokenizer = lang.Tokenizer;
+const Compiler = lang.Compiler;
 const Vm = lang.Vm;
 
 pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
@@ -35,6 +36,16 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
                 .i = 0,
             },
             .repl = true,
+        },
+        .compiler = .{
+            .tree = &tree,
+            .arena = arena,
+            .module_scope = .{
+                .id = .Module,
+                .parent = null,
+                .syms = Compiler.Symbol.List.init(arena),
+            },
+            .code = Compiler.Code.init(arena),
         },
     };
     defer repl.vm.deinit();
@@ -91,6 +102,7 @@ const Repl = struct {
     tree: *Tree,
     buffer: ArrayList(u8),
     module: lang.Module,
+    compiler: Compiler,
 
     fn handleLine(repl: *Repl, in_stream: var, out_stream: var) !void {
         var begin_index = repl.tree.tokens.len;
@@ -100,7 +112,7 @@ const Repl = struct {
             try repl.readLine("... ", in_stream, out_stream);
         }
         const node = (try lang.Parser.parseRepl(repl.tree, begin_index)) orelse return;
-        try repl.tree.compileRepl(node, &repl.module);
+        try repl.compiler.compileRepl(node, &repl.module);
 
         try repl.vm.exec(&repl.module);
         if (repl.vm.result) |some| {
