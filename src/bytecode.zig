@@ -19,11 +19,11 @@ pub const Op = enum(u8) {
     /// DISCARD(A)
     Discard,
 
-    /// A = BOOL(B)
-    ConstBool,
-
-    /// A = ()
-    ConstNone,
+    /// A = PRIMTIVE(B)
+    /// 0 = ()
+    /// 1 = false
+    /// 2 = true
+    ConstPrimitive,
 
     /// A = B // C
     DivFloor,
@@ -156,6 +156,7 @@ pub const Module = struct {
     code: []const u8,
     strings: []const u8,
     start_index: u32,
+    // debug_info,
 
     pub fn read(src: []const u8) Module {
         @panic("TODO");

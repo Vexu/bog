@@ -57,9 +57,9 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
     });
 
     var tree = try lang.parse(alloc, source);
-    const module = try tree.compile(alloc);
+    var module = try tree.compile(alloc);
 
-    try vm.exec(module);
+    try vm.exec(&module);
     if (vm.result) |some| {
         var out_buf = try std.Buffer.initSize(alloc, 0);
         var out_stream = std.io.BufferOutStream.init(&out_buf);

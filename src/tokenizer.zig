@@ -309,6 +309,7 @@ pub const Token = struct {
             .Keyword_in => "in",
             .Keyword_fn => "fn",
             .Keyword_as => "as",
+            .Keyword_const => "const",
         };
     }
 };
@@ -1003,7 +1004,7 @@ pub const Tokenizer = struct {
 };
 
 var test_tree = Tree{
-    .errors = lang.ErrorMsg.List.init(std.debug.failing_allocator),
+    .errors = lang.ErrorMsg.List.init(std.testing.failing_allocator),
 
     .tokens = undefined,
     .nodes = undefined,

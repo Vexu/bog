@@ -12,7 +12,7 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     const arena = &arena_allocator.allocator;
     var tree = Tree{
         .source = undefined,
-        .arena_allocator = undefined,
+        .arena_allocator = arena_allocator,
         .tokens = lang.Token.List.init(arena),
         .nodes = lang.Node.List.init(arena),
         .errors = lang.ErrorMsg.List.init(arena),
@@ -25,12 +25,15 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
             .strings = "",
             .start_index = 0,
         },
-        .tree = tree,
+        .tree = &tree,
         .vm = Vm.init(allocator, true),
         .buffer = try ArrayList(u8).initCapacity(allocator, std.mem.page_size),
         .tokenizer = .{
             .tree = &tree,
-            .it = undefined,
+            .it = .{
+                .bytes = "",
+                .i = 0,
+            },
             .repl = true,
         },
     };
@@ -85,7 +88,7 @@ fn lineBegin(slice: []const u8, start_index: usize) usize {
 const Repl = struct {
     vm: Vm,
     tokenizer: Tokenizer,
-    tree: Tree,
+    tree: *Tree,
     buffer: ArrayList(u8),
     module: lang.Module,
 
@@ -96,7 +99,7 @@ const Repl = struct {
         while (!(try repl.tokenizer.tokenizeRepl(repl.buffer.toSliceConst()))) {
             try repl.readLine("... ", in_stream, out_stream);
         }
-        const node = (try lang.Parser.parseRepl(&repl.tree, begin_index)) orelse return;
+        const node = (try lang.Parser.parseRepl(repl.tree, begin_index)) orelse return;
         try repl.tree.compileRepl(node, &repl.module);
 
         try repl.vm.exec(&repl.module);
