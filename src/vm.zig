@@ -52,6 +52,18 @@ pub const Vm = struct {
         while (vm.ip < module.code.len) {
             const op = @intToEnum(Op, vm.getVal(module, u8));
             switch (op) {
+                .ConstInt8 => {
+                    const reg = vm.getVal(module, RegRef);
+                    const val = vm.getVal(module, i8);
+
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Int = val,
+                        },
+                    };
+                    frame.stack[reg] = ref;
+                },
                 .ConstInt32 => {
                     const reg = vm.getVal(module, RegRef);
                     const val = vm.getVal(module, i32);
@@ -59,7 +71,19 @@ pub const Vm = struct {
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
-                            .Int = @bitCast(i32, val),
+                            .Int = val,
+                        },
+                    };
+                    frame.stack[reg] = ref;
+                },
+                .ConstInt64 => {
+                    const reg = vm.getVal(module, RegRef);
+                    const val = vm.getVal(module, i64);
+
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Int = val,
                         },
                     };
                     frame.stack[reg] = ref;
@@ -68,7 +92,7 @@ pub const Vm = struct {
                     const reg = vm.getVal(module, RegRef);
                     const val = vm.getVal(module, u8);
 
-                    if (vm.ip == 0) {
+                    if (val == 0) {
                         frame.stack[reg].value.? = &Value.None;
                     } else {
                         const ref = try vm.gc.alloc();

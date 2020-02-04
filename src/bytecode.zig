@@ -25,6 +25,17 @@ pub const Op = enum(u8) {
     /// 2 = true
     ConstPrimitive,
 
+    /// A = arg1
+    ConstInt8,
+    ConstInt32,
+    ConstInt64,
+
+    /// A = STRING(arg1)
+    ConstString,
+
+    /// A = NUM(arg1)
+    ConstNum,
+
     /// A = B // C
     DivFloor,
 
@@ -128,15 +139,6 @@ pub const Op = enum(u8) {
 
     /// if (not A is error) ip = arg1
     JumpNotErr,
-
-    /// A = arg1
-    ConstInt32,
-
-    /// A = STRING(arg1)
-    ConstString,
-
-    /// A = NUM(arg1)
-    ConstNum,
 
     /// A = IMPORT(arg1)
     Import,

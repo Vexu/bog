@@ -32,22 +32,16 @@ pub const Compiler = struct {
         }
     }
 
-    // TODO these are really fragile and inefficient
+    // TODO improve?
     fn emitInstruction_1(self: *Compiler, op: lang.Op, reg: RegRef) !void {
         try self.code.append(@enumToInt(op));
         try self.code.appendSlice(@sliceToBytes(([_]RegRef{reg})[0..]));
     }
 
-    fn emitInstruction_1_8(self: *Compiler, op: lang.Op, reg: RegRef, val: u8) !void {
+    fn emitInstruction_1_1(self: *Compiler, op: lang.Op, reg: RegRef, arg: var) !void {
         try self.code.append(@enumToInt(op));
         try self.code.appendSlice(@sliceToBytes(([_]RegRef{reg})[0..]));
-        try self.code.append(val);
-    }
-
-    fn emitInstruction_1_32(self: *Compiler, op: lang.Op, reg: RegRef, val: i32) !void {
-        try self.code.append(@enumToInt(op));
-        try self.code.appendSlice(@sliceToBytes(([_]RegRef{reg})[0..]));
-        try self.code.appendSlice(@sliceToBytes(([_]i32{val})[0..]));
+        try self.code.appendSlice(@sliceToBytes(([_]@TypeOf(arg){arg})[0..]));
     }
 
     const Scope = struct {
@@ -93,13 +87,19 @@ pub const Compiler = struct {
         return switch (val) {
             .Empty => unreachable,
             .Rt => |v| std.debug.assert(v == res),
-            .None => try self.emitInstruction_1_8(.ConstPrimitive, res, 0),
+            .None => try self.emitInstruction_1_1(.ConstPrimitive, res, @as(u8, 0)),
             .Int => |v| {
-                // TODO check size
-                try self.emitInstruction_1_32(.ConstInt32, res, @truncate(i32, v));
+
+            if (v > std.math.minInt(i8) and v < std.math.maxInt(i8)) {
+                try self.emitInstruction_1_1(.ConstInt8, res, @truncate(i8, v));
+            } else if (v > std.math.minInt(i32) and v < std.math.maxInt(i32)) {
+                try self.emitInstruction_1_1(.ConstInt32, res, @truncate(i32, v));
+            } else {
+                try self.emitInstruction_1_1(.ConstInt64, res, v);
+            }
             },
             // .Num => |v| try self.builder.constNum(res, v),
-            .Bool => |v| try self.emitInstruction_1_8(.ConstPrimitive, res, @as(u8, @boolToInt(v)) + 1),
+            .Bool => |v| try self.emitInstruction_1_1(.ConstPrimitive, res, @as(u8, @boolToInt(v)) + 1),
             // .Str => |v| try self.builder.constStr(res, v),
             else => unreachable,
         };
@@ -340,7 +340,7 @@ pub const Compiler = struct {
             };
 
             x = std.math.mul(i64, x, radix) catch {
-                // try self.adderr();
+                // try self.adderr("TODO bigint");
                 return error.CompileError;
             };
             // why is this cast needed?
