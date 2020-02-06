@@ -1,3 +1,18 @@
+test "basic variables" {
+    try expectOutput(
+        \\let x = 12
+        \\x
+    ,
+        \\12
+    );
+    try expectOutput(
+        \\let x = true
+        \\not x
+    ,
+        \\false
+    );
+}
+
 test "number literals" {
     try expectOutput(
         \\12
@@ -50,11 +65,8 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
     var vm = Vm.init(alloc, true);
 
     // TODO move this
-    try vm.call_stack.push(.{
-        .return_ip = null,
-        .result_reg = undefined,
-        .stack = try vm.gc.stackAlloc(250),
-    });
+    // TODO move this
+    try vm.gc.stackAlloc(250);
 
     var tree = try lang.parse(alloc, source);
     var module = try tree.compile(alloc);

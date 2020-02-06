@@ -34,15 +34,21 @@ pub const Compiler = struct {
     }
 
     // TODO improve?
-    fn emitInstruction_1(self: *Compiler, op: lang.Op, reg: RegRef) !void {
+    fn emitInstruction_1(self: *Compiler, op: lang.Op, A: RegRef) !void {
         try self.code.append(@enumToInt(op));
-        try self.code.appendSlice(@sliceToBytes(([_]RegRef{reg})[0..]));
+        try self.code.appendSlice(@sliceToBytes(([_]RegRef{A})[0..]));
     }
 
-    fn emitInstruction_1_1(self: *Compiler, op: lang.Op, reg: RegRef, arg: var) !void {
+    fn emitInstruction_1_1(self: *Compiler, op: lang.Op, A: RegRef, arg: var) !void {
         try self.code.append(@enumToInt(op));
-        try self.code.appendSlice(@sliceToBytes(([_]RegRef{reg})[0..]));
+        try self.code.appendSlice(@sliceToBytes(([_]RegRef{A})[0..]));
         try self.code.appendSlice(@sliceToBytes(([_]@TypeOf(arg){arg})[0..]));
+    }
+
+    fn emitInstruction_2(self: *Compiler, op: lang.Op, A: RegRef, B: RegRef) !void {
+        try self.code.append(@enumToInt(op));
+        try self.code.appendSlice(@sliceToBytes(([_]RegRef{A})[0..]));
+        try self.code.appendSlice(@sliceToBytes(([_]RegRef{B})[0..]));
     }
 
     const Scope = struct {
@@ -272,10 +278,23 @@ pub const Compiler = struct {
         const r_val = try self.genNode(node.rhs, .Value);
         try self.assertNotEmpty(r_val);
         if (r_val == .Rt) {
-            @panic("TODO");
-            // const result_loc = if (res == .Rt) res.Rt else @panic("TODO: create result loc");
-            // try self.builder.prefix(result_loc, node.op, r_val.Rt);
-            // return Value{ .Rt = result_loc };
+            const op_id = switch (node.op) {
+                .BoolNot => .BoolNot,
+                .BitNot => .BitNot,
+                .Minus => .Negate,
+                // TODO should unary + be a no-op
+                .Plus => return r_val,
+                .Try => lang.Op.Try,
+            };
+            // TODO r_val should be freed here
+            if (res == .Rt) {
+                try self.emitInstruction_2(op_id, res.Rt, r_val.Rt);
+                return Value{ .Rt = res.Rt };
+            } else {
+                const reg = self.registerAlloc();
+                try self.emitInstruction_2(op_id, reg, r_val.Rt);
+                return Value{ .Rt = reg };
+            }
         }
         const ret_val = switch (node.op) {
             .BoolNot => blk: {

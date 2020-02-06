@@ -64,10 +64,10 @@ pub const Op = enum(u8) {
     RShift,
 
     /// A = B & C
-    BinAnd,
+    BitAnd,
 
     /// A = B | C
-    BinOr,
+    BitOr,
 
     /// A //= B
     DirectDivFloor,
@@ -97,10 +97,10 @@ pub const Op = enum(u8) {
     DirectRShift,
 
     /// A &= B
-    DirectBinAnd,
+    DirectBitAnd,
 
     /// A |= B
-    DirectBinOr,
+    DirectBitOr,
 
     /// A = B and C
     And,
@@ -109,10 +109,10 @@ pub const Op = enum(u8) {
     Or,
 
     /// A = not B
-    Not,
+    BoolNot,
 
     /// A = ~B
-    BinNot,
+    BitNot,
 
     /// A = -B
     Negate,

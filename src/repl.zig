@@ -52,11 +52,7 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     defer repl.buffer.deinit();
 
     // TODO move this
-    try repl.vm.call_stack.push(.{
-        .return_ip = null,
-        .result_reg = undefined,
-        .stack = try repl.vm.gc.stackAlloc(250),
-    });
+    try repl.vm.gc.stackAlloc(250);
 
     while (true) {
         repl.handleLine(in_stream, out_stream) catch |err| switch (err) {

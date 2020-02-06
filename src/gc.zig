@@ -33,12 +33,11 @@ pub const Gc = struct {
 
     pub fn free(gc: *Gc, Ref) void {}
 
-    pub fn stackAlloc(gc: *Gc, count: u8) ![]Ref {
+    pub fn stackAlloc(gc: *Gc, count: u8) !void {
         try gc.stack.resize(count);
-        return gc.stack.toSlice()[gc.stack.len - count ..];
     }
 
-    pub fn stackFree(gc: *Gc, stack: []Ref) void {
+    pub fn stackFree(gc: *Gc, count: usize) void {
         gc.stack.resize(stack.len) catch unreachable;
     }
 };

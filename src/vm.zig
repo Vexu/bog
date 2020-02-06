@@ -21,11 +21,11 @@ pub const Vm = struct {
     const FunctionFrame = struct {
         return_ip: ?usize,
         result_reg: u8,
-        stack: []Ref, // slice of vm.gc.stack
     };
 
     pub const ExecError = error{
         MalformedByteCode,
+        TypeError,
         OtherError, // TODO
 
         // TODO remove possibility
@@ -47,8 +47,15 @@ pub const Vm = struct {
     }
 
     // TODO some safety
+    // TODO rename to step and execute 1 instruction
     pub fn exec(vm: *Vm, module: *lang.Module) ExecError!void {
-        const frame = vm.call_stack.uncheckedAt(0);
+        // TODO
+        const stack = vm.gc.stack.toSlice();
+        try vm.call_stack.push(.{
+            .return_ip = null,
+            .result_reg = 0,
+        });
+        defer _ = vm.call_stack.pop();
         while (vm.ip < module.code.len) {
             const op = @intToEnum(Op, vm.getVal(module, u8));
             switch (op) {
@@ -62,7 +69,7 @@ pub const Vm = struct {
                             .Int = val,
                         },
                     };
-                    frame.stack[reg] = ref;
+                    stack[reg] = ref;
                 },
                 .ConstInt32 => {
                     const reg = vm.getVal(module, RegRef);
@@ -74,7 +81,7 @@ pub const Vm = struct {
                             .Int = val,
                         },
                     };
-                    frame.stack[reg] = ref;
+                    stack[reg] = ref;
                 },
                 .ConstInt64 => {
                     const reg = vm.getVal(module, RegRef);
@@ -86,14 +93,14 @@ pub const Vm = struct {
                             .Int = val,
                         },
                     };
-                    frame.stack[reg] = ref;
+                    stack[reg] = ref;
                 },
                 .ConstPrimitive => {
                     const reg = vm.getVal(module, RegRef);
                     const val = vm.getVal(module, u8);
 
                     if (val == 0) {
-                        frame.stack[reg].value.? = &Value.None;
+                        stack[reg].value.? = &Value.None;
                     } else {
                         const ref = try vm.gc.alloc();
                         ref.value.?.* = .{
@@ -101,7 +108,7 @@ pub const Vm = struct {
                                 .Bool = (val - 1) != 0,
                             },
                         };
-                        frame.stack[reg] = ref;
+                        stack[reg] = ref;
                         // TODO https://github.com/ziglang/zig/issues/4295
                         // frame.stack[inst.A].value = if (inst.B != 0) &Value.True else &Value.False;
                     }
@@ -116,12 +123,30 @@ pub const Vm = struct {
                 //     };
                 //     frame.stack[inst.A] = ref;
                 // },
+                .BoolNot => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+
+                    if (stack[B].value.?.kind != .Bool) {
+                        // TODO error expected boolean
+                        return error.TypeError;
+                    }
+
+                    // TODO https://github.com/ziglang/zig/issues/4295
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Bool = !stack[B].value.?.kind.Bool,
+                        },
+                    };
+                    stack[A] = ref;
+                },
                 .Discard => {
                     const reg = vm.getVal(module, RegRef);
                     if (vm.repl and vm.call_stack.len == 1) {
-                        vm.result = frame.stack[reg];
+                        vm.result = stack[reg];
                     } else {
-                        const val = frame.stack[reg].value.?;
+                        const val = stack[reg].value.?;
                         if (val.kind == .Error) {
                             // TODO error discarded
                         }
