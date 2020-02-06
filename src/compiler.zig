@@ -1,6 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
+const assert = std.debug.assert;
 const lang = @import("lang.zig");
 const TypeId = lang.Value.TypeId;
 const Node = lang.Node;
@@ -61,6 +62,21 @@ pub const Compiler = struct {
             base: Scope,
             // code: ArrayList(Code),
         };
+
+        fn declSymbol(self: *Scope, sym: Symbol) !void {
+            try self.syms.push(sym);
+        }
+
+        fn getSymbol(self: *Scope, name: []const u8) ?*Symbol {
+            var it = self.syms.iterator(self.syms.len);
+            while (it.prev()) |sym| {
+                if (mem.eql(u8, sym.name, name)) {
+                    return sym;
+                }
+            }
+            // TODO self.parent
+            return null;
+        }
     };
 
     pub const Symbol = struct {
@@ -86,17 +102,14 @@ pub const Compiler = struct {
     fn makeRuntime(self: *Compiler, res: RegRef, val: Value) Error!void {
         return switch (val) {
             .Empty => unreachable,
-            .Rt => |v| std.debug.assert(v == res),
+            .Rt => |v| assert(v == res),
             .None => try self.emitInstruction_1_1(.ConstPrimitive, res, @as(u8, 0)),
-            .Int => |v| {
-
-            if (v > std.math.minInt(i8) and v < std.math.maxInt(i8)) {
+            .Int => |v| if (v > std.math.minInt(i8) and v < std.math.maxInt(i8)) {
                 try self.emitInstruction_1_1(.ConstInt8, res, @truncate(i8, v));
             } else if (v > std.math.minInt(i32) and v < std.math.maxInt(i32)) {
                 try self.emitInstruction_1_1(.ConstInt32, res, @truncate(i32, v));
             } else {
                 try self.emitInstruction_1_1(.ConstInt64, res, v);
-            }
             },
             .Num => |v| try self.emitInstruction_1_1(.ConstNum, res, v),
             .Bool => |v| try self.emitInstruction_1_1(.ConstPrimitive, res, @as(u8, @boolToInt(v)) + 1),
@@ -110,9 +123,9 @@ pub const Compiler = struct {
         Rt: RegRef,
 
         /// Something assignable is expected
-        Lval: enum {
-            Const,
-            Let,
+        Lval: union(enum) {
+            Const: RegRef,
+            Let: RegRef,
             Assign,
         },
 
@@ -156,7 +169,9 @@ pub const Compiler = struct {
 
     pub fn compileRepl(compiler: *Compiler, node: *Node, module: *lang.Module) Error!void {
         const val = try compiler.genNode(node, .Value);
-        if (val != .Empty) {
+        if (val == .Rt) {
+            try compiler.emitInstruction_1(.Discard, val.Rt);
+        } else if (val != .Empty) {
             const reg = compiler.registerAlloc();
             defer compiler.registerFree(reg);
             try compiler.makeRuntime(reg, val);
@@ -171,9 +186,9 @@ pub const Compiler = struct {
             .Literal => return self.genLiteral(@fieldParentPtr(Node.Literal, "base", node), res),
             .Block => return self.genBlock(@fieldParentPtr(Node.ListTupleMapBlock, "base", node), res),
             .Prefix => return self.genPrefix(@fieldParentPtr(Node.Prefix, "base", node), res),
-            .Decl => @panic("TODO: Decl"),
+            .Decl => return self.genDecl(@fieldParentPtr(Node.Decl, "base", node), res),
+            .Identifier => return self.genIdentifier(@fieldParentPtr(Node.SingleToken, "base", node), res),
             .Fn => @panic("TODO: Fn"),
-            .Identifier => @panic("TODO: Identifier"),
             .Infix => @panic("TODO: Infix"),
             .TypeInfix => @panic("TODO: TypeInfix"),
             .Suffix => @panic("TODO: Suffix"),
@@ -294,6 +309,47 @@ pub const Compiler = struct {
         }
         // if res == .NoVal or .Value nothing needs to be done
         return ret_val;
+    }
+
+    fn genDecl(self: *Compiler, node: *Node.Decl, res: Result) Error!Value {
+        assert(res != .Lval);
+        const r_loc = self.registerAlloc();
+        assert((try self.genNode(node.value, Result{ .Rt = r_loc })) == .Rt);
+
+        const lval_kind = if (self.tree.tokens.at(node.let_const).id == .Keyword_let)
+            Result{ .Lval = .{ .Let = r_loc } }
+        else
+            Result{ .Lval = .{ .Const = r_loc } };
+
+        assert((try self.genNode(node.capture, lval_kind)) == .Empty);
+        return Value.Empty;
+    }
+
+    fn genIdentifier(self: *Compiler, node: *Node.SingleToken, res: Result) Error!Value {
+        // TODO cur_scope instead of module_scope
+        const name = self.tokenSlice(node.tok);
+        if (res == .Lval) {
+            switch (res.Lval) {
+                .Let, .Const => |r| {
+                    if (self.module_scope.getSymbol(name)) |sym| {
+                        // adderr "redeclaration of identifier 'name'"
+                        return error.CompileError;
+                    }
+                    try self.module_scope.declSymbol(.{
+                        .name = name,
+                        .mutable = res.Lval == .Let,
+                        .reg = r,
+                    });
+                    return Value.Empty;
+                },
+                .Assign => @panic("TODO"),
+            }
+        } else if (self.module_scope.getSymbol(name)) |sym| {
+            return Value{ .Rt = sym.reg };
+        } else {
+            // adderr "use of undeclared identifier 'name'"
+            return error.CompileError;
+        }
     }
 
     fn genLiteral(self: *Compiler, node: *Node.Literal, res: Result) Error!Value {
