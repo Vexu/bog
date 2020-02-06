@@ -98,7 +98,7 @@ pub const Compiler = struct {
                 try self.emitInstruction_1_1(.ConstInt64, res, v);
             }
             },
-            // .Num => |v| try self.builder.constNum(res, v),
+            .Num => |v| try self.emitInstruction_1_1(.ConstNum, res, v),
             .Bool => |v| try self.emitInstruction_1_1(.ConstPrimitive, res, @as(u8, @boolToInt(v)) + 1),
             // .Str => |v| try self.builder.constStr(res, v),
             else => unreachable,

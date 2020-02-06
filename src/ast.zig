@@ -109,7 +109,7 @@ pub const Node = struct {
     pub const Decl = struct {
         base: Node = Node{ .id = .Decl },
         capture: *Node,
-        body: *Node,
+        value: *Node,
         let_const: TokenIndex,
         eq_tok: TokenIndex,
     };

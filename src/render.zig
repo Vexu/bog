@@ -107,7 +107,7 @@ const Renderer = struct {
                 try self.renderToken(decl.let_const, stream, indent, .Space);
                 try self.renderNode(decl.capture, stream, indent, .Space);
                 try self.renderToken(decl.eq_tok, stream, indent, .Space);
-                return self.renderNode(decl.body, stream, indent, space);
+                return self.renderNode(decl.value, stream, indent, space);
             },
             .Import => {
                 const import = @fieldParentPtr(Node.Import, "base", node);

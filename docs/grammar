@@ -1,8 +1,10 @@
 root : (stmt NL)* EOF
 
-stmt : decl | expr
+stmt
+    : decl "=" expr
+    | expr
 
-decl : ("let" | "const") primary_expr "=" expr
+decl : ("let" | "const") primary_expr
 
 expr
     : fn
@@ -26,7 +28,7 @@ type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" |
 
 range_expr : bit_expr ("..." bit_expr)?
 
-bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)* | ("catch" ("let" expr )? block))?
+bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)* | ("catch" decl? block))?
 
 shift_expr : add_expr (("<<" | ">>") add_expr)?
 
@@ -70,14 +72,14 @@ primary_expr
 
 block : "{" (expr | ((NL stmt)+ NL)) "}"
 
-if : "if" ("let" primary_expr "=")? bool_expr block ("else" expr)?
+if : "if" (decl "=")? expr block ("else" expr)?
 
-while : "while" ("let" primary_expr "=")? bool_expr block
+while : "while" (decl "=")? expr block
 
-for : "for" ("let" primary_expr "in")? range_expr block
+for : "for" decl? range_expr block
 
 match : "match" bool_expr "{" (NL match_case)+ NL "}"
 
 match_case
-    : "let" primary_expr block
+    : decl block
     | expr ("," expr)* ","? block

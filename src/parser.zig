@@ -71,26 +71,28 @@ pub const Parser = struct {
         return ret;
     }
 
-    /// stmt : decl | expr.l
+    /// stmt
+    ///     : decl "=" expr
+    ///     | expr
     fn stmt(parser: *Parser) Error!*Node {
         if (try parser.decl()) |node| return node;
         return parser.expr(false);
     }
 
-    /// decl : ("let" | "const") primary_expr "=" expr
+    /// decl : ("let" | "const") primary_expr
     fn decl(parser: *Parser) Error!?*Node {
         const tok = parser.eatToken(.Keyword_let, false) orelse
             parser.eatToken(.Keyword_const, false) orelse return null;
         const capture = try parser.primaryExpr(true);
         const eq_tok = try parser.expectToken(.Equal, true);
         parser.skipNl();
-        const body = try parser.expr(false);
+        const value = try parser.expr(false);
         const node = try parser.arena.create(Node.Decl);
         node.* = .{
             .let_const = tok,
             .capture = capture,
             .eq_tok = eq_tok,
-            .body = body,
+            .value = value,
         };
         return &node.base;
     }
@@ -280,7 +282,7 @@ pub const Parser = struct {
         return lhs;
     }
 
-    /// bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)* | ("catch" ("let" expr )? block))?
+    /// bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)* | ("catch" decl? block))?
     fn bitExpr(parser: *Parser, skip_nl: bool) Error!*Node {
         var lhs = try parser.shiftExpr(skip_nl);
 
@@ -339,7 +341,9 @@ pub const Parser = struct {
                 .capture = null,
                 .rhs = undefined,
             };
-            if (parser.eatToken(.Keyword_let, true)) |_| {
+            if (parser.eatToken(.Keyword_let, true) orelse
+                parser.eatToken(.Keyword_const, false)) |_|
+            {
                 node.capture = try parser.primaryExpr(true);
             }
             node.rhs = try parser.block(null);
@@ -801,7 +805,7 @@ pub const Parser = struct {
         }
     }
 
-    /// if : "if" ("let" primary_expr "=")? bool_expr block ("else" expr)?
+    /// if : "if" (decl "=")? expr block ("else" expr)?
     fn ifExpr(parser: *Parser, skip_nl: bool) Error!?*Node {
         const tok = parser.eatToken(.Keyword_if, skip_nl) orelse return null;
         const capture = if (parser.eatToken(.Keyword_let, true)) |_|
@@ -813,7 +817,7 @@ pub const Parser = struct {
             .if_tok = tok,
             .capture = capture,
             .eq_tok = if (capture != null) try parser.expectToken(.Equal, true) else null,
-            .cond = try parser.boolExpr(true),
+            .cond = try parser.expr(true),
             .if_body = try parser.block(null),
             .else_tok = parser.eatToken(.Keyword_else, skip_nl),
             .else_body = null,
@@ -824,7 +828,7 @@ pub const Parser = struct {
         return &node.base;
     }
 
-    /// while : "while" ("let" primary_expr "=")? bool_expr block
+    /// while : "while" (decl "=")? expr block
     fn whileExpr(parser: *Parser, skip_nl: bool) Error!?*Node {
         const tok = parser.eatToken(.Keyword_while, skip_nl) orelse return null;
         const capture = if (parser.eatToken(.Keyword_let, true)) |_|
@@ -836,16 +840,17 @@ pub const Parser = struct {
             .while_tok = tok,
             .capture = capture,
             .eq_tok = if (capture != null) try parser.expectToken(.Equal, true) else null,
-            .cond = try parser.boolExpr(true),
+            .cond = try parser.expr(true),
             .body = try parser.block(null),
         };
         return &node.base;
     }
 
-    /// for : "for" ("let" primary_expr "in")? range_expr block
+    /// for : "for" decl? range_expr block
     fn forExpr(parser: *Parser, skip_nl: bool) Error!?*Node {
         const tok = parser.eatToken(.Keyword_for, skip_nl) orelse return null;
-        const capture = if (parser.eatToken(.Keyword_let, true)) |_|
+        const capture = if (parser.eatToken(.Keyword_let, true) orelse
+            parser.eatToken(.Keyword_const, false)) |_|
             try parser.primaryExpr(true)
         else
             null;
@@ -884,10 +889,12 @@ pub const Parser = struct {
     }
 
     /// match_case
-    ///     : "let" primary_expr ":" expr
+    ///     : decl ":" expr
     ///     | expr ("," expr)* ","? ":" expr
     fn matchCase(parser: *Parser) Error!*Node {
-        if (parser.eatToken(.Keyword_let, false)) |_| {
+        if (parser.eatToken(.Keyword_let, false) orelse
+            parser.eatToken(.Keyword_const, false)) |_|
+        {
             if (parser.eatToken(.Identifier, true)) |tok| {
                 _ = try parser.expectToken(.Colon, true);
                 const node = try parser.arena.create(Node.MatchCatchAll);
