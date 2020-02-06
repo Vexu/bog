@@ -60,7 +60,7 @@ pub const Vm = struct {
             const op = @intToEnum(Op, vm.getVal(module, u8));
             switch (op) {
                 .ConstInt8 => {
-                    const reg = vm.getVal(module, RegRef);
+                    const A = vm.getVal(module, RegRef);
                     const val = vm.getVal(module, i8);
 
                     const ref = try vm.gc.alloc();
@@ -69,10 +69,10 @@ pub const Vm = struct {
                             .Int = val,
                         },
                     };
-                    stack[reg] = ref;
+                    stack[A] = ref;
                 },
                 .ConstInt32 => {
-                    const reg = vm.getVal(module, RegRef);
+                    const A = vm.getVal(module, RegRef);
                     const val = vm.getVal(module, i32);
 
                     const ref = try vm.gc.alloc();
@@ -81,10 +81,10 @@ pub const Vm = struct {
                             .Int = val,
                         },
                     };
-                    stack[reg] = ref;
+                    stack[A] = ref;
                 },
                 .ConstInt64 => {
-                    const reg = vm.getVal(module, RegRef);
+                    const A = vm.getVal(module, RegRef);
                     const val = vm.getVal(module, i64);
 
                     const ref = try vm.gc.alloc();
@@ -93,14 +93,14 @@ pub const Vm = struct {
                             .Int = val,
                         },
                     };
-                    stack[reg] = ref;
+                    stack[A] = ref;
                 },
                 .ConstPrimitive => {
-                    const reg = vm.getVal(module, RegRef);
+                    const A = vm.getVal(module, RegRef);
                     const val = vm.getVal(module, u8);
 
                     if (val == 0) {
-                        stack[reg].value.? = &Value.None;
+                        stack[A].value.? = &Value.None;
                     } else {
                         const ref = try vm.gc.alloc();
                         ref.value.?.* = .{
@@ -108,21 +108,67 @@ pub const Vm = struct {
                                 .Bool = (val - 1) != 0,
                             },
                         };
-                        stack[reg] = ref;
+                        stack[A] = ref;
                         // TODO https://github.com/ziglang/zig/issues/4295
-                        // frame.stack[inst.A].value = if (inst.B != 0) &Value.True else &Value.False;
+                        // stack[A].value = if (val != 0) &Value.True else &Value.False;
                     }
                 },
-                // .Add => {
-                //     // TODO check numeric
-                //     const ref = try vm.gc.alloc();
-                //     ref.value.?.* = .{
-                //         .kind = .{
-                //             .Int = frame.stack[inst.B].value.?.kind.Int + frame.stack[inst.C].value.?.kind.Int,
-                //         },
-                //     };
-                //     frame.stack[inst.A] = ref;
-                // },
+                .Add => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+                    const C = vm.getVal(module, RegRef);
+
+                    // TODO check numeric
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Int = stack[B].value.?.kind.Int + stack[C].value.?.kind.Int,
+                        },
+                    };
+                    stack[A] = ref;
+                },
+                .Sub => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+                    const C = vm.getVal(module, RegRef);
+
+                    // TODO check numeric
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Int = stack[B].value.?.kind.Int - stack[C].value.?.kind.Int,
+                        },
+                    };
+                    stack[A] = ref;
+                },
+                .Mul => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+                    const C = vm.getVal(module, RegRef);
+
+                    // TODO check numeric
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Int = stack[B].value.?.kind.Int * stack[C].value.?.kind.Int,
+                        },
+                    };
+                    stack[A] = ref;
+                },
+                .DivFloor => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+                    const C = vm.getVal(module, RegRef);
+
+                    // TODO check numeric
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Int = @divFloor(stack[B].value.?.kind.Int, stack[C].value.?.kind.Int),
+                        },
+                    };
+                    stack[A] = ref;
+                },
                 .BoolNot => {
                     const A = vm.getVal(module, RegRef);
                     const B = vm.getVal(module, RegRef);
@@ -162,7 +208,7 @@ pub const Vm = struct {
     }
 
     fn getVal(vm: *Vm, module: *lang.Module, comptime T: type) T {
-        const val = @ptrCast(*const align(1) T, module.code[vm.ip..].ptr).*;
+        const val = @ptrCast(*align(1) const T, module.code[vm.ip..].ptr).*;
         vm.ip += @sizeOf(T);
         return val;
     }

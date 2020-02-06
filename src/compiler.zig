@@ -47,8 +47,12 @@ pub const Compiler = struct {
 
     fn emitInstruction_2(self: *Compiler, op: lang.Op, A: RegRef, B: RegRef) !void {
         try self.code.append(@enumToInt(op));
-        try self.code.appendSlice(@sliceToBytes(([_]RegRef{A})[0..]));
-        try self.code.appendSlice(@sliceToBytes(([_]RegRef{B})[0..]));
+        try self.code.appendSlice(@sliceToBytes(([_]RegRef{ A, B })[0..]));
+    }
+
+    fn emitInstruction_3(self: *Compiler, op: lang.Op, A: RegRef, B: RegRef, C: RegRef) !void {
+        try self.code.append(@enumToInt(op));
+        try self.code.appendSlice(@sliceToBytes(([_]RegRef{ A, B, C })[0..]));
     }
 
     const Scope = struct {
@@ -194,8 +198,8 @@ pub const Compiler = struct {
             .Prefix => return self.genPrefix(@fieldParentPtr(Node.Prefix, "base", node), res),
             .Decl => return self.genDecl(@fieldParentPtr(Node.Decl, "base", node), res),
             .Identifier => return self.genIdentifier(@fieldParentPtr(Node.SingleToken, "base", node), res),
+            .Infix => return self.genInfix(@fieldParentPtr(Node.Infix, "base", node), res),
             .Fn => @panic("TODO: Fn"),
-            .Infix => @panic("TODO: Infix"),
             .TypeInfix => @panic("TODO: TypeInfix"),
             .Suffix => @panic("TODO: Suffix"),
             .Import => @panic("TODO: Import"),
@@ -326,7 +330,138 @@ pub const Compiler = struct {
             try self.makeRuntime(res.Rt, ret_val);
             return Value{ .Rt = res.Rt };
         }
-        // if res == .NoVal or .Value nothing needs to be done
+        // if res == .Value nothing needs to be done
+        return ret_val;
+    }
+
+    fn genInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
+        try self.assertNotLval(res);
+        switch (node.op) {
+            .BoolOr,
+            .BoolAnd,
+            => {},
+
+            .LessThan,
+            .LessThanEqual,
+            .GreaterThan,
+            .GreaterThanEqual,
+            .Equal,
+            .NotEqual,
+            .In,
+            => {},
+
+            .Range => {},
+
+            .BitAnd,
+            .BitOr,
+            .BitXor,
+            .LShift,
+            .RShift,
+            => {},
+
+            .Add,
+            .Sub,
+            .Mul,
+            .Div,
+            .DivFloor,
+            .Mod,
+            .Pow,
+            => return self.genNumericInfix(node, res),
+
+            .Assign,
+            .AddAssign,
+            .SubAssign,
+            .MulAssign,
+            .PowAssign,
+            .DivAssign,
+            .DivFloorAssign,
+            .ModAssign,
+            .LShiftAssign,
+            .RShfitAssign,
+            .BitAndAssign,
+            .BitOrAssign,
+            .BitXOrAssign,
+            => {},
+        }
+        @panic("TODO");
+    }
+
+    fn genNumericInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
+        var l_val = try self.genNode(node.lhs, .Value);
+        try self.assertNotEmpty(l_val);
+
+        var r_val = try self.genNode(node.rhs, .Value);
+        try self.assertNotEmpty(r_val);
+
+        if (r_val == .Rt or l_val == .Rt) {
+            if (r_val != .Rt) {
+                try self.assertNumeric(r_val);
+                const reg = self.registerAlloc();
+                try self.makeRuntime(reg, r_val);
+                r_val = Value{ .Rt = reg };
+            }
+            if (l_val != .Rt) {
+                try self.assertNumeric(l_val);
+                const reg = self.registerAlloc();
+                try self.makeRuntime(reg, l_val);
+                l_val = Value{ .Rt = reg };
+            }
+            const op_id = switch (node.op) {
+                .Add => .Add,
+                .Sub => .Sub,
+                .Mul => .Mul,
+                .Div => .Div,
+                .DivFloor => .DivFloor,
+                .Mod => .Mod,
+                .Pow => lang.Op.Pow,
+                else => unreachable,
+            };
+            // TODO r_val and l_val should be freed here
+            if (res == .Rt) {
+                try self.emitInstruction_3(op_id, res.Rt, l_val.Rt, r_val.Rt);
+                return Value{ .Rt = res.Rt };
+            } else {
+                const reg = self.registerAlloc();
+                try self.emitInstruction_3(op_id, reg, l_val.Rt, r_val.Rt);
+                return Value{ .Rt = reg };
+            }
+        }
+        try self.assertNumeric(r_val);
+        try self.assertNumeric(l_val);
+
+        // TODO makeRuntime if overflow
+        // TODO decay to numeric
+        const ret_val = switch (node.op) {
+            .Add => blk: {
+                break :blk Value{ .Int = l_val.Int + r_val.Int };
+            },
+            .Sub => blk: {
+                break :blk Value{ .Int = l_val.Int - r_val.Int };
+            },
+            .Mul => blk: {
+                break :blk Value{ .Int = l_val.Int * r_val.Int };
+            },
+            .Div => blk: {
+                @panic("TODO");
+                // break :blk Value{ .Num = std.math.div(l_val.Int, r_val.Int) };
+            },
+            .DivFloor => blk: {
+                break :blk Value{ .Int = @divFloor(l_val.Int, r_val.Int) };
+            },
+            .Mod => blk: {
+                @panic("TODO");
+                // break :blk Value{ .Int =std.math.rem(i64, l_val.Int, r_val.Int) catch @panic("TODO") };
+            },
+            .Pow => blk: {
+                break :blk Value{ .Int = std.math.powi(i64, l_val.Int, r_val.Int) catch @panic("TODO") };
+            },
+            else => unreachable,
+        };
+        if (res == .Rt) {
+            try self.makeRuntime(res.Rt, ret_val);
+            return Value{ .Rt = res.Rt };
+        }
+        // if res == .Value nothing needs to be done
         return ret_val;
     }
 
@@ -385,7 +520,7 @@ pub const Compiler = struct {
             try self.makeRuntime(res.Rt, ret_val);
             return Value{ .Rt = res.Rt };
         }
-        // if res == .NoVal or .Value nothing needs to be done
+        // if res == .Value nothing needs to be done
         return ret_val;
     }
 

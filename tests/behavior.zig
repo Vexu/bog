@@ -1,3 +1,14 @@
+test "basic math" {
+    try expectOutput(
+        \\let x = 2
+        \\let y = x * 5
+        \\let z = 90
+        \\y // x * z
+    ,
+        \\450
+    );
+}
+
 test "basic variables" {
     try expectOutput(
         \\let x = 12
