@@ -57,7 +57,7 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     while (true) {
         repl.handleLine(in_stream, out_stream) catch |err| switch (err) {
             error.EndOfStream => return,
-            error.TokenizeError, error.ParseError => {
+            error.TokenizeError, error.ParseError, error.CompileError => {
                 const RED = "\x1b[31;1m";
                 const GREEN = "\x1b[32;1m";
                 const BOLD = "\x1b[0;1m";

@@ -223,10 +223,7 @@ pub const Compiler = struct {
     }
 
     fn genBlock(self: *Compiler, node: *Node.ListTupleMapBlock, res: Result) Error!Value {
-        if (res == .Lval) {
-            // try adderr("cannot assign to block")
-            return error.CompileError;
-        }
+        try self.assertNotLval(res, node.r_tok);
         var it = node.values.iterator(0);
         while (it.next()) |n| {
             if (it.peek() == null) {
@@ -242,45 +239,40 @@ pub const Compiler = struct {
         unreachable;
     }
 
-    fn assertNotLval(self: *Compiler, res: Result) !void {
+    fn assertNotLval(self: *Compiler, res: Result, tok: TokenIndex) !void {
         if (res == .Lval) {
-            // try adderr("invalid left hand side to assignment")
-            return error.CompileError;
+            return self.reportErr(.InvalidLval, tok);
         }
     }
 
-    fn assertNotEmpty(self: *Compiler, val: Value) !void {
+    fn assertNotEmpty(self: *Compiler, val: Value, tok: TokenIndex) !void {
         if (val == .Empty) {
-            // try adderr("expected value")
-            return error.CompileError;
+            return self.reportErr(.InvalidEmpty, tok);
         }
     }
 
-    fn assertBool(self: *Compiler, val: Value) !void {
+    fn assertBool(self: *Compiler, val: Value, tok: TokenIndex) !void {
         if (val != .Bool) {
-            // try adderr("expected boolean value")
-            return error.CompileError;
+            return self.reportErr(.ExpectedBoolean, tok);
         }
     }
 
-    fn assertInt(self: *Compiler, val: Value) !void {
+    fn assertInt(self: *Compiler, val: Value, tok: TokenIndex) !void {
         if (val != .Int) {
-            // try adderr("expected integer value")
-            return error.CompileError;
+            return self.reportErr(.ExpectedInt, tok);
         }
     }
 
-    fn assertNumeric(self: *Compiler, val: Value) !void {
+    fn assertNumeric(self: *Compiler, val: Value, tok: TokenIndex) !void {
         if (val != .Int and val != .Num) {
-            // try adderr("expected numeric value")
-            return error.CompileError;
+            return self.reportErr(.ExpectedNumeric, tok);
         }
     }
 
     fn genPrefix(self: *Compiler, node: *Node.Prefix, res: Result) Error!Value {
-        try self.assertNotLval(res);
+        try self.assertNotLval(res, node.tok);
         const r_val = try self.genNode(node.rhs, .Value);
-        try self.assertNotEmpty(r_val);
+        try self.assertNotEmpty(r_val, node.tok);
         if (r_val == .Rt) {
             const op_id = switch (node.op) {
                 .BoolNot => .BoolNot,
@@ -302,15 +294,15 @@ pub const Compiler = struct {
         }
         const ret_val = switch (node.op) {
             .BoolNot => blk: {
-                try self.assertBool(r_val);
+                try self.assertBool(r_val, node.tok);
                 break :blk Value{ .Bool = !r_val.Bool };
             },
             .BitNot => blk: {
-                try self.assertInt(r_val);
+                try self.assertInt(r_val, node.tok);
                 break :blk Value{ .Int = ~r_val.Int };
             },
             .Minus => blk: {
-                try self.assertNumeric(r_val);
+                try self.assertNumeric(r_val, node.tok);
                 if (r_val == .Int) {
                     // TODO check for overflow
                     break :blk Value{ .Int = -r_val.Int };
@@ -319,7 +311,7 @@ pub const Compiler = struct {
                 }
             },
             .Plus => blk: {
-                try self.assertNumeric(r_val);
+                try self.assertNumeric(r_val, node.tok);
                 break :blk r_val;
             },
             // errors are runtime only currently, so ret_val does not need to be checked
@@ -335,7 +327,7 @@ pub const Compiler = struct {
     }
 
     fn genInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
-        try self.assertNotLval(res);
+        try self.assertNotLval(res, node.tok);
         switch (node.op) {
             .BoolOr,
             .BoolAnd,
@@ -388,16 +380,15 @@ pub const Compiler = struct {
 
     fn genAssignInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
         if (res == .Rt) {
-            // assignment produces no value
-            return error.CompileError;
+            return self.reportErr(.InvalidLval, node.tok);
         }
         const reg = self.registerAlloc();
         defer self.registerFree(reg);
         var r_val = try self.genNode(node.rhs, Result{ .Rt = reg });
-        try self.assertNotEmpty(r_val);
+        try self.assertNotEmpty(r_val, node.tok);
 
         var l_val = try self.genNode(node.lhs, Result{ .Lval = .Assign });
-        try self.assertNotEmpty(l_val);
+        try self.assertNotEmpty(l_val, node.tok);
 
         const op_id = switch (node.op) {
             .Assign => lang.Op.Move,
@@ -422,20 +413,20 @@ pub const Compiler = struct {
 
     fn genNumericInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
         var l_val = try self.genNode(node.lhs, .Value);
-        try self.assertNotEmpty(l_val);
+        try self.assertNotEmpty(l_val, node.tok);
 
         var r_val = try self.genNode(node.rhs, .Value);
-        try self.assertNotEmpty(r_val);
+        try self.assertNotEmpty(r_val, node.tok);
 
         if (r_val == .Rt or l_val == .Rt) {
             if (r_val != .Rt) {
-                try self.assertNumeric(r_val);
+                try self.assertNumeric(r_val, node.tok);
                 const reg = self.registerAlloc();
                 try self.makeRuntime(reg, r_val);
                 r_val = Value{ .Rt = reg };
             }
             if (l_val != .Rt) {
-                try self.assertNumeric(l_val);
+                try self.assertNumeric(l_val, node.tok);
                 const reg = self.registerAlloc();
                 try self.makeRuntime(reg, l_val);
                 l_val = Value{ .Rt = reg };
@@ -460,8 +451,8 @@ pub const Compiler = struct {
                 return Value{ .Rt = reg };
             }
         }
-        try self.assertNumeric(r_val);
-        try self.assertNumeric(l_val);
+        try self.assertNumeric(r_val, node.tok);
+        try self.assertNumeric(l_val, node.tok);
 
         // TODO makeRuntime if overflow
         // TODO decay to numeric
@@ -520,8 +511,7 @@ pub const Compiler = struct {
             switch (res.Lval) {
                 .Let, .Const => |r| {
                     if (self.module_scope.getSymbol(name)) |sym| {
-                        // adderr "redeclaration of identifier 'name'"
-                        return error.CompileError;
+                        return self.reportErr(.Redeclaration, node.tok);
                     }
                     try self.module_scope.declSymbol(.{
                         .name = name,
@@ -533,8 +523,7 @@ pub const Compiler = struct {
                 .Assign => {
                     if (self.module_scope.getSymbol(name)) |sym| {
                         if (!sym.mutable) {
-                            // assignment to constant
-                            return error.CompileError;
+                            return self.reportErr(.AssignToConst, node.tok);
                         }
                         return Value{ .Rt = sym.reg };
                     }
@@ -543,12 +532,11 @@ pub const Compiler = struct {
         } else if (self.module_scope.getSymbol(name)) |sym| {
             return Value{ .Rt = sym.reg };
         }
-        // adderr "use of undeclared identifier 'name'"
-        return error.CompileError;
+        return self.reportErr(.Undeclared, node.tok);
     }
 
     fn genLiteral(self: *Compiler, node: *Node.Literal, res: Result) Error!Value {
-        try self.assertNotLval(res);
+        try self.assertNotLval(res, node.tok);
         const ret_val: Value = switch (node.kind) {
             .Int => .{ .Int = try self.parseInt(node.tok) },
             .True => .{ .Bool = true },
@@ -617,5 +605,13 @@ pub const Compiler = struct {
             // "invalid real number"
             return error.CompileError;
         };
+    }
+
+    fn reportErr(self: *Compiler, kind: lang.ErrorMsg.Kind, tok: TokenIndex) Error {
+        try self.tree.errors.push(.{
+            .kind = kind,
+            .index = self.tree.tokens.at(tok).start,
+        });
+        return error.CompileError;
     }
 };

@@ -47,6 +47,14 @@ pub const ErrorMsg = struct {
         UnterminatedString,
         UnexpectedEof,
         UnmatchedBracket,
+        Redeclaration,
+        AssignToConst,
+        Undeclared,
+        InvalidLval,
+        InvalidEmpty,
+        ExpectedBoolean,
+        ExpectedInt,
+        ExpectedNumeric,
     };
 
     pub fn string(err: ErrorMsg) []const u8 {
@@ -68,6 +76,14 @@ pub const ErrorMsg = struct {
             .UnterminatedString => "unterminated string",
             .UnexpectedEof => "unexpected EOF",
             .UnmatchedBracket => "unmatched bracket",
+            .Redeclaration => "redeclaration of identifier",
+            .AssignToConst => "assignment to constant",
+            .Undeclared => "use of undeclared identifier",
+            .InvalidLval => "invalid left hand side to assignment",
+            .InvalidEmpty => "expected a value",
+            .ExpectedBoolean => "expected boolean value",
+            .ExpectedInt => "expected integer value",
+            .ExpectedNumeric => "expected numeric value",
         };
     }
 };
