@@ -69,6 +69,9 @@ pub const Op = enum(u8) {
     /// A = B | C
     BitOr,
 
+    /// A = B ^ C
+    BitXor,
+
     /// A //= B
     DirectDivFloor,
 
@@ -101,6 +104,9 @@ pub const Op = enum(u8) {
 
     /// A |= B
     DirectBitOr,
+
+    /// A ^= C
+    DirectBitXor,
 
     /// A = B and C
     And,

@@ -381,9 +381,43 @@ pub const Compiler = struct {
             .BitAndAssign,
             .BitOrAssign,
             .BitXOrAssign,
-            => {},
+            => return self.genAssignInfix(node, res),
         }
         @panic("TODO");
+    }
+
+    fn genAssignInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
+        if (res == .Rt) {
+            // assignment produces no value
+            return error.CompileError;
+        }
+        const reg = self.registerAlloc();
+        defer self.registerFree(reg);
+        var r_val = try self.genNode(node.rhs, Result{ .Rt = reg });
+        try self.assertNotEmpty(r_val);
+
+        var l_val = try self.genNode(node.lhs, Result{ .Lval = .Assign });
+        try self.assertNotEmpty(l_val);
+
+        const op_id = switch (node.op) {
+            .Assign => lang.Op.Move,
+            .AddAssign => .DirectAdd,
+            .SubAssign => .DirectSub,
+            .MulAssign => .DirectMul,
+            .PowAssign => .DirectPow,
+            .DivAssign => .DirectDiv,
+            .DivFloorAssign => .DirectDivFloor,
+            .ModAssign => .DirectMod,
+            .LShiftAssign => .DirectLShift,
+            .RShfitAssign => .DirectRShift,
+            .BitAndAssign => .DirectBitAnd,
+            .BitOrAssign => .DirectBitOr,
+            .BitXOrAssign => .DirectBitXor,
+            else => unreachable,
+        };
+
+        try self.emitInstruction_2(op_id, l_val.Rt, r_val.Rt);
+        return Value.Empty;
     }
 
     fn genNumericInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
@@ -496,14 +530,21 @@ pub const Compiler = struct {
                     });
                     return Value.Empty;
                 },
-                .Assign => @panic("TODO"),
+                .Assign => {
+                    if (self.module_scope.getSymbol(name)) |sym| {
+                        if (!sym.mutable) {
+                            // assignment to constant
+                            return error.CompileError;
+                        }
+                        return Value{ .Rt = sym.reg };
+                    }
+                },
             }
         } else if (self.module_scope.getSymbol(name)) |sym| {
             return Value{ .Rt = sym.reg };
-        } else {
-            // adderr "use of undeclared identifier 'name'"
-            return error.CompileError;
         }
+        // adderr "use of undeclared identifier 'name'"
+        return error.CompileError;
     }
 
     fn genLiteral(self: *Compiler, node: *Node.Literal, res: Result) Error!Value {
@@ -514,7 +555,7 @@ pub const Compiler = struct {
             .False => .{ .Bool = false },
             .None => .None,
             .Str => @panic("TODO: genStr"),
-            .Num => @panic("TODO: genNum"),
+            .Num => .{ .Num = try self.parseNum(node.tok) },
         };
         if (res == .Rt) {
             try self.makeRuntime(res.Rt, ret_val);
@@ -558,5 +599,23 @@ pub const Compiler = struct {
         }
 
         return x;
+    }
+
+    fn parseNum(self: *Compiler, tok: TokenIndex) !f64 {
+        var buf: [256]u8 = undefined;
+        const slice = self.tokenSlice(tok);
+
+        var i: u32 = 0;
+        for (slice) |c| {
+            if (c != '_') {
+                buf[i] = c;
+                i += 1;
+            }
+        }
+
+        return std.fmt.parseFloat(f64, buf[0..i]) catch {
+            // "invalid real number"
+            return error.CompileError;
+        };
     }
 };

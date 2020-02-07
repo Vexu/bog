@@ -1,3 +1,14 @@
+test "assignment" {
+    try expectOutput(
+        \\let x = 2
+        \\let y = -3
+        \\x **= -y
+        \\x
+    ,
+        \\8
+    );
+}
+
 test "basic math" {
     try expectOutput(
         \\let x = 2

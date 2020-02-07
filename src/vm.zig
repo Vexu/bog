@@ -95,6 +95,18 @@ pub const Vm = struct {
                     };
                     stack[A] = ref;
                 },
+                .ConstNum => {
+                    const A = vm.getVal(module, RegRef);
+                    const val = vm.getVal(module, f64);
+
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Num = val,
+                        },
+                    };
+                    stack[A] = ref;
+                },
                 .ConstPrimitive => {
                     const A = vm.getVal(module, RegRef);
                     const val = vm.getVal(module, u8);
@@ -155,6 +167,20 @@ pub const Vm = struct {
                     };
                     stack[A] = ref;
                 },
+                .Pow => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+                    const C = vm.getVal(module, RegRef);
+
+                    // TODO check numeric
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Int = std.math.powi(i64, stack[B].value.?.kind.Int, stack[C].value.?.kind.Int) catch @panic("TODO: overflow"),
+                        },
+                    };
+                    stack[A] = ref;
+                },
                 .DivFloor => {
                     const A = vm.getVal(module, RegRef);
                     const B = vm.getVal(module, RegRef);
@@ -168,6 +194,47 @@ pub const Vm = struct {
                         },
                     };
                     stack[A] = ref;
+                },
+                .Move => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+                    stack[A] = stack[B];
+                },
+                .DirectAdd => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+
+                    // TODO check numeric
+                    stack[A].value.?.kind.Int += stack[B].value.?.kind.Int;
+                },
+                .DirectSub => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+
+                    // TODO check numeric
+                    stack[A].value.?.kind.Int -= stack[B].value.?.kind.Int;
+                },
+                .DirectMul => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+
+                    // TODO check numeric
+                    stack[A].value.?.kind.Int *= stack[B].value.?.kind.Int;
+                },
+                .DirectPow => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+
+                    // TODO check numeric
+                    stack[A].value.?.kind.Int = std.math.powi(i64, stack[A].value.?.kind.Int, stack[B].value.?.kind.Int) catch @panic("TODO: overflow");
+                },
+                .DirectDivFloor => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+
+                    // TODO check numeric
+                    stack[A].value.?.kind.Int *= stack[B].value.?.kind.Int;
+                    stack[A].value.?.kind.Int = @divFloor(stack[A].value.?.kind.Int, stack[B].value.?.kind.Int);
                 },
                 .BoolNot => {
                     const A = vm.getVal(module, RegRef);
@@ -183,6 +250,32 @@ pub const Vm = struct {
                     ref.value.?.* = .{
                         .kind = .{
                             .Bool = !stack[B].value.?.kind.Bool,
+                        },
+                    };
+                    stack[A] = ref;
+                },
+                .BitNot => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+
+                    // TODO check numeric
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Int = ~stack[B].value.?.kind.Int,
+                        },
+                    };
+                    stack[A] = ref;
+                },
+                .Negate => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+
+                    // TODO check numeric
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Int = -stack[B].value.?.kind.Int,
                         },
                     };
                     stack[A] = ref;
