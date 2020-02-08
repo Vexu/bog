@@ -280,12 +280,24 @@ pub const Vm = struct {
                     };
                     stack[A] = ref;
                 },
+                .JumpFalse => {
+                    const A = vm.getVal(module, RegRef);
+                    const addr = vm.getVal(module, u32);
+
+                    if (stack[A].value.?.kind.Bool == false) {
+                        vm.ip += addr;
+                    }
+                },
+                .Jump => {
+                    const addr = vm.getVal(module, u32);
+                    vm.ip += addr;
+                },
                 .Discard => {
-                    const reg = vm.getVal(module, RegRef);
+                    const A = vm.getVal(module, RegRef);
                     if (vm.repl and vm.call_stack.len == 1) {
-                        vm.result = stack[reg];
+                        vm.result = stack[A];
                     } else {
-                        const val = stack[reg].value.?;
+                        const val = stack[A].value.?;
                         if (val.kind == .Error) {
                             // TODO error discarded
                         }

@@ -45,6 +45,11 @@ pub const Compiler = struct {
         try self.code.appendSlice(@sliceToBytes(([_]@TypeOf(arg){arg})[0..]));
     }
 
+    fn emitInstruction_0_1(self: *Compiler, op: lang.Op, arg: var) !void {
+        try self.code.append(@enumToInt(op));
+        try self.code.appendSlice(@sliceToBytes(([_]@TypeOf(arg){arg})[0..]));
+    }
+
     fn emitInstruction_2(self: *Compiler, op: lang.Op, A: RegRef, B: RegRef) !void {
         try self.code.append(@enumToInt(op));
         try self.code.appendSlice(@sliceToBytes(([_]RegRef{ A, B })[0..]));
@@ -199,6 +204,7 @@ pub const Compiler = struct {
             .Decl => return self.genDecl(@fieldParentPtr(Node.Decl, "base", node), res),
             .Identifier => return self.genIdentifier(@fieldParentPtr(Node.SingleToken, "base", node), res),
             .Infix => return self.genInfix(@fieldParentPtr(Node.Infix, "base", node), res),
+            .If => return self.genIf(@fieldParentPtr(Node.If, "base", node), res),
             .Fn => @panic("TODO: Fn"),
             .TypeInfix => @panic("TODO: TypeInfix"),
             .Suffix => @panic("TODO: Suffix"),
@@ -208,7 +214,6 @@ pub const Compiler = struct {
             .Tuple => @panic("TODO: Tuple"),
             .Map => @panic("TODO: Map"),
             .Catch => @panic("TODO: Catch"),
-            .If => @panic("TODO: If"),
             .For => @panic("TODO: For"),
             .While => @panic("TODO: While"),
             .Match => @panic("TODO: Match"),
@@ -237,6 +242,53 @@ pub const Compiler = struct {
             }
         }
         unreachable;
+    }
+
+    fn genIf(self: *Compiler, node: *Node.If, res: Result) Error!Value {
+        try self.assertNotLval(res, node.if_tok);
+
+        if (node.capture != null) @panic("TODO if let");
+
+        const cond_val = try self.genNode(node.cond, .Value);
+        if (cond_val == .Bool) {
+            if (cond_val.Bool) {
+                return self.genNode(node.if_body, res);
+            } else if (node.else_body) |some| {
+                return self.genNode(some, res);
+            }
+            const res_val = Value{ .None = {} };
+            if (res == .Rt) {
+                try self.makeRuntime(res.Rt, res_val);
+                return Value{ .Rt = res.Rt };
+            } else return res_val;
+        } else if (cond_val != .Rt) {
+            // TODO node.cond.firstToken()
+            return self.reportErr(.ExpectedBoolean, node.if_tok);
+        }
+        const res_loc = if (res == .Rt) res else Result{
+            .Rt = self.registerAlloc(),
+        };
+
+        // jump past if_body if cond == false
+        try self.emitInstruction_1_1(.JumpFalse, cond_val.Rt, @as(u32, 0));
+        const addr = self.code.len - @sizeOf(u32);
+        _ = try self.genNode(node.if_body, res_loc);
+
+        // jump past else_body since if_body was executed
+        try self.emitInstruction_0_1(.Jump, @as(u32, 0));
+        const addr2 = self.code.len - @sizeOf(u32);
+
+        @ptrCast(*align(1) u32, self.code.toSlice()[addr..].ptr).* = @truncate(u32, self.code.len - addr - @sizeOf(u32));
+        if (node.else_body) |some| {
+            _ = try self.genNode(some, res_loc);
+        } else {
+            try self.emitInstruction_1_1(.ConstPrimitive, res_loc.Rt, @as(u8, 0));
+        }
+    
+        @ptrCast(*align(1) u32, self.code.toSlice()[addr2..].ptr).* = @truncate(u32, self.code.len - addr2 - @sizeOf(u32));
+        return Value{
+            .Rt = res_loc.Rt,
+        };
     }
 
     fn assertNotLval(self: *Compiler, res: Result, tok: TokenIndex) !void {

@@ -1,3 +1,12 @@
+test "bool if" {
+    try expectOutput(
+        \\const x = not false
+        \\3 + if not x {2} else if x {4} else 9
+    ,
+        \\7
+    );
+}
+
 test "assignment" {
     try expectOutput(
         \\let x = 2
