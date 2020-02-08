@@ -40,14 +40,16 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
         .compiler = .{
             .tree = &tree,
             .arena = arena,
-            .module_scope = .{
-                .id = .Module,
+            .root_scope = .{
+                .id = .Fn,
                 .parent = null,
-                .syms = Compiler.Symbol.List.init(arena),
+                .syms = Compiler.Symbol.List.init(allocator),
             },
-            .code = Compiler.Code.init(arena),
+            .code = Compiler.Code.init(allocator),
+            .cur_scope = undefined,
         },
     };
+    repl.compiler.cur_scope = &repl.compiler.root_scope;
     defer repl.vm.deinit();
     defer repl.buffer.deinit();
 
@@ -117,11 +119,10 @@ const Repl = struct {
             // vm.result.deref();
             repl.vm.result = null;
         }
-        // var token_it = repl.tree.tokens.iterator(begin_index);
-        // while (token_it.next()) |tok| {
-        //     try out_stream.print("{}\n", .{tok});
-        // }
-        // try @import("render.zig").render(repl.buffer.toSliceConst(), &repl.tree, out_stream);
+
+        // reset arena
+        repl.tree.arena_allocator.deinit();
+        repl.tree.arena_allocator = std.heap.ArenaAllocator.init(repl.buffer.allocator);
     }
 
     fn readLine(repl: *Repl, prompt: []const u8, in_stream: var, out_stream: var) !void {

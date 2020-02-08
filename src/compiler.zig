@@ -15,7 +15,8 @@ pub const Error = error{CompileError} || Allocator.Error;
 pub const Compiler = struct {
     tree: *Tree,
     arena: *Allocator,
-    module_scope: Scope,
+    root_scope: Scope,
+    cur_scope: *Scope,
     used_regs: RegRef = 0,
     code: Code,
 
@@ -66,7 +67,6 @@ pub const Compiler = struct {
         syms: Symbol.List,
 
         const Id = enum {
-            Module,
             Fn,
             Loop,
             Block,
@@ -90,6 +90,10 @@ pub const Compiler = struct {
                 }
             }
             // TODO self.parent
+            if (self.parent) |some| {
+                if (self.id == .Fn) @panic("TODO: closures");
+                return some.getSymbol(name);
+            }
             return null;
         }
     };
@@ -153,13 +157,15 @@ pub const Compiler = struct {
         var compiler = Compiler{
             .tree = tree,
             .arena = arena,
-            .module_scope = .{
-                .id = .Module,
+            .root_scope = .{
+                .id = .Fn,
                 .parent = null,
                 .syms = Symbol.List.init(arena),
             },
             .code = Code.init(allocator),
+            .cur_scope = undefined,
         };
+        compiler.cur_scope = &compiler.root_scope;
         var it = tree.nodes.iterator(0);
         while (it.next()) |n| {
             const val = try compiler.genNode(n.*, .Value);
@@ -229,6 +235,16 @@ pub const Compiler = struct {
 
     fn genBlock(self: *Compiler, node: *Node.ListTupleMapBlock, res: Result) Error!Value {
         try self.assertNotLval(res, node.r_tok);
+        var block_scope = Scope{
+            .id = .Block,
+            .parent = self.cur_scope,
+            .syms = Symbol.List.init(self.arena),
+        };
+        self.cur_scope = &block_scope;
+        defer self.cur_scope = block_scope.parent.?;
+        const start_reg_count = self.used_regs;
+        defer self.used_regs = start_reg_count;
+
         var it = node.values.iterator(0);
         while (it.next()) |n| {
             if (it.peek() == null) {
@@ -557,15 +573,14 @@ pub const Compiler = struct {
     }
 
     fn genIdentifier(self: *Compiler, node: *Node.SingleToken, res: Result) Error!Value {
-        // TODO cur_scope instead of module_scope
         const name = self.tokenSlice(node.tok);
         if (res == .Lval) {
             switch (res.Lval) {
                 .Let, .Const => |r| {
-                    if (self.module_scope.getSymbol(name)) |sym| {
+                    if (self.cur_scope.getSymbol(name)) |sym| {
                         return self.reportErr(.Redeclaration, node.tok);
                     }
-                    try self.module_scope.declSymbol(.{
+                    try self.cur_scope.declSymbol(.{
                         .name = name,
                         .mutable = res.Lval == .Let,
                         .reg = r,
@@ -573,7 +588,7 @@ pub const Compiler = struct {
                     return Value.Empty;
                 },
                 .Assign => {
-                    if (self.module_scope.getSymbol(name)) |sym| {
+                    if (self.cur_scope.getSymbol(name)) |sym| {
                         if (!sym.mutable) {
                             return self.reportErr(.AssignToConst, node.tok);
                         }
@@ -581,7 +596,7 @@ pub const Compiler = struct {
                     }
                 },
             }
-        } else if (self.module_scope.getSymbol(name)) |sym| {
+        } else if (self.cur_scope.getSymbol(name)) |sym| {
             return Value{ .Rt = sym.reg };
         }
         return self.reportErr(.Undeclared, node.tok);
