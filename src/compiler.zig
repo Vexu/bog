@@ -145,7 +145,8 @@ pub const Compiler = struct {
         Lval: union(enum) {
             Const: RegRef,
             Let: RegRef,
-            Assign,
+            Assign: RegRef,
+            AugAssign,
         },
 
         /// A value, runtime or constant, is expected
@@ -452,15 +453,19 @@ pub const Compiler = struct {
         }
         const reg = self.registerAlloc();
         defer self.registerFree(reg);
-        var r_val = try self.genNode(node.rhs, Result{ .Rt = reg });
+        const r_val = try self.genNode(node.rhs, Result{ .Rt = reg });
         try self.assertNotEmpty(r_val, node.tok);
 
-        var l_val = try self.genNode(node.lhs, Result{ .Lval = .Assign });
-        try self.assertNotEmpty(l_val, node.tok);
+        if (node.op == .Assign) {
+            const l_val = try self.genNode(node.lhs, Result {.Lval = .{.Assign = reg}});
+            std.debug.assert(l_val == .Empty);
+            return l_val;
+        }
+
+        const l_val =  try self.genNode(node.lhs, Result{ .Lval = .AugAssign });
 
         const op_id = switch (node.op) {
-            .Assign => lang.Op.Move,
-            .AddAssign => .DirectAdd,
+            .AddAssign => lang.Op.DirectAdd,
             .SubAssign => .DirectSub,
             .MulAssign => .DirectMul,
             .PowAssign => .DirectPow,
@@ -587,7 +592,17 @@ pub const Compiler = struct {
                     });
                     return Value.Empty;
                 },
-                .Assign => {
+                .Assign => |r| {
+                    if (self.cur_scope.getSymbol(name)) |sym| {
+                        if (!sym.mutable) {
+                            return self.reportErr(.AssignToConst, node.tok);
+                        }
+                        // TODO this move can usually be avoided
+                        try self.emitInstruction_2(.Move, sym.reg, r);
+                        return Value.Empty;
+                    }
+                },
+                .AugAssign => {
                     if (self.cur_scope.getSymbol(name)) |sym| {
                         if (!sym.mutable) {
                             return self.reportErr(.AssignToConst, node.tok);
