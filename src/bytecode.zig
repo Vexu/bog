@@ -134,6 +134,9 @@ pub const Op = enum(u8) {
     /// A = error(A)
     BuildError,
 
+    /// A = (arg1, ... argB)
+    BuildTuple,
+
     /// ip = arg1
     Jump,
 

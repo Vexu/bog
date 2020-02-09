@@ -20,7 +20,7 @@ pub const Value = struct {
 
     ref: u32 = 0,
     kind: union(TypeId) {
-        Tuple: []*Ref,
+        Tuple: []Ref,
         Map: Map,
         List: *List,
         Error: *Ref,
@@ -70,11 +70,16 @@ pub const Ref = struct {
                     try val.end.dump(stream, level - 1);
                 }
             },
-            .Tuple => {
+            .Tuple => |val| {
                 if (level == 0) {
                     try stream.write("(...)");
                 } else {
-                    return error.Unimplemented;
+                    try stream.writeByte('(');
+                    for (val) |v, i| {
+                        if (i != 0) try stream.write(", ");
+                        try v.dump(stream, level - 1);
+                    }
+                    try stream.writeByte(')');
                 }
             },
             .Map => {

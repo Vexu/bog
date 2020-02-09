@@ -61,6 +61,13 @@ pub const Compiler = struct {
         try self.code.appendSlice(@sliceToBytes(([_]RegRef{ A, B, C })[0..]));
     }
 
+    fn emitInstruction_1_s(self: *Compiler, op: lang.Op, A: RegRef, args: []RegRef) !void {
+        try self.code.append(@enumToInt(op));
+        try self.code.appendSlice(@sliceToBytes(([_]RegRef{A})[0..]));
+        try self.code.appendSlice(@sliceToBytes(([_]u16{@truncate(u16, args.len)})[0..]));
+        try self.code.appendSlice(@sliceToBytes(args));
+    }
+
     const Scope = struct {
         id: Id,
         parent: ?*Scope,
@@ -212,13 +219,13 @@ pub const Compiler = struct {
             .Identifier => return self.genIdentifier(@fieldParentPtr(Node.SingleToken, "base", node), res),
             .Infix => return self.genInfix(@fieldParentPtr(Node.Infix, "base", node), res),
             .If => return self.genIf(@fieldParentPtr(Node.If, "base", node), res),
+            .Tuple => return self.genTuple(@fieldParentPtr(Node.ListTupleMapBlock, "base", node), res),
             .Fn => @panic("TODO: Fn"),
             .TypeInfix => @panic("TODO: TypeInfix"),
             .Suffix => @panic("TODO: Suffix"),
             .Import => @panic("TODO: Import"),
             .Error => @panic("TODO: Error"),
             .List => @panic("TODO: List"),
-            .Tuple => @panic("TODO: Tuple"),
             .Map => @panic("TODO: Map"),
             .Catch => @panic("TODO: Catch"),
             .For => @panic("TODO: For"),
@@ -232,6 +239,26 @@ pub const Compiler = struct {
             .Discard,
             => unreachable,
         }
+    }
+
+    fn genTuple(self: *Compiler, node: *Node.ListTupleMapBlock, res: Result) Error!Value {
+        if (res == .Lval) {
+            @panic("TODO destructuring assignment");
+        }
+        const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
+        const args = try self.arena.alloc(RegRef, node.values.len);
+
+        var i: u32 = 0;
+        var it = node.values.iterator(0);
+        while (it.next()) |n| {
+            args[i] = self.registerAlloc();
+            _ = try self.genNode(n.*, Result{ .Rt = args[i] });
+
+            i += 1;
+        }
+
+        try self.emitInstruction_1_s(.BuildTuple, res_loc.Rt, args);
+        return Value{ .Rt = res_loc.Rt };
     }
 
     fn genBlock(self: *Compiler, node: *Node.ListTupleMapBlock, res: Result) Error!Value {
@@ -301,7 +328,7 @@ pub const Compiler = struct {
         } else {
             try self.emitInstruction_1_1(.ConstPrimitive, res_loc.Rt, @as(u8, 0));
         }
-    
+
         @ptrCast(*align(1) u32, self.code.toSlice()[addr2..].ptr).* = @truncate(u32, self.code.len - addr2 - @sizeOf(u32));
         return Value{
             .Rt = res_loc.Rt,
@@ -457,12 +484,12 @@ pub const Compiler = struct {
         try self.assertNotEmpty(r_val, node.tok);
 
         if (node.op == .Assign) {
-            const l_val = try self.genNode(node.lhs, Result {.Lval = .{.Assign = reg}});
+            const l_val = try self.genNode(node.lhs, Result{ .Lval = .{ .Assign = reg } });
             std.debug.assert(l_val == .Empty);
             return l_val;
         }
 
-        const l_val =  try self.genNode(node.lhs, Result{ .Lval = .AugAssign });
+        const l_val = try self.genNode(node.lhs, Result{ .Lval = .AugAssign });
 
         const op_id = switch (node.op) {
             .AddAssign => lang.Op.DirectAdd,

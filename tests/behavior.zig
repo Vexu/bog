@@ -1,3 +1,11 @@
+test "tuple" {
+    try expectOutput(
+        \\(1, 2, 3, 4, 22.4)
+    ,
+        \\(1, 2, 3, 4, 2.24e+01)
+    );
+}
+
 test "bool if" {
     try expectOutput(
         \\const x = not false

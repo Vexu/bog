@@ -5,6 +5,7 @@ const value = @import("value.zig");
 const Value = value.Value;
 const Ref = value.Ref;
 
+// TODO allocator interface
 pub const Gc = struct {
     values: Pool,
     stack: Stack,

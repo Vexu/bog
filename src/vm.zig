@@ -305,6 +305,24 @@ pub const Vm = struct {
                         return error.Unimplemented;
                     }
                 },
+                .BuildTuple => {
+                    const A = vm.getVal(module, RegRef);
+                    const args = vm.getVal(module, []align(1) const RegRef);
+
+                    // TODO gc this
+                    const vals = try vm.call_stack.allocator.alloc(Ref, args.len);
+                    for (args) |a, i| {
+                        vals[i] = stack[a];
+                    }
+
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Tuple = vals,
+                        },
+                    };
+                    stack[A] = ref;
+                },
                 else => {
                     std.debug.warn("Unimplemented: {}\n", .{op});
                 },
@@ -313,6 +331,12 @@ pub const Vm = struct {
     }
 
     fn getVal(vm: *Vm, module: *lang.Module, comptime T: type) T {
+        if (T == []align(1) const RegRef) {
+            const len = vm.getVal(module, u16);
+            const val = @ptrCast([*]align(1) const RegRef, module.code[vm.ip..].ptr);
+            vm.ip += @sizeOf(RegRef) * len;
+            return val[0..len];
+        }
         const val = @ptrCast(*align(1) const T, module.code[vm.ip..].ptr).*;
         vm.ip += @sizeOf(T);
         return val;
