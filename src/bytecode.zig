@@ -131,6 +131,9 @@ pub const Op = enum(u8) {
 
     Return,
 
+    /// A = B[C]
+    Subscript,
+
     /// A = error(A)
     BuildError,
 

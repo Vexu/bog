@@ -55,6 +55,7 @@ pub const ErrorMsg = struct {
         ExpectedBoolean,
         ExpectedInt,
         ExpectedNumeric,
+        InvalidAugAssign,
     };
 
     pub fn string(err: ErrorMsg) []const u8 {
@@ -84,6 +85,7 @@ pub const ErrorMsg = struct {
             .ExpectedBoolean => "expected boolean value",
             .ExpectedInt => "expected integer value",
             .ExpectedNumeric => "expected numeric value",
+            .InvalidAugAssign => "invalid left hand side to augmented assignment",
         };
     }
 };

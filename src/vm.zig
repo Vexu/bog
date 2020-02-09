@@ -323,6 +323,16 @@ pub const Vm = struct {
                     };
                     stack[A] = ref;
                 },
+                .Subscript => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+                    const C = vm.getVal(module, RegRef);
+
+                    stack[A] = switch (stack[B].value.?.kind) {
+                        .Tuple => |val| val[@intCast(u32, stack[C].value.?.kind.Int)],
+                        else => @panic("TODO: subscript for more types"),
+                    };
+                },
                 else => {
                     std.debug.warn("Unimplemented: {}\n", .{op});
                 },

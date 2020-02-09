@@ -1,3 +1,13 @@
+test "tuple destructuring" {
+    // TODO should destructuring different sized tuples be an error?
+    try expectOutput(
+        \\let (a, b, c) = (1, 2, 3, 4)
+        \\(a + b) * c
+    ,
+        \\9
+    );
+}
+
 test "tuple" {
     try expectOutput(
         \\(1, 2, 3, 4, 22.4)

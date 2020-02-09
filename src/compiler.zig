@@ -243,7 +243,36 @@ pub const Compiler = struct {
 
     fn genTuple(self: *Compiler, node: *Node.ListTupleMapBlock, res: Result) Error!Value {
         if (res == .Lval) {
-            @panic("TODO destructuring assignment");
+            switch (res.Lval) {
+                .Const, .Let, .Assign => |reg| {
+                    const index_reg = self.registerAlloc();
+                    var sub_reg = self.registerAlloc();
+                    var index_val = Value{
+                        .Int = 0,
+                    };
+
+                    var it = node.values.iterator(0);
+                    while (it.next()) |n| {
+                        try self.makeRuntime(index_reg, index_val);
+                        try self.emitInstruction_3(.Subscript, sub_reg, reg, index_reg);
+                        const l_val = try self.genNode(n.*, switch (res.Lval) {
+                            .Const => Result{ .Lval = .{ .Const = sub_reg } },
+                            .Let => Result{ .Lval = .{ .Let = sub_reg } },
+                            .Assign => Result{ .Lval = .{ .Assign = sub_reg } },
+                            else => unreachable,
+                        });
+                        std.debug.assert(l_val == .Empty);
+                        index_val.Int += 1;
+
+                        // TODO this should probably be done in genIdentifier
+                        if (it.peek() != null and res.Lval != .Assign) sub_reg = self.registerAlloc();
+                    }
+                    return Value.Empty;
+                },
+                .AugAssign => {
+                    return self.reportErr(.InvalidAugAssign, node.r_tok);
+                },
+            }
         }
         const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
         const args = try self.arena.alloc(RegRef, node.values.len);
