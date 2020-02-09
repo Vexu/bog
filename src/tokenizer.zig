@@ -404,6 +404,7 @@ pub const Tokenizer = struct {
             HexNumber,
             Number,
             Zero,
+            NumberDot,
             FloatFraction,
             FloatExponent,
             FloatExponentDigits,
@@ -840,8 +841,7 @@ pub const Tokenizer = struct {
                         state = .HexNumber;
                     },
                     '.' => {
-                        // TODO might be ...
-                        state = .FloatFraction;
+                        state = .NumberDot;
                     },
                     '0'...'9', 'a', 'c'...'f', 'A'...'F' => {
                         return self.err(.InvalidOctalStart, c);
@@ -854,6 +854,17 @@ pub const Tokenizer = struct {
                         res = .Integer;
                         break;
                     },
+                },
+                .NumberDot => switch (c) {
+                    '.' => {
+                        self.it.i -= 2;
+                        res = .Integer;
+                        break;
+                    },
+                    else => {
+                        self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        state = .FloatFraction;
+                    }
                 },
                 .BinaryNumber => switch (c) {
                     '0', '1', '_' => {},
@@ -903,8 +914,7 @@ pub const Tokenizer = struct {
                         return self.err(.InvalidNum, c);
                     },
                     '.' => {
-                        // TODO might be ...
-                        state = .FloatFraction;
+                        state = .NumberDot;
                     },
                     'e' => {
                         state = .FloatExponent;

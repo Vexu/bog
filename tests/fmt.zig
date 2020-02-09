@@ -1,3 +1,12 @@
+test "range operator" {
+    try testTransform(
+        \\1...2
+    ,
+        \\1 ... 2
+        \\
+    );
+}
+
 test "preserve comments" {
     try testCanonical(
         \\#some comment
