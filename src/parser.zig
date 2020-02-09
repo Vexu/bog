@@ -130,7 +130,6 @@ pub const Parser = struct {
             try node.params.push(try parser.primaryExpr(true));
             if (parser.eatToken(.Comma, true) == null) end = true;
         }
-        node.r_paren = try parser.expectToken(.RParen, true);
         parser.skipNl();
         node.body = try parser.expr(false);
         return &node.base;
@@ -743,6 +742,7 @@ pub const Parser = struct {
                     try node.values.push(&item.base);
                     if (parser.eatToken(.Comma, true) == null) end = true;
                 }
+                return &node.base;
             }
         }
         if (parser.eatToken(.LBracket, skip_nl)) |tok| {

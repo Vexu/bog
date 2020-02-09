@@ -161,12 +161,77 @@ const Renderer = struct {
                 try self.renderNode(for_expr.cond, stream, indent, .Space);
                 return self.renderNode(for_expr.body, stream, indent, space);
             },
-            .Fn,
-            .List,
-            .Tuple,
-            .Map,
-            .Block,
-            .MapItem,
+            .Fn => {
+                const fn_expr = @fieldParentPtr(Node.Fn, "base", node);
+
+                try self.renderToken(fn_expr.fn_tok, stream, indent, .None);
+                try self.renderToken(fn_expr.fn_tok + 1, stream, indent, .None);
+
+                var it = fn_expr.params.iterator(0);
+                const prev = self.tokens.at(fn_expr.r_paren - 1).id;
+                if (prev == .Comma or prev == .Nl) {
+                    try stream.writeByte('\n');
+                    const new_indet = indent + indent_delta;
+                    while (it.next()) |param| {
+                        try stream.writeByteNTimes(' ', new_indet);
+                        try self.renderNode(param.*, stream, new_indet, .None);
+                        try stream.write(",\n");
+                    }
+                } else {
+                    while (it.next()) |param| {
+                        if (it.peek() == null) {
+                            try self.renderNode(param.*, stream, indent, .None);
+                            break;
+                        }
+                        try self.renderNode(param.*, stream, indent, .None);
+                        try stream.write(", ");
+                    }
+                }
+
+                try self.renderToken(fn_expr.r_paren, stream, indent, .Space);
+                return self.renderNode(fn_expr.body, stream, indent, space);
+            },
+            .List, .Tuple, .Map, .Block => {
+                const ltmb = @fieldParentPtr(Node.ListTupleMapBlock, "base", node);
+
+                try self.renderToken(ltmb.l_tok, stream, indent, .None);
+
+                var it = ltmb.values.iterator(0);
+                const prev = self.tokens.at(ltmb.r_tok - 1).id;
+                if (prev == .Comma or prev == .Nl or (node.id == .Block and ltmb.values.len != 1)) {
+                    try stream.writeByte('\n');
+                    const new_indet = indent + indent_delta;
+                    while (it.next()) |param| {
+                        try stream.writeByteNTimes(' ', new_indet);
+                        try self.renderNode(param.*, stream, new_indet, .None);
+                        if (node.id != .Block)
+                            try stream.write(",\n")
+                        else
+                            try stream.writeByte('\n');
+                    }
+                } else {
+                    while (it.next()) |param| {
+                        if (it.peek() == null) {
+                            try self.renderNode(param.*, stream, indent, .None);
+                            break;
+                        }
+                        try self.renderNode(param.*, stream, indent, .None);
+                        try stream.write(", ");
+                    }
+                }
+
+                return self.renderToken(ltmb.r_tok, stream, indent, space);
+            },
+            .MapItem => {
+                const item = @fieldParentPtr(Node.MapItem, "base", node);
+
+                if (item.key) |some| {
+                    try self.renderNode(some, stream, indent, .None);
+                    try self.renderToken(item.colon.?, stream, indent, .Space);
+                }
+                
+                return self.renderNode(item.value, stream, indent, space);
+            },
             .Catch,
             .If,
             .Match,
