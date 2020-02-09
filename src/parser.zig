@@ -955,8 +955,12 @@ pub const Parser = struct {
 
     fn eatTokenId(parser: *Parser, id: Token.Id, skip_nl: bool) ?TokAndId {
         var next_tok = parser.it.next().?;
-        while (next_tok.id == .Comment)
-            next_tok = parser.it.next().?;
+        while (true) {
+            if (next_tok.id == .Comment or next_tok.id == .Nl and (parser.it.peek() orelse break).id == .Comment)
+                next_tok = parser.it.next().?
+            else
+                break;
+        }
         if (skip_nl and next_tok.id == .Nl)
             next_tok = parser.it.next().?;
         if (next_tok.id == id) {

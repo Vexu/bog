@@ -6,13 +6,23 @@ const TokenList = lang.Token.List;
 const TokenIndex = lang.Token.Index;
 
 pub fn render(tree: *Tree, stream: var) @TypeOf(stream).Child.Error!void {
-    var it = tree.nodes.iterator(0);
     var renderer = Renderer{
         .source = tree.source,
         .tokens = &tree.tokens,
     };
-    while (it.next()) |node| {
-        try renderer.renderNode(node.*, stream, 0, .Newline);
+    {
+        var it = tree.tokens.iterator(0);
+        while (it.next()) |tok| {
+            if (tok.id == .Nl) continue;
+            if (tok.id != .Comment) break;
+            try renderer.renderToken(@truncate(u32, it.index - 1), stream, 0, .Newline);
+        }
+    }
+    {
+        var it = tree.nodes.iterator(0);
+        while (it.next()) |node| {
+            try renderer.renderNode(node.*, stream, 0, .Newline);
+        }
     }
 }
 
@@ -302,7 +312,6 @@ const Renderer = struct {
             .MatchCase => {
                 const case = @fieldParentPtr(Node.MatchCase, "base", node);
 
-
                 var it = case.lhs.iterator(0);
                 while (it.next()) |param| {
                     if (it.peek() == null) {
@@ -324,14 +333,26 @@ const Renderer = struct {
         Space,
     };
 
-    // TODO keep comments
     fn renderToken(self: *Renderer, token: TokenIndex, stream: var, indent: u32, space: Space) !void {
-        const tok = self.tokens.at(token);
+        var tok = self.tokens.at(token);
         try stream.write(self.source[tok.start..tok.end]);
         switch (space) {
             .None => {},
             .Newline => try stream.writeByte('\n'),
             .Space => try stream.writeByte(' '),
+        }
+        var i = token;
+        tok = self.tokens.at(i);
+        while (true) {
+            i += 1;
+            tok = self.tokens.at(i);
+            if (tok.id == .Nl) continue;
+            if (tok.id != .Comment) break;
+
+            try stream.write(self.source[tok.start..tok.end]);
+            try stream.writeByte('\n');
+            if (space != .Newline)
+                try stream.writeByteNTimes(' ', indent + indent_delta);
         }
     }
 };

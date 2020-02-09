@@ -1,3 +1,15 @@
+test "preserve comments" {
+    try testCanonical(
+        \\#some comment
+        \\123 + #another comment
+        \\    #third comment
+        \\    2
+        \\#fourth comment
+        \\#fifth comment
+        \\
+    );
+}
+
 test "match" {
     try testCanonical(
         \\match 2 {
