@@ -56,6 +56,7 @@ pub const ErrorMsg = struct {
         ExpectedInt,
         ExpectedNumeric,
         InvalidAugAssign,
+        InvalidDiscard,
     };
 
     pub fn string(err: ErrorMsg) []const u8 {
@@ -86,6 +87,7 @@ pub const ErrorMsg = struct {
             .ExpectedInt => "expected integer value",
             .ExpectedNumeric => "expected numeric value",
             .InvalidAugAssign => "invalid left hand side to augmented assignment",
+            .InvalidDiscard => "'_' can only be used to discard unwanted tuple/list items in destructuring assignment",
         };
     }
 };

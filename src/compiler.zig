@@ -220,6 +220,7 @@ pub const Compiler = struct {
             .Infix => return self.genInfix(@fieldParentPtr(Node.Infix, "base", node), res),
             .If => return self.genIf(@fieldParentPtr(Node.If, "base", node), res),
             .Tuple => return self.genTuple(@fieldParentPtr(Node.ListTupleMapBlock, "base", node), res),
+            .Discard => return self.reportErr(.InvalidDiscard, @fieldParentPtr(Node.SingleToken, "base", node).tok),
             .Fn => @panic("TODO: Fn"),
             .TypeInfix => @panic("TODO: TypeInfix"),
             .Suffix => @panic("TODO: Suffix"),
@@ -236,7 +237,6 @@ pub const Compiler = struct {
             .MatchCatchAll,
             .MatchLet,
             .MatchCase,
-            .Discard,
             => unreachable,
         }
     }
@@ -253,6 +253,10 @@ pub const Compiler = struct {
 
                     var it = node.values.iterator(0);
                     while (it.next()) |n| {
+                        if (n.*.id == .Discard) {
+                            index_val.Int += 1;
+                            continue;
+                        }
                         try self.makeRuntime(index_reg, index_val);
                         try self.emitInstruction_3(.Subscript, sub_reg, reg, index_reg);
                         const l_val = try self.genNode(n.*, switch (res.Lval) {

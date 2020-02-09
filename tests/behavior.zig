@@ -1,10 +1,10 @@
 test "tuple destructuring" {
     // TODO should destructuring different sized tuples be an error?
     try expectOutput(
-        \\let (a, b, c) = (1, 2, 3, 4)
+        \\let (a, b, _, c) = (1, 2, 3, 4, 5)
         \\(a + b) * c
     ,
-        \\9
+        \\12
     );
 }
 
@@ -113,7 +113,6 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
 
     var vm = Vm.init(alloc, true);
 
-    // TODO move this
     // TODO move this
     try vm.gc.stackAlloc(250);
 
