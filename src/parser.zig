@@ -875,9 +875,9 @@ pub const Parser = struct {
             .match_tok = tok,
             .expr = try parser.boolExpr(true),
             .body = NodeList.init(parser.arena),
+            .body_l_brace = try parser.expectToken(.LBrace, true),
             .body_r_brace = undefined,
         };
-        _ = try parser.expectToken(.LBrace, true);
         _ = try parser.expectToken(.Nl, false);
         while (true) {
             try node.body.push(try parser.matchCase());
@@ -891,42 +891,46 @@ pub const Parser = struct {
     }
 
     /// match_case
-    ///     : decl ":" expr
-    ///     | expr ("," expr)* ","? ":" expr
+    ///     : decl block
+    ///     | expr ("," expr)* block
     fn matchCase(parser: *Parser) Error!*Node {
         if (parser.eatToken(.Keyword_let, false) orelse
-            parser.eatToken(.Keyword_const, false)) |_|
+            parser.eatToken(.Keyword_const, false)) |let_const|
         {
             if (parser.eatToken(.Identifier, true)) |tok| {
-                _ = try parser.expectToken(.Colon, true);
                 const node = try parser.arena.create(Node.MatchCatchAll);
                 node.* = .{
                     .tok = tok,
-                    .expr = try parser.expr(false),
+                    .expr = try parser.block(null),
                 };
                 return &node.base;
             }
             const capture = try parser.primaryExpr(true);
-            _ = try parser.expectToken(.Colon, true);
             const node = try parser.arena.create(Node.MatchLet);
             node.* = .{
+                .let_const = let_const,
                 .capture = capture,
-                .expr = try parser.expr(false),
+                .expr = try parser.block(null),
+            };
+            return &node.base;
+        } else if (parser.eatToken(.Underscore, false)) |u| {
+            const node = try parser.arena.create(Node.MatchCatchAll);
+            node.* = .{
+                .tok = u,
+                .expr = try parser.block(null),
             };
             return &node.base;
         } else {
             const node = try parser.arena.create(Node.MatchCase);
             node.* = .{
                 .lhs = NodeList.init(parser.arena),
-                .colon = undefined,
                 .expr = undefined,
             };
             while (true) {
                 try node.lhs.push(try parser.expr(true));
                 if (parser.eatToken(.Comma, true) == null) break;
             }
-            node.colon = try parser.expectToken(.Colon, true);
-            node.expr = try parser.expr(false);
+            node.expr = try parser.block(null);
             return &node.base;
         }
     }

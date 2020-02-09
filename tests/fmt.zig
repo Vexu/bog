@@ -1,3 +1,14 @@
+test "match" {
+    try testCanonical(
+        \\match 2 {
+        \\    let (x, y) { x + y }
+        \\    2, 3 { 1 }
+        \\    _ { () }
+        \\}
+        \\
+    );
+}
+
 test "if" {
     try testCanonical(
         \\if foo { bar } else baz

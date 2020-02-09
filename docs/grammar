@@ -82,4 +82,4 @@ match : "match" bool_expr "{" (NL match_case)+ NL "}"
 
 match_case
     : decl block
-    | expr ("," expr)* ","? block
+    | expr ("," expr)* block

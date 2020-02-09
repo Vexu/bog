@@ -266,11 +266,55 @@ const Renderer = struct {
                     return self.renderNode(if_expr.if_body, stream, indent, space);
                 }
             },
-            .Match,
-            .MatchCatchAll,
-            .MatchLet,
-            .MatchCase,
-            => @panic("TODO"),
+            .Match => {
+                const match_expr = @fieldParentPtr(Node.Match, "base", node);
+
+                try self.renderToken(match_expr.match_tok, stream, indent, .Space);
+                try self.renderNode(match_expr.expr, stream, indent, .Space);
+
+                try self.renderToken(match_expr.body_l_brace, stream, indent, .Newline);
+                const new_indet = indent + indent_delta;
+                var it = match_expr.body.iterator(0);
+                while (it.next()) |n| {
+                    try stream.writeByteNTimes(' ', new_indet);
+                    try self.renderNode(n.*, stream, new_indet, .Newline);
+                }
+                try stream.writeByteNTimes(' ', indent);
+
+                return self.renderToken(match_expr.body_r_brace, stream, indent, space);
+            },
+            .MatchCatchAll => {
+                const case = @fieldParentPtr(Node.MatchCatchAll, "base", node);
+
+                if (self.tokens.at(case.tok).id == .Identifier) {
+                    try self.renderToken(case.tok - 1, stream, indent, .Space);
+                }
+                try self.renderToken(case.tok, stream, indent, .Space);
+                return self.renderNode(case.expr, stream, indent, space);
+            },
+            .MatchLet => {
+                const case = @fieldParentPtr(Node.MatchLet, "base", node);
+
+                try self.renderToken(case.let_const, stream, indent, .Space);
+                try self.renderNode(case.capture, stream, indent, .Space);
+                return self.renderNode(case.expr, stream, indent, space);
+            },
+            .MatchCase => {
+                const case = @fieldParentPtr(Node.MatchCase, "base", node);
+
+
+                var it = case.lhs.iterator(0);
+                while (it.next()) |param| {
+                    if (it.peek() == null) {
+                        try self.renderNode(param.*, stream, indent, .Space);
+                        break;
+                    }
+                    try self.renderNode(param.*, stream, indent, .None);
+                    try stream.write(", ");
+                }
+
+                return self.renderNode(case.expr, stream, indent, space);
+            },
         }
     }
 

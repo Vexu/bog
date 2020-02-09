@@ -320,6 +320,7 @@ pub const Node = struct {
         expr: *Node,
         body: List,
         match_tok: TokenIndex,
+        body_l_brace: TokenIndex,
         body_r_brace: TokenIndex,
     };
 
@@ -333,13 +334,13 @@ pub const Node = struct {
         base: Node = Node{ .id = .MatchLet },
         capture: *Node,
         expr: *Node,
+        let_const: TokenIndex,
     };
 
     pub const MatchCase = struct {
         base: Node = Node{ .id = .MatchCase },
         lhs: List,
         expr: *Node,
-        colon: TokenIndex,
     };
 
     pub const Jump = struct {
