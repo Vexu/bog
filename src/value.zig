@@ -129,3 +129,35 @@ pub const Ref = struct {
         }
     }
 };
+
+var buffer: [1024]u8 = undefined;
+
+fn testDump(val: *Value, expected: []const u8) !void {
+    var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
+    const alloc = &buf_alloc.allocator;
+
+    var out_buf = try std.Buffer.initSize(alloc, 0);
+    var out_stream = std.io.BufferOutStream.init(&out_buf);
+
+    const ref = Ref{
+        .value = val,
+    };
+    try ref.dump(&out_stream.stream, 4);
+    const result = out_buf.toSliceConst();
+
+    if (!std.mem.eql(u8, result, expected)) {
+        std.debug.warn("\n---expected----\n{}\n-----found-----\n{}\n---------------\n", .{ expected, result });
+        return error.TestFailed;
+    }
+}
+
+test "dumping int/num" {
+    var int = Value{
+        .kind = .{ .Int = 2 },
+    };
+    try testDump(&int, "2");
+    var num = Value{
+        .kind = .{ .Num = 2.5 },
+    };
+    try testDump(&num, "2.5e+00");
+}
