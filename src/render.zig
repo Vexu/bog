@@ -209,6 +209,7 @@ const Renderer = struct {
                         else
                             try stream.writeByte('\n');
                     }
+                    try stream.writeByteNTimes(' ', indent);
                 } else {
                     while (it.next()) |param| {
                         if (it.peek() == null) {
@@ -229,11 +230,42 @@ const Renderer = struct {
                     try self.renderNode(some, stream, indent, .None);
                     try self.renderToken(item.colon.?, stream, indent, .Space);
                 }
-                
+
                 return self.renderNode(item.value, stream, indent, space);
             },
-            .Catch,
-            .If,
+            .Catch => {
+                const catch_expr = @fieldParentPtr(Node.Catch, "base", node);
+
+                try self.renderNode(catch_expr.lhs, stream, indent, .Space);
+                try self.renderToken(catch_expr.tok, stream, indent, .Space);
+
+                if (catch_expr.capture) |some| {
+                    try self.renderToken(catch_expr.tok + 1, stream, indent, .Space);
+                    try self.renderNode(some, stream, indent, .Space);
+                }
+                return self.renderNode(catch_expr.rhs, stream, indent, space);
+            },
+            .If => {
+                const if_expr = @fieldParentPtr(Node.If, "base", node);
+
+                try self.renderToken(if_expr.if_tok, stream, indent, .Space);
+                if (if_expr.capture) |some| {
+                    try self.renderToken(if_expr.if_tok + 1, stream, indent, .Space);
+                    try self.renderNode(some, stream, indent, .Space);
+                    try self.renderToken(if_expr.eq_tok.?, stream, indent, .Space);
+                }
+
+                try self.renderNode(if_expr.cond, stream, indent, .Space);
+
+                if (if_expr.else_body) |some| {
+                    try self.renderNode(if_expr.if_body, stream, indent, .Space);
+
+                    try self.renderToken(if_expr.else_tok.?, stream, indent, .Space);
+                    return self.renderNode(some, stream, indent, space);
+                } else {
+                    return self.renderNode(if_expr.if_body, stream, indent, space);
+                }
+            },
             .Match,
             .MatchCatchAll,
             .MatchLet,

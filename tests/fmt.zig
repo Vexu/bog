@@ -1,3 +1,19 @@
+test "if" {
+    try testCanonical(
+        \\if foo { bar } else baz
+        \\if const foo = bar() { baz }
+        \\
+    );
+}
+
+test "catch" {
+    try testCanonical(
+        \\foo() catch { bar() }
+        \\baz() catch const e { return e }
+        \\
+    );
+}
+
 test "tuples, lists, maps" {
     try testCanonical(
         \\(a, b)
@@ -21,7 +37,9 @@ test "functions" {
     try testCanonical(
         \\const foo = fn(arg1, arg2, _, arg3) (arg1, arg2, arg3)
         \\const bar = fn(val) {
-        \\    val * 2
+        \\    {
+        \\        val * 45
+        \\    }
         \\}
         \\
     );

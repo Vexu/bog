@@ -808,7 +808,8 @@ pub const Parser = struct {
     /// if : "if" (decl "=")? expr block ("else" expr)?
     fn ifExpr(parser: *Parser, skip_nl: bool) Error!?*Node {
         const tok = parser.eatToken(.Keyword_if, skip_nl) orelse return null;
-        const capture = if (parser.eatToken(.Keyword_let, true)) |_|
+        const capture = if (parser.eatToken(.Keyword_let, true) orelse
+            parser.eatToken(.Keyword_const, false)) |_|
             try parser.primaryExpr(true)
         else
             null;
@@ -831,7 +832,8 @@ pub const Parser = struct {
     /// while : "while" (decl "=")? expr block
     fn whileExpr(parser: *Parser, skip_nl: bool) Error!?*Node {
         const tok = parser.eatToken(.Keyword_while, skip_nl) orelse return null;
-        const capture = if (parser.eatToken(.Keyword_let, true)) |_|
+        const capture = if (parser.eatToken(.Keyword_let, true) orelse
+            parser.eatToken(.Keyword_const, false)) |_|
             try parser.primaryExpr(true)
         else
             null;
