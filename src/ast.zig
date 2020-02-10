@@ -126,6 +126,78 @@ pub const Node = struct {
         Jump,
     };
 
+    pub fn firstToken(node: *Node) TokenIndex {
+        return switch (node.id) {
+            .Decl => @fieldParentPtr(Node.Decl, "base", node).let_const,
+            .Fn => @fieldParentPtr(Node.Fn, "base", node).fn_tok,
+            .Identifier, .Discard => @fieldParentPtr(Node.SingleToken, "base", node).tok,
+            .Prefix => @fieldParentPtr(Node.Prefix, "base", node).tok,
+            .Infix => @fieldParentPtr(Node.Infix, "base", node).lhs.firstToken(),
+            .TypeInfix => @fieldParentPtr(Node.TypeInfix, "base", node).lhs.firstToken(),
+            .Suffix => @fieldParentPtr(Node.Suffix, "base", node).l_tok,
+            .Literal => {
+                const lit = @fieldParentPtr(Node.Literal, "base", node);
+                return if (lit.kind != .None) lit.tok else lit.tok - 1;
+            },
+            .Import => @fieldParentPtr(Node.Import, "base", node).tok,
+            .Error => @fieldParentPtr(Node.Error, "base", node).tok,
+            .List, .Tuple, .Map, .Block => @fieldParentPtr(Node.ListTupleMapBlock, "base", node).l_tok,
+            .Grouped => @fieldParentPtr(Node.Grouped, "base", node).l_tok,
+            .MapItem => {
+                const map = @fieldParentPtr(Node.MapItem, "base", node);
+
+                if (map.key) |some| return some.firstToken();
+                return map.value.firstToken();
+            },
+            .Catch => @fieldParentPtr(Node.Catch, "base", node).lhs.firstToken(),
+            .If => @fieldParentPtr(Node.If, "base", node).if_tok,
+            .For => @fieldParentPtr(Node.For, "base", node).for_tok,
+            .While => @fieldParentPtr(Node.While, "base", node).while_tok,
+            .Match => @fieldParentPtr(Node.Match, "base", node).match_tok,
+            .MatchCatchAll => @fieldParentPtr(Node.Jump, "base", node).tok,
+            .MatchLet => @fieldParentPtr(Node.MatchLet, "base", node).let_const,
+            .MatchCase => @fieldParentPtr(Node.MatchCase, "base", node).lhs.at(0).*.firstToken(),
+            .Jump => @fieldParentPtr(Node.Jump, "base", node).tok,
+        };
+    }
+
+    pub fn lastToken(node: *Node) TokenIndex {
+        return switch (node.id) {
+            .Decl => @fieldParentPtr(Node.Decl, "base", node).value.lastToken(),
+            .Fn => @fieldParentPtr(Node.Fn, "base", node).body.lastToken(),
+            .Identifier, .Discard => @fieldParentPtr(Node.SingleToken, "base", node).tok,
+            .Prefix => @fieldParentPtr(Node.Prefix, "base", node).rhs.lastToken(),
+            .Infix => @fieldParentPtr(Node.Infix, "base", node).rhs.lastToken(),
+            .TypeInfix => @fieldParentPtr(Node.TypeInfix, "base", node).type_tok,
+            .Suffix => @fieldParentPtr(Node.Suffix, "base", node).r_tok,
+            .Literal => @fieldParentPtr(Node.Literal, "base", node).tok,
+            .Import => @fieldParentPtr(Node.Import, "base", node).str_tok + 1,
+            .Error => @fieldParentPtr(Node.Error, "base", node).r_paren,
+            .List, .Tuple, .Map, .Block => @fieldParentPtr(Node.ListTupleMapBlock, "base", node).r_tok,
+            .Grouped => @fieldParentPtr(Node.Grouped, "base", node).r_tok,
+            .MapItem => @fieldParentPtr(Node.MapItem, "base", node).value.lastToken(),
+            .Catch => @fieldParentPtr(Node.Catch, "base", node).rhs.lastToken(),
+            .If => {
+                const if_node = @fieldParentPtr(Node.If, "base", node);
+                if (if_node.else_body) |some| return some.lastToken();
+                return if_node.if_body.lastToken();
+            },
+            .For => @fieldParentPtr(Node.For, "base", node).body.lastToken(),
+            .While => @fieldParentPtr(Node.While, "base", node).body.lastToken(),
+            .Match => @fieldParentPtr(Node.Match, "base", node).body_r_brace,
+            .MatchCatchAll => @fieldParentPtr(Node.MatchCatchAll, "base", node).expr.lastToken(),
+            .MatchLet => @fieldParentPtr(Node.MatchLet, "base", node).expr.lastToken(),
+            .MatchCase => @fieldParentPtr(Node.MatchCase, "base", node).expr.lastToken(),
+            .Jump => {
+                const jump = @fieldParentPtr(Node.Jump, "base", node);
+                switch (jump.op) {
+                    .Break, .Return => |n| return if (n) |some| some.lastToken() else jump.tok,
+                    .Continue => return jump.tok,
+                }
+            },
+        };
+    }
+
     pub const Decl = struct {
         base: Node = Node{ .id = .Decl },
         capture: *Node,
@@ -169,7 +241,6 @@ pub const Node = struct {
             As,
         },
         lhs: *Node,
-        tok: TokenIndex,
         type_tok: TokenIndex,
     };
 

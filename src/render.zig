@@ -70,8 +70,8 @@ const Renderer = struct {
                 const type_infix = @fieldParentPtr(Node.TypeInfix, "base", node);
 
                 try self.renderNode(type_infix.lhs, stream, indent, .Space);
-                try self.renderToken(type_infix.tok - 1, stream, indent, .Space);
-                return self.renderToken(type_infix.tok, stream, indent, space);
+                try self.renderToken(type_infix.type_tok - 1, stream, indent, .Space);
+                return self.renderToken(type_infix.type_tok, stream, indent, space);
             },
             .Discard, .Identifier => {
                 const single = @fieldParentPtr(Node.SingleToken, "base", node);
@@ -93,7 +93,11 @@ const Renderer = struct {
                             while (it.next()) |param| {
                                 try stream.writeByteNTimes(' ', new_indet);
                                 try self.renderNode(param.*, stream, new_indet, .None);
-                                try stream.write(",\n");
+                                const comma = param.*.lastToken() + 1;
+                                if (self.tokens.at(comma).id == .Comma)
+                                    try self.renderToken(comma, stream, indent, .Newline)
+                                else
+                                    try stream.write(",\n");
                             }
                         } else {
                             while (it.next()) |param| {
@@ -102,7 +106,7 @@ const Renderer = struct {
                                     break;
                                 }
                                 try self.renderNode(param.*, stream, indent, .None);
-                                try stream.write(", ");
+                                try self.renderToken(param.*.lastToken() + 1, stream, indent, .Space);
                             }
                         }
                     },
@@ -185,7 +189,11 @@ const Renderer = struct {
                     while (it.next()) |param| {
                         try stream.writeByteNTimes(' ', new_indet);
                         try self.renderNode(param.*, stream, new_indet, .None);
-                        try stream.write(",\n");
+                        const comma = param.*.lastToken() + 1;
+                        if (self.tokens.at(comma).id == .Comma)
+                            try self.renderToken(comma, stream, indent, .Newline)
+                        else
+                            try stream.write(",\n");
                     }
                 } else {
                     while (it.next()) |param| {
@@ -194,7 +202,7 @@ const Renderer = struct {
                             break;
                         }
                         try self.renderNode(param.*, stream, indent, .None);
-                        try stream.write(", ");
+                        try self.renderToken(param.*.lastToken() + 1, stream, indent, .Space);
                     }
                 }
 
@@ -213,11 +221,16 @@ const Renderer = struct {
                     const new_indet = indent + indent_delta;
                     while (it.next()) |param| {
                         try stream.writeByteNTimes(' ', new_indet);
-                        try self.renderNode(param.*, stream, new_indet, .None);
-                        if (node.id != .Block)
-                            try stream.write(",\n")
-                        else
-                            try stream.writeByte('\n');
+                        if (node.id == .Block)
+                            try self.renderNode(param.*, stream, new_indet, .Newline)
+                        else {
+                            try self.renderNode(param.*, stream, new_indet, .None);
+                            const comma = param.*.lastToken() + 1;
+                            if (self.tokens.at(comma).id == .Comma)
+                                try self.renderToken(comma, stream, indent, .Newline)
+                            else
+                                try stream.write(",\n");
+                        }
                     }
                     try stream.writeByteNTimes(' ', indent);
                 } else {
@@ -227,7 +240,7 @@ const Renderer = struct {
                             break;
                         }
                         try self.renderNode(param.*, stream, indent, .None);
-                        try stream.write(", ");
+                        try self.renderToken(param.*.lastToken() + 1, stream, indent, .Space);
                     }
                 }
 
@@ -296,10 +309,10 @@ const Renderer = struct {
             .MatchCatchAll => {
                 const case = @fieldParentPtr(Node.MatchCatchAll, "base", node);
 
-                if (self.tokens.at(case.tok).id == .Identifier) {
-                    try self.renderToken(case.tok - 1, stream, indent, .Space);
-                }
                 try self.renderToken(case.tok, stream, indent, .Space);
+                if (self.tokens.at(case.tok).id != .Underscore) {
+                    try self.renderToken(case.tok + 1, stream, indent, .Space);
+                }
                 return self.renderNode(case.expr, stream, indent, space);
             },
             .MatchLet => {
@@ -319,7 +332,7 @@ const Renderer = struct {
                         break;
                     }
                     try self.renderNode(param.*, stream, indent, .None);
-                    try stream.write(", ");
+                    try self.renderToken(param.*.lastToken() + 1, stream, indent, .Space);
                 }
 
                 return self.renderNode(case.expr, stream, indent, space);

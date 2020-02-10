@@ -1,3 +1,11 @@
+test "preserve comment after comma" {
+    try testCanonical(
+        \\(1, #hello world
+        \\    2)
+        \\
+    );
+}
+
 test "range operator" {
     try testTransform(
         \\1...2

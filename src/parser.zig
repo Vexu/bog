@@ -246,7 +246,6 @@ pub const Parser = struct {
             const node = try parser.arena.create(Node.TypeInfix);
             node.* = .{
                 .lhs = lhs,
-                .tok = tok + 1,
                 .op = .Is,
                 .type_tok = try parser.typeName(),
             };
@@ -428,7 +427,6 @@ pub const Parser = struct {
             const node = try parser.arena.create(Node.TypeInfix);
             node.* = .{
                 .lhs = lhs,
-                .tok = tok + 1,
                 .op = .As,
                 .type_tok = try parser.typeName(),
             };
@@ -897,10 +895,10 @@ pub const Parser = struct {
         if (parser.eatToken(.Keyword_let, false) orelse
             parser.eatToken(.Keyword_const, false)) |let_const|
         {
-            if (parser.eatToken(.Identifier, true)) |tok| {
+            if (parser.eatToken(.Identifier, true)) |_| {
                 const node = try parser.arena.create(Node.MatchCatchAll);
                 node.* = .{
-                    .tok = tok,
+                    .tok = let_const,
                     .expr = try parser.block(null),
                 };
                 return &node.base;

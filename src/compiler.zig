@@ -339,8 +339,7 @@ pub const Compiler = struct {
                 return Value{ .Rt = res.Rt };
             } else return res_val;
         } else if (cond_val != .Rt) {
-            // TODO node.cond.firstToken()
-            return self.reportErr(.ExpectedBoolean, node.if_tok);
+            return self.reportErr(.ExpectedBoolean, node.cond.firstToken());
         }
         const res_loc = if (res == .Rt) res else Result{
             .Rt = self.registerAlloc(),
