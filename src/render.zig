@@ -32,12 +32,28 @@ const Renderer = struct {
 
     const indent_delta = 4;
 
+    fn prevToken(self: *Renderer, tok: TokenIndex) TokenIndex {
+        var it = self.tokens.iterator(tok);
+        while (it.prev()) |some| {
+            if (some.id != .Comment and some.id != .Nl) break;
+        }
+        return @truncate(TokenIndex, it.index);
+    }
+
+    fn nextToken(self: *Renderer, tok: TokenIndex) TokenIndex {
+        var it = self.tokens.iterator(tok + 1);
+        while (it.next()) |some| {
+            if (some.id != .Comment and some.id != .Nl) break;
+        }
+        return @truncate(TokenIndex, it.index - 1);
+    }
+
     fn renderNode(self: *Renderer, node: *Node, stream: var, indent: u32, space: Space) @TypeOf(stream).Child.Error!void {
         switch (node.id) {
             .Literal => {
                 const literal = @fieldParentPtr(Node.Literal, "base", node);
                 if (literal.kind == .None) {
-                    try self.renderToken(literal.tok - 1, stream, indent, .None);
+                    try self.renderToken(self.prevToken(literal.tok), stream, indent, .None);
                 }
 
                 return self.renderToken(literal.tok, stream, indent, space);
@@ -70,7 +86,7 @@ const Renderer = struct {
                 const type_infix = @fieldParentPtr(Node.TypeInfix, "base", node);
 
                 try self.renderNode(type_infix.lhs, stream, indent, .Space);
-                try self.renderToken(type_infix.type_tok - 1, stream, indent, .Space);
+                try self.renderToken(self.prevToken(type_infix.type_tok), stream, indent, .Space);
                 return self.renderToken(type_infix.type_tok, stream, indent, space);
             },
             .Discard, .Identifier => {
@@ -93,7 +109,7 @@ const Renderer = struct {
                             while (it.next()) |param| {
                                 try stream.writeByteNTimes(' ', new_indet);
                                 try self.renderNode(param.*, stream, new_indet, .None);
-                                const comma = param.*.lastToken() + 1;
+                                const comma = self.nextToken(param.*.lastToken());
                                 if (self.tokens.at(comma).id == .Comma)
                                     try self.renderToken(comma, stream, indent, .Newline)
                                 else
@@ -106,7 +122,7 @@ const Renderer = struct {
                                     break;
                                 }
                                 try self.renderNode(param.*, stream, indent, .None);
-                                try self.renderToken(param.*.lastToken() + 1, stream, indent, .Space);
+                                try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .Space);
                             }
                         }
                     },
@@ -127,15 +143,15 @@ const Renderer = struct {
                 const import = @fieldParentPtr(Node.Import, "base", node);
 
                 try self.renderToken(import.tok, stream, indent, .None);
-                try self.renderToken(import.tok + 1, stream, indent, .None);
+                try self.renderToken(self.nextToken(import.tok), stream, indent, .None);
                 try self.renderToken(import.str_tok, stream, indent, .None);
-                return self.renderToken(import.str_tok + 1, stream, indent, space);
+                return self.renderToken(self.nextToken(import.str_tok), stream, indent, space);
             },
             .Error => {
                 const err = @fieldParentPtr(Node.Error, "base", node);
 
                 try self.renderToken(err.tok, stream, indent, .None);
-                try self.renderToken(err.tok + 1, stream, indent, .None);
+                try self.renderToken(self.nextToken(err.tok), stream, indent, .None);
                 try self.renderNode(err.value, stream, indent, .None);
                 return self.renderToken(err.r_paren, stream, indent, space);
             },
@@ -156,7 +172,7 @@ const Renderer = struct {
 
                 try self.renderToken(while_expr.while_tok, stream, indent, .Space);
                 if (while_expr.capture) |some| {
-                    try self.renderToken(while_expr.while_tok + 1, stream, indent, .Space);
+                    try self.renderToken(self.nextToken(while_expr.while_tok), stream, indent, .Space);
                     try self.renderNode(some, stream, indent, .Space);
                     try self.renderToken(while_expr.eq_tok.?, stream, indent, .Space);
                 }
@@ -168,7 +184,7 @@ const Renderer = struct {
 
                 try self.renderToken(for_expr.for_tok, stream, indent, .Space);
                 if (for_expr.capture) |some| {
-                    try self.renderToken(for_expr.for_tok + 1, stream, indent, .Space);
+                    try self.renderToken(self.nextToken(for_expr.for_tok), stream, indent, .Space);
                     try self.renderNode(some, stream, indent, .Space);
                     try self.renderToken(for_expr.in_tok.?, stream, indent, .Space);
                 }
@@ -179,7 +195,7 @@ const Renderer = struct {
                 const fn_expr = @fieldParentPtr(Node.Fn, "base", node);
 
                 try self.renderToken(fn_expr.fn_tok, stream, indent, .None);
-                try self.renderToken(fn_expr.fn_tok + 1, stream, indent, .None);
+                try self.renderToken(self.nextToken(fn_expr.fn_tok), stream, indent, .None);
 
                 var it = fn_expr.params.iterator(0);
                 const prev = self.tokens.at(fn_expr.r_paren - 1).id;
@@ -189,7 +205,7 @@ const Renderer = struct {
                     while (it.next()) |param| {
                         try stream.writeByteNTimes(' ', new_indet);
                         try self.renderNode(param.*, stream, new_indet, .None);
-                        const comma = param.*.lastToken() + 1;
+                        const comma = self.nextToken(param.*.lastToken());
                         if (self.tokens.at(comma).id == .Comma)
                             try self.renderToken(comma, stream, indent, .Newline)
                         else
@@ -202,7 +218,7 @@ const Renderer = struct {
                             break;
                         }
                         try self.renderNode(param.*, stream, indent, .None);
-                        try self.renderToken(param.*.lastToken() + 1, stream, indent, .Space);
+                        try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .Space);
                     }
                 }
 
@@ -216,7 +232,7 @@ const Renderer = struct {
 
                 var it = ltmb.values.iterator(0);
                 const prev = self.tokens.at(ltmb.r_tok - 1).id;
-                if (prev == .Comma or prev == .Nl or (node.id == .Block and ltmb.values.len != 1)) {
+                if (prev == .Comma or prev == .Nl or node.id == .Block) {
                     try stream.writeByte('\n');
                     const new_indet = indent + indent_delta;
                     while (it.next()) |param| {
@@ -225,7 +241,7 @@ const Renderer = struct {
                             try self.renderNode(param.*, stream, new_indet, .Newline)
                         else {
                             try self.renderNode(param.*, stream, new_indet, .None);
-                            const comma = param.*.lastToken() + 1;
+                            const comma = self.nextToken(param.*.lastToken());
                             if (self.tokens.at(comma).id == .Comma)
                                 try self.renderToken(comma, stream, indent, .Newline)
                             else
@@ -240,7 +256,7 @@ const Renderer = struct {
                             break;
                         }
                         try self.renderNode(param.*, stream, indent, .None);
-                        try self.renderToken(param.*.lastToken() + 1, stream, indent, .Space);
+                        try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .Space);
                     }
                 }
 
@@ -263,7 +279,7 @@ const Renderer = struct {
                 try self.renderToken(catch_expr.tok, stream, indent, .Space);
 
                 if (catch_expr.capture) |some| {
-                    try self.renderToken(catch_expr.tok + 1, stream, indent, .Space);
+                    try self.renderToken(self.nextToken(catch_expr.tok), stream, indent, .Space);
                     try self.renderNode(some, stream, indent, .Space);
                 }
                 return self.renderNode(catch_expr.rhs, stream, indent, space);
@@ -273,7 +289,7 @@ const Renderer = struct {
 
                 try self.renderToken(if_expr.if_tok, stream, indent, .Space);
                 if (if_expr.capture) |some| {
-                    try self.renderToken(if_expr.if_tok + 1, stream, indent, .Space);
+                    try self.renderToken(self.nextToken(if_expr.if_tok), stream, indent, .Space);
                     try self.renderNode(some, stream, indent, .Space);
                     try self.renderToken(if_expr.eq_tok.?, stream, indent, .Space);
                 }
@@ -311,7 +327,7 @@ const Renderer = struct {
 
                 try self.renderToken(case.tok, stream, indent, .Space);
                 if (self.tokens.at(case.tok).id != .Underscore) {
-                    try self.renderToken(case.tok + 1, stream, indent, .Space);
+                    try self.renderToken(self.nextToken(case.tok), stream, indent, .Space);
                 }
                 return self.renderNode(case.expr, stream, indent, space);
             },
@@ -332,7 +348,7 @@ const Renderer = struct {
                         break;
                     }
                     try self.renderNode(param.*, stream, indent, .None);
-                    try self.renderToken(param.*.lastToken() + 1, stream, indent, .Space);
+                    try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .Space);
                 }
 
                 return self.renderNode(case.expr, stream, indent, space);
@@ -350,7 +366,7 @@ const Renderer = struct {
         var tok = self.tokens.at(token);
         try stream.write(self.source[tok.start..tok.end]);
         switch (space) {
-            .None => {},
+            .None => if (tok.id == .Comment) try stream.writeByte('\n'),
             .Newline => try stream.writeByte('\n'),
             .Space => try stream.writeByte(' '),
         }

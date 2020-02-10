@@ -4,6 +4,12 @@ test "preserve comment after comma" {
         \\    2)
         \\
     );
+    // TODO make this prettier
+    try testCanonical(
+        \\(1#hello world
+        \\    , 2)
+        \\
+    );
 }
 
 test "range operator" {
