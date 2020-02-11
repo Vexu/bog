@@ -241,6 +241,7 @@ pub const Node = struct {
             As,
         },
         lhs: *Node,
+        tok: TokenIndex,
         type_tok: TokenIndex,
     };
 

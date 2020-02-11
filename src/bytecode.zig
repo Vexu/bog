@@ -10,22 +10,22 @@ pub const Op = enum(u8) {
     /// A <- B
     Move,
 
-    /// CALL(A)
-    Call,
+    // /// CALL(A)
+    // Call,
 
-    /// STACK(A, B) = C
-    PushStack,
+    // /// STACK(A, B) = C
+    // PushStack,
 
     /// DISCARD(A)
     Discard,
 
-    /// A = PRIMTIVE(B)
+    /// A = PRIMTIVE(arg1)
     /// 0 = ()
     /// 1 = false
     /// 2 = true
     ConstPrimitive,
 
-    /// A = arg1
+    /// A = INT(arg1)
     ConstInt8,
     ConstInt32,
     ConstInt64,
@@ -126,10 +126,7 @@ pub const Op = enum(u8) {
     /// IF (A==error) RET A
     Try,
 
-    /// A = B as TYPEID(C)
-    Cast,
-
-    Return,
+    // Return,
 
     /// A = B[C]
     Subscript,
@@ -137,7 +134,7 @@ pub const Op = enum(u8) {
     /// A = error(A)
     BuildError,
 
-    /// A = (arg1, ... argB)
+    /// A = (arg1, ... argN)
     BuildTuple,
 
     /// ip = arg1
@@ -154,6 +151,12 @@ pub const Op = enum(u8) {
 
     /// A = IMPORT(arg1)
     Import,
+
+    /// A = B is TYPEID
+    Is,
+
+    /// A = B as TYPEID
+    As,
 
     // _,
 };

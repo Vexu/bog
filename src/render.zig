@@ -86,7 +86,7 @@ const Renderer = struct {
                 const type_infix = @fieldParentPtr(Node.TypeInfix, "base", node);
 
                 try self.renderNode(type_infix.lhs, stream, indent, .Space);
-                try self.renderToken(self.prevToken(type_infix.type_tok), stream, indent, .Space);
+                try self.renderToken(type_infix.tok, stream, indent, .Space);
                 return self.renderToken(type_infix.type_tok, stream, indent, space);
             },
             .Discard, .Identifier => {

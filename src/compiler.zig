@@ -56,6 +56,12 @@ pub const Compiler = struct {
         try self.code.appendSlice(@sliceToBytes(([_]RegRef{ A, B })[0..]));
     }
 
+    fn emitInstruction_2_1(self: *Compiler, op: lang.Op, A: RegRef, B: RegRef, arg: var) !void {
+        try self.code.append(@enumToInt(op));
+        try self.code.appendSlice(@sliceToBytes(([_]RegRef{ A, B })[0..]));
+        try self.code.appendSlice(@sliceToBytes(([_]@TypeOf(arg){arg})[0..]));
+    }
+
     fn emitInstruction_3(self: *Compiler, op: lang.Op, A: RegRef, B: RegRef, C: RegRef) !void {
         try self.code.append(@enumToInt(op));
         try self.code.appendSlice(@sliceToBytes(([_]RegRef{ A, B, C })[0..]));
@@ -221,8 +227,8 @@ pub const Compiler = struct {
             .If => return self.genIf(@fieldParentPtr(Node.If, "base", node), res),
             .Tuple => return self.genTuple(@fieldParentPtr(Node.ListTupleMapBlock, "base", node), res),
             .Discard => return self.reportErr(.InvalidDiscard, @fieldParentPtr(Node.SingleToken, "base", node).tok),
+            .TypeInfix => return self.genTypeInfix(@fieldParentPtr(Node.TypeInfix, "base", node), res),
             .Fn => @panic("TODO: Fn"),
-            .TypeInfix => @panic("TODO: TypeInfix"),
             .Suffix => @panic("TODO: Suffix"),
             .Import => @panic("TODO: Import"),
             .Error => @panic("TODO: Error"),
@@ -400,7 +406,7 @@ pub const Compiler = struct {
     fn genPrefix(self: *Compiler, node: *Node.Prefix, res: Result) Error!Value {
         try self.assertNotLval(res, node.tok);
         const r_val = try self.genNode(node.rhs, .Value);
-        try self.assertNotEmpty(r_val, node.tok);
+        try self.assertNotEmpty(r_val, node.rhs.firstToken());
         if (r_val == .Rt) {
             const op_id = switch (node.op) {
                 .BoolNot => .BoolNot,
@@ -422,15 +428,15 @@ pub const Compiler = struct {
         }
         const ret_val = switch (node.op) {
             .BoolNot => blk: {
-                try self.assertBool(r_val, node.tok);
+                try self.assertBool(r_val, node.rhs.firstToken());
                 break :blk Value{ .Bool = !r_val.Bool };
             },
             .BitNot => blk: {
-                try self.assertInt(r_val, node.tok);
+                try self.assertInt(r_val, node.rhs.firstToken());
                 break :blk Value{ .Int = ~r_val.Int };
             },
             .Minus => blk: {
-                try self.assertNumeric(r_val, node.tok);
+                try self.assertNumeric(r_val, node.rhs.firstToken());
                 if (r_val == .Int) {
                     // TODO check for overflow
                     break :blk Value{ .Int = -r_val.Int };
@@ -439,7 +445,7 @@ pub const Compiler = struct {
                 }
             },
             .Plus => blk: {
-                try self.assertNumeric(r_val, node.tok);
+                try self.assertNumeric(r_val, node.rhs.firstToken());
                 break :blk r_val;
             },
             // errors are runtime only currently, so ret_val does not need to be checked
@@ -452,6 +458,73 @@ pub const Compiler = struct {
         }
         // if res == .Value nothing needs to be done
         return ret_val;
+    }
+
+    fn genTypeInfix(self: *Compiler, node: *Node.TypeInfix, res: Result) Error!Value {
+        try self.assertNotLval(res, node.tok);
+        const l_val = try self.genNode(node.lhs, .Value);
+        try self.assertNotEmpty(l_val, node.lhs.firstToken());
+
+        const type_str = self.tokenSlice(node.type_tok);
+        const type_id = if (mem.eql(u8, type_str, "none"))
+            .None
+        else if (mem.eql(u8, type_str, "int"))
+            .Int
+        else if (mem.eql(u8, type_str, "num"))
+            .Num
+        else if (mem.eql(u8, type_str, "bool"))
+            .Bool
+        else if (mem.eql(u8, type_str, "str"))
+            .Str
+        else if (mem.eql(u8, type_str, "tuple"))
+            .Tuple
+        else if (mem.eql(u8, type_str, "map"))
+            .Map
+        else if (mem.eql(u8, type_str, "list"))
+            .List
+        else if (mem.eql(u8, type_str, "error"))
+            .Error
+        else if (mem.eql(u8, type_str, "range"))
+            .Range
+        else if (mem.eql(u8, type_str, "fn"))
+            lang.Value.TypeId.Fn
+        else
+            return self.reportErr(.TypeName, node.type_tok);
+
+        if (l_val == .Rt) {
+            const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
+            const op: lang.Op = if (node.op == .As) .As else .Is;
+            try self.emitInstruction_2_1(op, res_loc.Rt, l_val.Rt, type_id);
+            return Value{ .Rt = res_loc.Rt };
+        }
+
+        const ret = switch (node.op) {
+            .As => switch (type_id) {
+                .None => Value{ .None = {} },
+                // .Int => ,
+                // .Num => ,
+                // .Bool => ,
+                // .Str => ,
+                else => @panic("TODO more casts"),
+            },
+            .Is => Value{
+                .Bool = switch (type_id) {
+                    .None => l_val == .None,
+                    .Int => l_val == .Int,
+                    .Num => l_val == .Num,
+                    .Bool => l_val == .Bool,
+                    .Str => l_val == .Str,
+                    else => false,
+                },
+            },
+        };
+
+        if (res == .Rt) {
+            try self.makeRuntime(res.Rt, ret);
+            return Value{ .Rt = res.Rt };
+        }
+        // if res == .Value nothing needs to be done
+        return ret;
     }
 
     fn genInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
@@ -513,7 +586,7 @@ pub const Compiler = struct {
         const reg = self.registerAlloc();
         defer self.registerFree(reg);
         const r_val = try self.genNode(node.rhs, Result{ .Rt = reg });
-        try self.assertNotEmpty(r_val, node.tok);
+        try self.assertNotEmpty(r_val, node.rhs.firstToken());
 
         if (node.op == .Assign) {
             const l_val = try self.genNode(node.lhs, Result{ .Lval = .{ .Assign = reg } });
@@ -545,10 +618,10 @@ pub const Compiler = struct {
 
     fn genNumericInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
         var l_val = try self.genNode(node.lhs, .Value);
-        try self.assertNotEmpty(l_val, node.tok);
+        try self.assertNotEmpty(l_val, node.lhs.firstToken());
 
         var r_val = try self.genNode(node.rhs, .Value);
-        try self.assertNotEmpty(r_val, node.tok);
+        try self.assertNotEmpty(r_val, node.rhs.firstToken());
 
         if (r_val == .Rt or l_val == .Rt) {
             if (r_val != .Rt) {

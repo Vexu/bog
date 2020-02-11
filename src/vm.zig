@@ -333,6 +333,36 @@ pub const Vm = struct {
                         else => @panic("TODO: subscript for more types"),
                     };
                 },
+                .As => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+                    const type_id = vm.getVal(module, Value.TypeId);
+
+                    if (type_id == .None) {
+                        stack[A].value.? = &Value.None;
+                        continue;
+                    }
+
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = switch (type_id) {
+                        .None => unreachable,
+                        else => @panic("TODO more casts"),
+                    };
+                    stack[A] = ref;
+                },
+                .Is => {
+                    const A = vm.getVal(module, RegRef);
+                    const B = vm.getVal(module, RegRef);
+                    const type_id = vm.getVal(module, Value.TypeId);
+
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Bool = stack[B].value.?.kind == type_id,
+                        },
+                    };
+                    stack[A] = ref;
+                },
                 else => {
                     std.debug.warn("Unimplemented: {}\n", .{op});
                 },

@@ -1,3 +1,29 @@
+test "type casting" {
+    try expectOutput(
+        \\1 as none
+    ,
+        \\()
+    );
+}
+
+test "type checking" {
+    try expectOutput(
+        \\1 is int
+    ,
+        \\true
+    );
+    try expectOutput(
+        \\1 is num
+    ,
+        \\false
+    );
+    try expectOutput(
+        \\(1,) is tuple
+    ,
+        \\true
+    );
+}
+
 test "tuple destructuring" {
     // TODO should destructuring different sized tuples be an error?
     try expectOutput(

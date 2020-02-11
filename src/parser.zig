@@ -247,6 +247,7 @@ pub const Parser = struct {
             node.* = .{
                 .lhs = lhs,
                 .op = .Is,
+                .tok = tok,
                 .type_tok = try parser.typeName(),
             };
             lhs = &node.base;
@@ -428,6 +429,7 @@ pub const Parser = struct {
             node.* = .{
                 .lhs = lhs,
                 .op = .As,
+                .tok = tok,
                 .type_tok = try parser.typeName(),
             };
             lhs = &node.base;
