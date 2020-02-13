@@ -4,6 +4,17 @@ test "type casting" {
     ,
         \\()
     );
+    try expectOutput(
+        \\1 as bool
+    ,
+        \\true
+    );
+    try expectOutput(
+        \\let y = 2.5
+        \\y as int
+    ,
+        \\2
+    );
 }
 
 test "type checking" {

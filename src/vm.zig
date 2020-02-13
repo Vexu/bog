@@ -387,8 +387,22 @@ pub const Vm = struct {
                     const addr = vm.getVal(module, u32);
                     vm.ip += addr;
                 },
-                .JumpTrue => return vm.reportErr("TODO Op.JumpTrue"),
-                .JumpNotError => return vm.reportErr("TODO Op.JumpNotError"),
+                .JumpTrue => {
+                    const A_val = try vm.getBool(module);
+                    const addr = vm.getVal(module, u32);
+
+                    if (A_val == true) {
+                        vm.ip += addr;
+                    }
+                },
+                .JumpNotError => {
+                    const A = vm.getVal(module, RegRef);
+                    const addr = vm.getVal(module, u32);
+
+                    if (stack[A].value.?.kind != .Error) {
+                        vm.ip += addr;
+                    }
+                },
                 .Import => return vm.reportErr("TODO Op.Import"),
                 .Discard => {
                     const A = vm.getVal(module, RegRef);
@@ -440,11 +454,57 @@ pub const Vm = struct {
                         stack[A].value.? = &Value.None;
                         continue;
                     }
+                    const B_kind = stack[B].value.?.kind;
+
+                    if (type_id == .Bool) {
+                        const bool_res = switch (B_kind) {
+                            .Int => |val| val != 0,
+                            .Num => |val| val != 0,
+                            .Bool => |val| val,
+                            .Str => |val| if (mem.eql(u8, val, "true"))
+                                true
+                            else if (mem.eql(u8, val, "false"))
+                                false
+                            else
+                                return vm.reportErr("cannot cast string to bool"),
+                            else => return vm.reportErr("invalid cast to bool"),
+                        };
+
+                        stack[A].value = if (bool_res) &Value.True else &Value.False;
+                        continue;
+                    }
 
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = switch (type_id) {
-                        .None => unreachable,
-                        else => return vm.reportErr("TODO more casts"),
+                        .Bool, .None => unreachable,
+                        .Int => .{
+                            .kind = .{
+                                .Int = switch (B_kind) {
+                                    .Int => |val| val,
+                                    .Num => |val| @floatToInt(i64, val),
+                                    .Bool => |val| @boolToInt(val),
+                                    // .Str => parseInt
+                                    else => return vm.reportErr("invalid cast to int"),
+                                },
+                            },
+                        },
+                        .Num => .{
+                            .kind = .{
+                                .Num = switch (B_kind) {
+                                    .Num => |val| val,
+                                    .Int => |val| @intToFloat(f64, val),
+                                    .Bool => |val| @intToFloat(f64, @boolToInt(val)),
+                                    // .Str => parseNum
+                                    else => return vm.reportErr("invalid cast to num"),
+                                },
+                            },
+                        },
+                        .Str,
+                        .Tuple,
+                        .Map,
+                        .List,
+                        => return vm.reportErr("TODO more casts"),
+                        else => return error.MalformedByteCode,
                     };
                     stack[A] = ref;
                 },
@@ -456,7 +516,7 @@ pub const Vm = struct {
                     stack[A].value = if (stack[B].value.?.kind == type_id) &Value.True else &Value.False;
                 },
                 _ => {
-                    vm.reportErr("Malformed bytecode") catch return error.MalformedByteCode;
+                    return error.MalformedByteCode;
                 },
             }
         }

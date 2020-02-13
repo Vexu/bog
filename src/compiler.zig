@@ -501,11 +501,52 @@ pub const Compiler = struct {
         const ret = switch (node.op) {
             .As => switch (type_id) {
                 .None => Value{ .None = {} },
-                // .Int => ,
-                // .Num => ,
-                // .Bool => ,
-                // .Str => ,
-                else => return self.reportErr("TODO more casts", node.tok),
+                .Int => Value{
+                    .Int = switch (l_val) {
+                        .Int => |val| val,
+                        .Num => |val| @floatToInt(i64, val),
+                        .Bool => |val| @boolToInt(val),
+                        // .Str => parseInt
+                        else => return self.reportErr("invalid cast to int", node.lhs.firstToken()),
+                    },
+                },
+                .Num => Value{
+                    .Num = switch (l_val) {
+                        .Num => |val| val,
+                        .Int => |val| @intToFloat(f64, val),
+                        .Bool => |val| @intToFloat(f64, @boolToInt(val)),
+                        // .Str => parseNum
+                        else => return self.reportErr("invalid cast to num", node.lhs.firstToken()),
+                    },
+                },
+                .Bool => Value{
+                    .Bool = switch (l_val) {
+                        .Int => |val| val != 0,
+                        .Num => |val| val != 0,
+                        .Bool => |val| val,
+                        .Str => |val| if (mem.eql(u8, val, "true"))
+                            true
+                        else if (mem.eql(u8, val, "false"))
+                            false
+                        else
+                            return self.reportErr("cannot cast string to bool", node.lhs.firstToken()),
+                        else => return self.reportErr("invalid cast to bool", node.lhs.firstToken()),
+                    },
+                },
+                .Str => Value{
+                    .Str = switch (l_val) {
+                        // .Int => |val| val != 0,
+                        // .Num => |val| val != 0,
+                        .Bool => |val| if (val) "true" else "false",
+                        .Str => |val| val,
+                        else => return self.reportErr("invalid cast to string", node.lhs.firstToken()),
+                    },
+                },
+                .Fn => return self.reportErr("cannot cast to function", node.type_tok),
+                .Error => return self.reportErr("cannot cast to error", node.type_tok),
+                .Range => return self.reportErr("cannot cast to range", node.type_tok),
+                .Tuple, .Map, .List => return self.reportErr("TODO Rt casts", node.tok),
+                _ => unreachable,
             },
             .Is => Value{
                 .Bool = switch (type_id) {

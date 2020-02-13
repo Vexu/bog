@@ -1,7 +1,7 @@
 const std = @import("std");
 
 pub const Value = struct {
-    pub const TypeId = enum {
+    pub const TypeId = enum(u8) {
         None,
         Int,
         Num,
@@ -13,6 +13,7 @@ pub const Value = struct {
         Error,
         Range,
         Fn,
+        _,
     };
 
     pub const Map = std.StringHashMap(*Ref);
@@ -126,6 +127,7 @@ pub const Ref = struct {
             .Fn => |val| {
                 try stream.print("fn({})", .{val.arg_count});
             },
+            _ => unreachable,
         }
     }
 };
