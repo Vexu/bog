@@ -13,11 +13,8 @@ test "preserve comment after comma" {
 }
 
 test "range operator" {
-    try testTransform(
+    try testCanonical(
         \\1...2
-    ,
-        \\1 ... 2
-        \\
     );
 }
 
@@ -35,27 +32,27 @@ test "preserve comments" {
 
 test "match" {
     try testCanonical(
-        \\match 2 {
-        \\    let (x, y) { x + y }
-        \\    2, 3 { 1 }
-        \\    _ { () }
-        \\}
+        \\match (2)
+        \\    let (x, 2) => x + 4
+        \\    2, 3 => 1
+        \\    _ => ()
+        \\
         \\
     );
 }
 
 test "if" {
     try testCanonical(
-        \\if foo { bar } else baz
-        \\if const foo = bar() { baz }
+        \\if (foo) bar else baz
+        \\if (const foo = bar()) baz
         \\
     );
 }
 
 test "catch" {
     try testCanonical(
-        \\foo() catch { bar() }
-        \\baz() catch const e { return e }
+        \\foo() catch bar()
+        \\baz() catch (const e) return e
         \\
     );
 }
@@ -82,11 +79,8 @@ test "tuples, lists, maps" {
 test "functions" {
     try testCanonical(
         \\const foo = fn(arg1, arg2, _, arg3) (arg1, arg2, arg3)
-        \\const bar = fn(val) {
-        \\    {
-        \\        val * 45
-        \\    }
-        \\}
+        \\const bar = fn(val)
+        \\    val * 45
         \\
     );
 }
@@ -131,10 +125,10 @@ test "trailing comma in call" {
 
 test "loops" {
     try testCanonical(
-        \\while true { break }
+        \\while (true) break
         \\return 123 // 4
-        \\for let foo in arr { foo + 2 }
-        \\for 1 ... 3 { continue }
+        \\for (let foo in arr) foo + 2
+        \\for (1...3) continue
         \\
     );
 }

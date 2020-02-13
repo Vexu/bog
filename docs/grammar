@@ -10,6 +10,11 @@ expr
     : fn
     | jump_expr
     | bool_expr assign?
+    | block
+
+block : (NL stmt)+ NL
+
+assign : ("=" | "+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") expr
 
 jump_expr : "return" expr? | "break" expr? | "continue"
 
@@ -28,7 +33,7 @@ type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" |
 
 range_expr : bit_expr ("..." bit_expr)?
 
-bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)* | ("catch" decl? block))?
+bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)* | ("catch" ("(" decl ")")? expr))?
 
 shift_expr : add_expr (("<<" | ">>") add_expr)?
 
@@ -41,10 +46,6 @@ cast_expr : prefix_expr ("as" type_name)?
 prefix_expr : ("try" | "-" | "+" | "~")? power_expr
 
 power_expr : primary_expr suffix_expr* ("**" power_expr)?
-
-assign
-    : "=" expr
-    | ("+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") bit_expr
 
 suffix_expr
     : "[" expr "]"
@@ -64,22 +65,19 @@ primary_expr
     | "[" (expr ",")* expr? "]"
     | "error" "(" expr ")"
     | "import" "(" STRING ")"
-    | block
     | if
     | while
     | for
     | match
 
-block : "{" (expr | ((NL stmt)+ NL)) "}"
+if : "if" "(" (decl "=")? expr ")" expr ("else" expr)?
 
-if : "if" (decl "=")? expr block ("else" expr)?
+while : "while" "(" (decl "=")? expr ")" expr
 
-while : "while" (decl "=")? expr block
+for : "for" "(" decl? expr ")" expr
 
-for : "for" decl? range_expr block
-
-match : "match" bool_expr "{" (NL match_case)+ NL "}"
+match : "match" "(" expr ")" (NL match_case)+ NL
 
 match_case
-    : decl block
-    | expr ("," expr)* block
+    : decl ":" expr
+    | expr ("," expr)* ","? ":" expr
