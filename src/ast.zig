@@ -9,7 +9,7 @@ const TokenIndex = Token.Index;
 pub const Tree = struct {
     tokens: Token.List,
     nodes: Node.List,
-    errors: ErrorMsg.List,
+    errors: lang.Error.List,
     source: []const u8,
     arena_allocator: std.heap.ArenaAllocator,
 
@@ -21,75 +21,6 @@ pub const Tree = struct {
     pub const render = @import("render.zig").render;
     pub const compile = lang.Compiler.compile;
     pub const compileRepl = lang.Compiler.compileRepl;
-};
-
-pub const ErrorMsg = struct {
-    index: u32,
-    kind: Kind,
-
-    pub const List = std.SegmentedList(ErrorMsg, 0);
-
-    pub const Kind = enum {
-        UnexpectedToken,
-        PrimaryExpr,
-        TypeName,
-        InvalidBaseReal,
-        InvalidNum,
-        InvalidHex,
-        InvalidOctal,
-        InvalidBinary,
-        InvalidExponent,
-        InvalidCharacter,
-        InvalidMultilineStr,
-        InvalidEscape,
-        InvalidNot,
-        InvalidOctalStart,
-        UnterminatedString,
-        UnexpectedEof,
-        UnmatchedBracket,
-        Redeclaration,
-        AssignToConst,
-        Undeclared,
-        InvalidLval,
-        InvalidEmpty,
-        ExpectedBoolean,
-        ExpectedInt,
-        ExpectedNumeric,
-        InvalidAugAssign,
-        InvalidDiscard,
-    };
-
-    pub fn string(err: ErrorMsg) []const u8 {
-        return switch (err.kind) {
-            .UnexpectedToken => "unexpected token",
-            .PrimaryExpr => "expected Identifier, String, Number, true, false, '(', '{{', '[', error, import, if, while, for, match.",
-            .TypeName => "expected type name",
-            .InvalidBaseReal => "invalid base for floating point number",
-            .InvalidNum => "invalid digit in number",
-            .InvalidHex => "invalid digit in hex number",
-            .InvalidOctal => "invalid digit in octal number",
-            .InvalidBinary => "invalid digit in binary number",
-            .InvalidExponent => "invalid exponent digit",
-            .InvalidCharacter => "invalid character",
-            .InvalidMultilineStr => "invalid newline, use'\"' for multiline strings",
-            .InvalidEscape => "invalid escape sequence",
-            .InvalidNot => "invalid character, use 'not' for boolean not",
-            .InvalidOctalStart => "octal literals start with '0o'",
-            .UnterminatedString => "unterminated string",
-            .UnexpectedEof => "unexpected EOF",
-            .UnmatchedBracket => "unmatched bracket",
-            .Redeclaration => "redeclaration of identifier",
-            .AssignToConst => "assignment to constant",
-            .Undeclared => "use of undeclared identifier",
-            .InvalidLval => "invalid left hand side to assignment",
-            .InvalidEmpty => "expected a value",
-            .ExpectedBoolean => "expected boolean value",
-            .ExpectedInt => "expected integer value",
-            .ExpectedNumeric => "expected numeric value",
-            .InvalidAugAssign => "invalid left hand side to augmented assignment",
-            .InvalidDiscard => "'_' can only be used to discard unwanted tuple/list items in destructuring assignment",
-        };
-    }
 };
 
 pub const Node = struct {

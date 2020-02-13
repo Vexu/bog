@@ -16,7 +16,7 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
         .arena_allocator = arena_allocator,
         .tokens = lang.Token.List.init(arena),
         .nodes = lang.Node.List.init(arena),
-        .errors = lang.ErrorMsg.List.init(arena),
+        .errors = lang.Error.List.init(arena),
     };
 
     var repl = Repl{
@@ -64,10 +64,15 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
                 const GREEN = "\x1b[32;1m";
                 const BOLD = "\x1b[0;1m";
                 const RESET = "\x1b[0m";
+                const CYAN = "\x1b[36;1m";
 
                 var it = repl.tree.errors.iterator(0);
                 while (it.next()) |e| {
-                    try out_stream.print(RED ++ "error: " ++ BOLD ++ "{}\n" ++ RESET, .{e.string()});
+                    switch (e.kind) {
+                        .Error => try out_stream.write(RED ++ "error: " ++ BOLD),
+                        .Note => try out_stream.write(CYAN ++ "note: " ++ BOLD),
+                    }
+                    try out_stream.print("{}\n" ++ RESET, .{e.msg});
 
                     const slice = repl.buffer.toSliceConst();
                     const start = lineBegin(slice, e.index);

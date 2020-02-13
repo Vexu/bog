@@ -10,7 +10,6 @@ const Tokenizer = lang.Tokenizer;
 const Tree = lang.Tree;
 const Node = lang.Node;
 const NodeList = Node.List;
-const ErrorList = lang.ErrorMsg.List;
 
 pub const Parser = struct {
     it: TokenList.Iterator,
@@ -38,7 +37,7 @@ pub const Parser = struct {
         const arena = &tree.arena_allocator.allocator;
         tree.tokens = TokenList.init(arena);
         tree.nodes = NodeList.init(arena);
-        tree.errors = ErrorList.init(arena);
+        tree.errors = lang.Error.List.init(arena);
 
         try Tokenizer.tokenize(tree);
 
@@ -260,7 +259,7 @@ pub const Parser = struct {
         return parser.eatToken(.Keyword_error, true) orelse
             parser.eatToken(.Keyword_fn, true) orelse
             parser.eatToken(.Identifier, true) orelse
-            parser.reportErr(.TypeName, parser.it.peek().?);
+            parser.reportErr("expected type name", parser.it.peek().?);
     }
 
     /// range_expr : bit_expr ("..." bit_expr)?
@@ -773,7 +772,7 @@ pub const Parser = struct {
         if (try parser.whileExpr(skip_nl)) |res| return res;
         if (try parser.forExpr(skip_nl)) |res| return res;
         if (try parser.matchExpr(skip_nl)) |res| return res;
-        return parser.reportErr(.PrimaryExpr, parser.it.peek().?);
+        return parser.reportErr("expected Identifier, String, Number, true, false, '(', '{{', '[', error, import, if, while, for or match", parser.it.peek().?);
     }
 
     /// block : "{" (expr | ((NL stmt)+ NL)) "}"
@@ -935,9 +934,10 @@ pub const Parser = struct {
         }
     }
 
-    fn reportErr(parser: *Parser, kind: lang.ErrorMsg.Kind, tok: *Token) Error {
+    fn reportErr(parser: *Parser, msg: []const u8, tok: *Token) Error {
         try parser.tree.errors.push(.{
-            .kind = kind,
+            .msg = msg,
+            .kind = .Error,
             .index = tok.start,
         });
         return error.ParseError;
@@ -982,6 +982,6 @@ pub const Parser = struct {
 
     fn expectToken(parser: *Parser, id: Token.Id, skip_nl: bool) !TokenIndex {
         if (parser.eatToken(id, skip_nl)) |tok| return tok;
-        return parser.reportErr(.UnexpectedToken, parser.it.peek().?);
+        return parser.reportErr("unexpected token", parser.it.peek().?);
     }
 };

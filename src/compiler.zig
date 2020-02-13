@@ -226,19 +226,19 @@ pub const Compiler = struct {
             .Infix => return self.genInfix(@fieldParentPtr(Node.Infix, "base", node), res),
             .If => return self.genIf(@fieldParentPtr(Node.If, "base", node), res),
             .Tuple => return self.genTuple(@fieldParentPtr(Node.ListTupleMapBlock, "base", node), res),
-            .Discard => return self.reportErr(.InvalidDiscard, @fieldParentPtr(Node.SingleToken, "base", node).tok),
+            .Discard => return self.reportErr("'_' can only be used to discard unwanted tuple/list items in destructuring assignment", node.firstToken()),
             .TypeInfix => return self.genTypeInfix(@fieldParentPtr(Node.TypeInfix, "base", node), res),
-            .Fn => @panic("TODO: Fn"),
-            .Suffix => @panic("TODO: Suffix"),
-            .Import => @panic("TODO: Import"),
-            .Error => @panic("TODO: Error"),
-            .List => @panic("TODO: List"),
-            .Map => @panic("TODO: Map"),
-            .Catch => @panic("TODO: Catch"),
-            .For => @panic("TODO: For"),
-            .While => @panic("TODO: While"),
-            .Match => @panic("TODO: Match"),
-            .Jump => @panic("TODO: Jump"),
+            .Fn => return self.reportErr("TODO: Fn", node.firstToken()),
+            .Suffix => return self.reportErr("TODO: Suffix", node.firstToken()),
+            .Import => return self.reportErr("TODO: Import", node.firstToken()),
+            .Error => return self.reportErr("TODO: Error", node.firstToken()),
+            .List => return self.reportErr("TODO: List", node.firstToken()),
+            .Map => return self.reportErr("TODO: Map", node.firstToken()),
+            .Catch => return self.reportErr("TODO: Catch", node.firstToken()),
+            .For => return self.reportErr("TODO: For", node.firstToken()),
+            .While => return self.reportErr("TODO: While", node.firstToken()),
+            .Match => return self.reportErr("TODO: Match", node.firstToken()),
+            .Jump => return self.reportErr("TODO: Jump", node.firstToken()),
             .MapItem,
             .MatchCatchAll,
             .MatchLet,
@@ -280,7 +280,7 @@ pub const Compiler = struct {
                     return Value.Empty;
                 },
                 .AugAssign => {
-                    return self.reportErr(.InvalidAugAssign, node.r_tok);
+                    return self.reportErr("invalid left hand side to augmented assignment", node.r_tok);
                 },
             }
         }
@@ -330,7 +330,7 @@ pub const Compiler = struct {
     fn genIf(self: *Compiler, node: *Node.If, res: Result) Error!Value {
         try self.assertNotLval(res, node.if_tok);
 
-        if (node.capture != null) @panic("TODO if let");
+        if (node.capture != null) return self.reportErr("TODO if let", node.capture.?.firstToken());
 
         const cond_val = try self.genNode(node.cond, .Value);
         if (cond_val == .Bool) {
@@ -345,7 +345,7 @@ pub const Compiler = struct {
                 return Value{ .Rt = res.Rt };
             } else return res_val;
         } else if (cond_val != .Rt) {
-            return self.reportErr(.ExpectedBoolean, node.cond.firstToken());
+            return self.reportErr("expected a boolean value", node.cond.firstToken());
         }
         const res_loc = if (res == .Rt) res else Result{
             .Rt = self.registerAlloc(),
@@ -375,31 +375,31 @@ pub const Compiler = struct {
 
     fn assertNotLval(self: *Compiler, res: Result, tok: TokenIndex) !void {
         if (res == .Lval) {
-            return self.reportErr(.InvalidLval, tok);
+            return self.reportErr("invalid left hand side to assignment", tok);
         }
     }
 
     fn assertNotEmpty(self: *Compiler, val: Value, tok: TokenIndex) !void {
         if (val == .Empty) {
-            return self.reportErr(.InvalidEmpty, tok);
+            return self.reportErr("expected a value", tok);
         }
     }
 
     fn assertBool(self: *Compiler, val: Value, tok: TokenIndex) !void {
         if (val != .Bool) {
-            return self.reportErr(.ExpectedBoolean, tok);
+            return self.reportErr("expected a boolean", tok);
         }
     }
 
     fn assertInt(self: *Compiler, val: Value, tok: TokenIndex) !void {
         if (val != .Int) {
-            return self.reportErr(.ExpectedInt, tok);
+            return self.reportErr("expected an integer", tok);
         }
     }
 
     fn assertNumeric(self: *Compiler, val: Value, tok: TokenIndex) !void {
         if (val != .Int and val != .Num) {
-            return self.reportErr(.ExpectedNumeric, tok);
+            return self.reportErr("expected a number", tok);
         }
     }
 
@@ -489,7 +489,7 @@ pub const Compiler = struct {
         else if (mem.eql(u8, type_str, "fn"))
             lang.Value.TypeId.Fn
         else
-            return self.reportErr(.TypeName, node.type_tok);
+            return self.reportErr("expected a type name", node.type_tok);
 
         if (l_val == .Rt) {
             const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
@@ -505,7 +505,7 @@ pub const Compiler = struct {
                 // .Num => ,
                 // .Bool => ,
                 // .Str => ,
-                else => @panic("TODO more casts"),
+                else => return self.reportErr("TODO more casts", node.tok),
             },
             .Is => Value{
                 .Bool = switch (type_id) {
@@ -576,12 +576,12 @@ pub const Compiler = struct {
             .BitXOrAssign,
             => return self.genAssignInfix(node, res),
         }
-        @panic("TODO");
+        return self.reportErr("TODO more infix ops", node.tok);
     }
 
     fn genAssignInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
         if (res == .Rt) {
-            return self.reportErr(.InvalidLval, node.tok);
+            return self.reportErr("assignment produces no value", node.tok);
         }
         const reg = self.registerAlloc();
         defer self.registerFree(reg);
@@ -672,18 +672,21 @@ pub const Compiler = struct {
                 break :blk Value{ .Int = l_val.Int * r_val.Int };
             },
             .Div => blk: {
-                @panic("TODO");
+                return self.reportErr("TODO division", node.tok);
                 // break :blk Value{ .Num = std.math.div(l_val.Int, r_val.Int) };
             },
             .DivFloor => blk: {
                 break :blk Value{ .Int = @divFloor(l_val.Int, r_val.Int) };
             },
             .Mod => blk: {
-                @panic("TODO");
+                return self.reportErr("TODO modulo", node.tok);
                 // break :blk Value{ .Int =std.math.rem(i64, l_val.Int, r_val.Int) catch @panic("TODO") };
             },
             .Pow => blk: {
-                break :blk Value{ .Int = std.math.powi(i64, l_val.Int, r_val.Int) catch @panic("TODO") };
+                break :blk Value{
+                    .Int = std.math.powi(i64, l_val.Int, r_val.Int) catch
+                        return self.reportErr("TODO integer overflow", node.tok),
+                };
             },
             else => unreachable,
         };
@@ -715,7 +718,7 @@ pub const Compiler = struct {
             switch (res.Lval) {
                 .Let, .Const => |r| {
                     if (self.cur_scope.getSymbol(name)) |sym| {
-                        return self.reportErr(.Redeclaration, node.tok);
+                        return self.reportErr("redeclaration of identifier", node.tok);
                     }
                     try self.cur_scope.declSymbol(.{
                         .name = name,
@@ -727,7 +730,7 @@ pub const Compiler = struct {
                 .Assign => |r| {
                     if (self.cur_scope.getSymbol(name)) |sym| {
                         if (!sym.mutable) {
-                            return self.reportErr(.AssignToConst, node.tok);
+                            return self.reportErr("assignment to constant", node.tok);
                         }
                         // TODO this move can usually be avoided
                         try self.emitInstruction_2(.Move, sym.reg, r);
@@ -737,7 +740,7 @@ pub const Compiler = struct {
                 .AugAssign => {
                     if (self.cur_scope.getSymbol(name)) |sym| {
                         if (!sym.mutable) {
-                            return self.reportErr(.AssignToConst, node.tok);
+                            return self.reportErr("assignment to constant", node.tok);
                         }
                         return Value{ .Rt = sym.reg };
                     }
@@ -746,7 +749,7 @@ pub const Compiler = struct {
         } else if (self.cur_scope.getSymbol(name)) |sym| {
             return Value{ .Rt = sym.reg };
         }
-        return self.reportErr(.Undeclared, node.tok);
+        return self.reportErr("use of undeclared identifier", node.tok);
     }
 
     fn genLiteral(self: *Compiler, node: *Node.Literal, res: Result) Error!Value {
@@ -756,7 +759,7 @@ pub const Compiler = struct {
             .True => .{ .Bool = true },
             .False => .{ .Bool = false },
             .None => .None,
-            .Str => @panic("TODO: genStr"),
+            .Str => return self.reportErr("TODO genLiteral string", node.tok),
             .Num => .{ .Num = try self.parseNum(node.tok) },
         };
         if (res == .Rt) {
@@ -821,9 +824,10 @@ pub const Compiler = struct {
         };
     }
 
-    fn reportErr(self: *Compiler, kind: lang.ErrorMsg.Kind, tok: TokenIndex) Error {
+    fn reportErr(self: *Compiler, msg: []const u8, tok: TokenIndex) Error {
         try self.tree.errors.push(.{
-            .kind = kind,
+            .msg = msg,
+            .kind = .Error,
             .index = self.tree.tokens.at(tok).start,
         });
         return error.CompileError;

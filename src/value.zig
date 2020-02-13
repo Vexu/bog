@@ -18,7 +18,7 @@ pub const Value = struct {
     pub const Map = std.StringHashMap(*Ref);
     pub const List = std.ArrayList(*Ref);
 
-    ref: u32 = 0,
+    // ref: u32 = 0,
     kind: union(TypeId) {
         Tuple: []Ref,
         Map: Map,
@@ -35,7 +35,7 @@ pub const Value = struct {
             arg_count: u8,
         },
 
-        /// always inferred
+        /// always memoized
         Bool: bool,
         None,
     },

@@ -114,15 +114,7 @@ pub const Vm = struct {
                     if (val == 0) {
                         stack[A].value.? = &Value.None;
                     } else {
-                        const ref = try vm.gc.alloc();
-                        ref.value.?.* = .{
-                            .kind = .{
-                                .Bool = (val - 1) != 0,
-                            },
-                        };
-                        stack[A] = ref;
-                        // TODO https://github.com/ziglang/zig/issues/4295
-                        // stack[A].value = if (val != 0) &Value.True else &Value.False;
+                        stack[A].value = if (val == 2) &Value.True else &Value.False;
                     }
                 },
                 .Add => {
@@ -245,14 +237,7 @@ pub const Vm = struct {
                         return error.TypeError;
                     }
 
-                    // TODO https://github.com/ziglang/zig/issues/4295
-                    const ref = try vm.gc.alloc();
-                    ref.value.?.* = .{
-                        .kind = .{
-                            .Bool = !stack[B].value.?.kind.Bool,
-                        },
-                    };
-                    stack[A] = ref;
+                    stack[A].value = if (stack[B].value.?.kind.Bool) &Value.False else &Value.True;
                 },
                 .BitNot => {
                     const A = vm.getVal(module, RegRef);
@@ -355,13 +340,7 @@ pub const Vm = struct {
                     const B = vm.getVal(module, RegRef);
                     const type_id = vm.getVal(module, Value.TypeId);
 
-                    const ref = try vm.gc.alloc();
-                    ref.value.?.* = .{
-                        .kind = .{
-                            .Bool = stack[B].value.?.kind == type_id,
-                        },
-                    };
-                    stack[A] = ref;
+                    stack[A].value = if (stack[B].value.?.kind == type_id) &Value.True else &Value.False;
                 },
                 else => {
                     std.debug.warn("Unimplemented: {}\n", .{op});
