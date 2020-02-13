@@ -28,9 +28,6 @@ pub const Vm = struct {
     pub const Error = error{
         RuntimeError,
         MalformedByteCode,
-
-        // TODO remove possibility
-        Unimplemented,
     } || Allocator.Error;
 
     pub fn init(allocator: *Allocator, repl: bool) Vm {
@@ -126,7 +123,6 @@ pub const Vm = struct {
                     const B_val = try vm.getNumeric(module);
                     const C_val = try vm.getNumeric(module);
 
-                    // TODO check numeric
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
@@ -140,7 +136,6 @@ pub const Vm = struct {
                     const B_val = try vm.getNumeric(module);
                     const C_val = try vm.getNumeric(module);
 
-                    // TODO check numeric
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
@@ -154,7 +149,6 @@ pub const Vm = struct {
                     const B_val = try vm.getNumeric(module);
                     const C_val = try vm.getNumeric(module);
 
-                    // TODO check numeric
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
@@ -168,7 +162,6 @@ pub const Vm = struct {
                     const B_val = try vm.getNumeric(module);
                     const C_val = try vm.getNumeric(module);
 
-                    // TODO check numeric
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
@@ -182,7 +175,6 @@ pub const Vm = struct {
                     const B_val = try vm.getNumeric(module);
                     const C_val = try vm.getNumeric(module);
 
-                    // TODO check numeric
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
@@ -198,7 +190,6 @@ pub const Vm = struct {
                     const B_val = try vm.getBool(module);
                     const C_val = try vm.getBool(module);
 
-                    // TODO check numeric
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
@@ -212,7 +203,6 @@ pub const Vm = struct {
                     const B_val = try vm.getBool(module);
                     const C_val = try vm.getBool(module);
 
-                    // TODO check numeric
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
@@ -230,35 +220,30 @@ pub const Vm = struct {
                     const A_val = try vm.getNumeric(module);
                     const B_val = try vm.getNumeric(module);
 
-                    // TODO check numeric
                     A_val.kind.Int += B_val.kind.Int;
                 },
                 .DirectSub => {
                     const A_val = try vm.getNumeric(module);
                     const B_val = try vm.getNumeric(module);
 
-                    // TODO check numeric
                     A_val.kind.Int -= B_val.kind.Int;
                 },
                 .DirectMul => {
                     const A_val = try vm.getNumeric(module);
                     const B_val = try vm.getNumeric(module);
 
-                    // TODO check numeric
                     A_val.kind.Int *= B_val.kind.Int;
                 },
                 .DirectPow => {
                     const A_val = try vm.getNumeric(module);
                     const B_val = try vm.getNumeric(module);
 
-                    // TODO check numeric
                     A_val.kind.Int = std.math.powi(i64, A_val.kind.Int, B_val.kind.Int) catch @panic("TODO: overflow");
                 },
                 .DirectDivFloor => {
                     const A_val = try vm.getNumeric(module);
                     const B_val = try vm.getNumeric(module);
 
-                    // TODO check numeric
                     A_val.kind.Int = @divFloor(A_val.kind.Int, B_val.kind.Int);
                 },
                 .DirectBitAnd => {
@@ -381,7 +366,6 @@ pub const Vm = struct {
                     const A = vm.getVal(module, RegRef);
                     const B_val = try vm.getNumeric(module);
 
-                    // TODO check numeric
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
@@ -413,10 +397,9 @@ pub const Vm = struct {
                     } else {
                         const val = stack[A].value.?;
                         if (val.kind == .Error) {
-                            // TODO error discarded
+                            return vm.reportErr("error discarded");
                         }
                         // val.deref();
-                        return error.Unimplemented;
                     }
                 },
                 .BuildTuple => {
@@ -445,7 +428,7 @@ pub const Vm = struct {
 
                     stack[A] = switch (stack[B].value.?.kind) {
                         .Tuple => |val| val[@intCast(u32, stack[C].value.?.kind.Int)],
-                        else => @panic("TODO: subscript for more types"),
+                        else => return vm.reportErr("TODO: subscript for more types"),
                     };
                 },
                 .As => {
@@ -461,7 +444,7 @@ pub const Vm = struct {
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = switch (type_id) {
                         .None => unreachable,
-                        else => @panic("TODO more casts"),
+                        else => return vm.reportErr("TODO more casts"),
                     };
                     stack[A] = ref;
                 },
