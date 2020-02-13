@@ -1017,7 +1017,7 @@ pub const Tokenizer = struct {
 };
 
 var test_tree = Tree{
-    .errors = lang.ErrorMsg.List.init(std.testing.failing_allocator),
+    .errors = lang.Error.List.init(std.testing.failing_allocator),
 
     .tokens = undefined,
     .nodes = undefined,

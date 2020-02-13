@@ -59,44 +59,11 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     while (true) {
         repl.handleLine(in_stream, out_stream) catch |err| switch (err) {
             error.EndOfStream => return,
-            error.TokenizeError, error.ParseError, error.CompileError => {
-                const RED = "\x1b[31;1m";
-                const GREEN = "\x1b[32;1m";
-                const BOLD = "\x1b[0;1m";
-                const RESET = "\x1b[0m";
-                const CYAN = "\x1b[36;1m";
-
-                var it = repl.tree.errors.iterator(0);
-                while (it.next()) |e| {
-                    switch (e.kind) {
-                        .Error => try out_stream.write(RED ++ "error: " ++ BOLD),
-                        .Note => try out_stream.write(CYAN ++ "note: " ++ BOLD),
-                    }
-                    try out_stream.print("{}\n" ++ RESET, .{e.msg});
-
-                    const slice = repl.buffer.toSliceConst();
-                    const start = lineBegin(slice, e.index);
-                    const end = std.mem.indexOfScalarPos(u8, slice, e.index, '\n') orelse slice.len;
-                    try out_stream.write(slice[start..end]);
-                    try out_stream.write(std.cstr.line_sep);
-                    try out_stream.writeByteNTimes(' ', e.index - start);
-                    try out_stream.write(GREEN ++ "^\n" ++ RESET);
-                }
-                repl.tree.errors.shrink(0);
-                continue;
-            },
+            error.TokenizeError, error.ParseError, error.CompileError => try repl.renderErrors(&repl.tree.errors, in_stream, out_stream),
+            error.RuntimeError => try repl.renderErrors(&repl.vm.errors, in_stream, out_stream),
             else => |e| return e,
         };
     }
-}
-
-fn lineBegin(slice: []const u8, start_index: usize) usize {
-    var i = start_index;
-    while (i != 0) {
-        i -= 1;
-        if (slice[i] == '\n') return i + 1;
-    }
-    return 0;
 }
 
 const Repl = struct {
@@ -106,6 +73,42 @@ const Repl = struct {
     buffer: ArrayList(u8),
     module: lang.Module,
     compiler: Compiler,
+
+    fn lineBegin(slice: []const u8, start_index: usize) usize {
+        var i = start_index;
+        while (i != 0) {
+            i -= 1;
+            if (slice[i] == '\n') return i + 1;
+        }
+        return 0;
+    }
+
+    fn renderErrors(repl: *Repl, errors: *lang.Error.List, in_stream: var, out_stream: var) !void {
+        const RED = "\x1b[31;1m";
+        const GREEN = "\x1b[32;1m";
+        const BOLD = "\x1b[0;1m";
+        const RESET = "\x1b[0m";
+        const CYAN = "\x1b[36;1m";
+
+        var it = errors.iterator(0);
+        while (it.next()) |e| {
+            switch (e.kind) {
+                .Error => try out_stream.write(RED ++ "error: " ++ BOLD),
+                .Note => try out_stream.write(CYAN ++ "note: " ++ BOLD),
+                .Trace => {},
+            }
+            try out_stream.print("{}\n" ++ RESET, .{e.msg});
+
+            const slice = repl.buffer.toSliceConst();
+            const start = lineBegin(slice, e.index);
+            const end = std.mem.indexOfScalarPos(u8, slice, e.index, '\n') orelse slice.len;
+            try out_stream.write(slice[start..end]);
+            try out_stream.write(std.cstr.line_sep);
+            try out_stream.writeByteNTimes(' ', e.index - start);
+            try out_stream.write(GREEN ++ "^\n" ++ RESET);
+        }
+        errors.shrink(0);
+    }
 
     fn handleLine(repl: *Repl, in_stream: var, out_stream: var) !void {
         var begin_index = repl.tree.tokens.len;

@@ -16,6 +16,8 @@ pub const Vm = struct {
     repl: bool,
     result: ?Ref = null,
 
+    errors: lang.Error.List,
+
     const CallStack = std.SegmentedList(FunctionFrame, 16);
 
     const FunctionFrame = struct {
@@ -23,10 +25,9 @@ pub const Vm = struct {
         result_reg: u8,
     };
 
-    pub const ExecError = error{
+    pub const Error = error{
+        RuntimeError,
         MalformedByteCode,
-        TypeError,
-        OtherError, // TODO
 
         // TODO remove possibility
         Unimplemented,
@@ -38,17 +39,19 @@ pub const Vm = struct {
             .gc = Gc.init(allocator),
             .call_stack = CallStack.init(allocator),
             .repl = repl,
+            .errors = lang.Error.List.init(allocator),
         };
     }
 
     pub fn deinit(vm: *Vm) void {
         vm.call_stack.deinit();
+        vm.errors.deinit();
         vm.gc.deinit();
     }
 
     // TODO some safety
     // TODO rename to step and execute 1 instruction
-    pub fn exec(vm: *Vm, module: *lang.Module) ExecError!void {
+    pub fn exec(vm: *Vm, module: *lang.Module) Error!void {
         // TODO
         const stack = vm.gc.stack.toSlice();
         try vm.call_stack.push(.{
@@ -119,70 +122,70 @@ pub const Vm = struct {
                 },
                 .Add => {
                     const A = vm.getVal(module, RegRef);
-                    const B = vm.getVal(module, RegRef);
-                    const C = vm.getVal(module, RegRef);
+                    const B_val = try vm.getNumeric(module);
+                    const C_val = try vm.getNumeric(module);
 
                     // TODO check numeric
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
-                            .Int = stack[B].value.?.kind.Int + stack[C].value.?.kind.Int,
+                            .Int = B_val.kind.Int + C_val.kind.Int,
                         },
                     };
                     stack[A] = ref;
                 },
                 .Sub => {
                     const A = vm.getVal(module, RegRef);
-                    const B = vm.getVal(module, RegRef);
-                    const C = vm.getVal(module, RegRef);
+                    const B_val = try vm.getNumeric(module);
+                    const C_val = try vm.getNumeric(module);
 
                     // TODO check numeric
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
-                            .Int = stack[B].value.?.kind.Int - stack[C].value.?.kind.Int,
+                            .Int = B_val.kind.Int - C_val.kind.Int,
                         },
                     };
                     stack[A] = ref;
                 },
                 .Mul => {
                     const A = vm.getVal(module, RegRef);
-                    const B = vm.getVal(module, RegRef);
-                    const C = vm.getVal(module, RegRef);
+                    const B_val = try vm.getNumeric(module);
+                    const C_val = try vm.getNumeric(module);
 
                     // TODO check numeric
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
-                            .Int = stack[B].value.?.kind.Int * stack[C].value.?.kind.Int,
+                            .Int = B_val.kind.Int * C_val.kind.Int,
                         },
                     };
                     stack[A] = ref;
                 },
                 .Pow => {
                     const A = vm.getVal(module, RegRef);
-                    const B = vm.getVal(module, RegRef);
-                    const C = vm.getVal(module, RegRef);
+                    const B_val = try vm.getNumeric(module);
+                    const C_val = try vm.getNumeric(module);
 
                     // TODO check numeric
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
-                            .Int = std.math.powi(i64, stack[B].value.?.kind.Int, stack[C].value.?.kind.Int) catch @panic("TODO: overflow"),
+                            .Int = std.math.powi(i64, B_val.kind.Int, C_val.kind.Int) catch @panic("TODO: overflow"),
                         },
                     };
                     stack[A] = ref;
                 },
                 .DivFloor => {
                     const A = vm.getVal(module, RegRef);
-                    const B = vm.getVal(module, RegRef);
-                    const C = vm.getVal(module, RegRef);
+                    const B_val = try vm.getNumeric(module);
+                    const C_val = try vm.getNumeric(module);
 
                     // TODO check numeric
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
-                            .Int = @divFloor(stack[B].value.?.kind.Int, stack[C].value.?.kind.Int),
+                            .Int = @divFloor(B_val.kind.Int, C_val.kind.Int),
                         },
                     };
                     stack[A] = ref;
@@ -193,83 +196,76 @@ pub const Vm = struct {
                     stack[A] = stack[B];
                 },
                 .DirectAdd => {
-                    const A = vm.getVal(module, RegRef);
-                    const B = vm.getVal(module, RegRef);
+                    const A_val = try vm.getNumeric(module);
+                    const B_val = try vm.getNumeric(module);
 
                     // TODO check numeric
-                    stack[A].value.?.kind.Int += stack[B].value.?.kind.Int;
+                    A_val.kind.Int += B_val.kind.Int;
                 },
                 .DirectSub => {
-                    const A = vm.getVal(module, RegRef);
-                    const B = vm.getVal(module, RegRef);
+                    const A_val = try vm.getNumeric(module);
+                    const B_val = try vm.getNumeric(module);
 
                     // TODO check numeric
-                    stack[A].value.?.kind.Int -= stack[B].value.?.kind.Int;
+                    A_val.kind.Int -= B_val.kind.Int;
                 },
                 .DirectMul => {
-                    const A = vm.getVal(module, RegRef);
-                    const B = vm.getVal(module, RegRef);
+                    const A_val = try vm.getNumeric(module);
+                    const B_val = try vm.getNumeric(module);
 
                     // TODO check numeric
-                    stack[A].value.?.kind.Int *= stack[B].value.?.kind.Int;
+                    A_val.kind.Int *= B_val.kind.Int;
                 },
                 .DirectPow => {
-                    const A = vm.getVal(module, RegRef);
-                    const B = vm.getVal(module, RegRef);
+                    const A_val = try vm.getNumeric(module);
+                    const B_val = try vm.getNumeric(module);
 
                     // TODO check numeric
-                    stack[A].value.?.kind.Int = std.math.powi(i64, stack[A].value.?.kind.Int, stack[B].value.?.kind.Int) catch @panic("TODO: overflow");
+                    A_val.kind.Int = std.math.powi(i64, A_val.kind.Int, B_val.kind.Int) catch @panic("TODO: overflow");
                 },
                 .DirectDivFloor => {
-                    const A = vm.getVal(module, RegRef);
-                    const B = vm.getVal(module, RegRef);
+                    const A_val = try vm.getNumeric(module);
+                    const B_val = try vm.getNumeric(module);
 
                     // TODO check numeric
-                    stack[A].value.?.kind.Int *= stack[B].value.?.kind.Int;
-                    stack[A].value.?.kind.Int = @divFloor(stack[A].value.?.kind.Int, stack[B].value.?.kind.Int);
+                    A_val.kind.Int = @divFloor(A_val.kind.Int, B_val.kind.Int);
                 },
                 .BoolNot => {
                     const A = vm.getVal(module, RegRef);
-                    const B = vm.getVal(module, RegRef);
+                    const B_val = try vm.getBool(module);
 
-                    if (stack[B].value.?.kind != .Bool) {
-                        // TODO error expected boolean
-                        return error.TypeError;
-                    }
-
-                    stack[A].value = if (stack[B].value.?.kind.Bool) &Value.False else &Value.True;
+                    stack[A].value = if (B_val) &Value.False else &Value.True;
                 },
                 .BitNot => {
                     const A = vm.getVal(module, RegRef);
-                    const B = vm.getVal(module, RegRef);
+                    const B_val = try vm.getInt(module);
 
-                    // TODO check numeric
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
-                            .Int = ~stack[B].value.?.kind.Int,
+                            .Int = ~B_val,
                         },
                     };
                     stack[A] = ref;
                 },
                 .Negate => {
                     const A = vm.getVal(module, RegRef);
-                    const B = vm.getVal(module, RegRef);
+                    const B_val = try vm.getNumeric(module);
 
                     // TODO check numeric
                     const ref = try vm.gc.alloc();
                     ref.value.?.* = .{
                         .kind = .{
-                            .Int = -stack[B].value.?.kind.Int,
+                            .Int = -B_val.kind.Int,
                         },
                     };
                     stack[A] = ref;
                 },
                 .JumpFalse => {
-                    const A = vm.getVal(module, RegRef);
+                    const A_val = try vm.getBool(module);
                     const addr = vm.getVal(module, u32);
 
-                    if (stack[A].value.?.kind.Bool == false) {
+                    if (A_val == false) {
                         vm.ip += addr;
                     }
                 },
@@ -359,5 +355,55 @@ pub const Vm = struct {
         const val = @ptrCast(*align(1) const T, module.code[vm.ip..].ptr).*;
         vm.ip += @sizeOf(T);
         return val;
+    }
+
+    fn getBool(vm: *Vm, module: *lang.Module) !bool {
+        // TODO
+        const stack = vm.gc.stack.toSlice();
+        const val = stack[vm.getVal(module, RegRef)].value.?;
+
+        if (val.kind != .Bool) {
+            return vm.reportErr("expected a boolean");
+        }
+        return val.kind.Bool;
+    }
+
+    fn getInt(vm: *Vm, module: *lang.Module) !i64 {
+        // TODO
+        const stack = vm.gc.stack.toSlice();
+        const val = stack[vm.getVal(module, RegRef)].value.?;
+
+        if (val.kind != .Int) {
+            return vm.reportErr("expected an integer");
+        }
+        return val.kind.Int;
+    }
+
+    fn getNumeric(vm: *Vm, module: *lang.Module) !*Value {
+        // TODO
+        const stack = vm.gc.stack.toSlice();
+        const val = stack[vm.getVal(module, RegRef)].value.?;
+
+        if (val.kind != .Int and val.kind != .Num) {
+            return vm.reportErr("expected a number");
+        }
+        return val;
+    }
+
+    fn reportErr(vm: *Vm, msg: []const u8) Error {
+        try vm.errors.push(.{
+            .msg = msg,
+            .kind = .Error,
+            .index = 0, // TODO debug info
+        });
+        while (vm.call_stack.pop()) |some| {
+            if (vm.call_stack.len == 0) break;
+            try vm.errors.push(.{
+                .msg = "called here",
+                .kind = .Trace,
+                .index = 0, // TODO debug info
+            });
+        }
+        return error.RuntimeError;
     }
 };

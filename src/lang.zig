@@ -36,7 +36,7 @@ pub const Error = struct {
     const Kind = enum {
         Error,
         Note,
-        // Trace,
+        Trace,
     };
 
     pub const List = std.SegmentedList(Error, 0);
