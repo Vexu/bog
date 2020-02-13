@@ -120,6 +120,7 @@ pub const Vm = struct {
                         stack[A].value = if (val == 2) &Value.True else &Value.False;
                     }
                 },
+                .ConstString => return vm.reportErr("TODO Op.ConstString"),
                 .Add => {
                     const A = vm.getVal(module, RegRef);
                     const B_val = try vm.getNumeric(module);
@@ -190,6 +191,36 @@ pub const Vm = struct {
                     };
                     stack[A] = ref;
                 },
+                .Div => return vm.reportErr("TODO Op.Div"),
+                .Mod => return vm.reportErr("TODO Op.Mod"),
+                .And => {
+                    const A = vm.getVal(module, RegRef);
+                    const B_val = try vm.getBool(module);
+                    const C_val = try vm.getBool(module);
+
+                    // TODO check numeric
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Bool = B_val and C_val,
+                        },
+                    };
+                    stack[A] = ref;
+                },
+                .Or => {
+                    const A = vm.getVal(module, RegRef);
+                    const B_val = try vm.getBool(module);
+                    const C_val = try vm.getBool(module);
+
+                    // TODO check numeric
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Bool = B_val or C_val,
+                        },
+                    };
+                    stack[A] = ref;
+                },
                 .Move => {
                     const A = vm.getVal(module, RegRef);
                     const B = vm.getVal(module, RegRef);
@@ -230,6 +261,39 @@ pub const Vm = struct {
                     // TODO check numeric
                     A_val.kind.Int = @divFloor(A_val.kind.Int, B_val.kind.Int);
                 },
+                .DirectBitAnd => {
+                    const A_val = try vm.getIntRef(module);
+                    const B_val = try vm.getInt(module);
+
+                    A_val.kind.Int &= B_val;
+                },
+                .DirectBitOr => {
+                    const A_val = try vm.getIntRef(module);
+                    const B_val = try vm.getInt(module);
+
+                    A_val.kind.Int |= B_val;
+                },
+                .DirectBitXor => {
+                    const A_val = try vm.getIntRef(module);
+                    const B_val = try vm.getInt(module);
+
+                    A_val.kind.Int ^= B_val;
+                },
+                .DirectLShift => {
+                    const A_val = try vm.getIntRef(module);
+                    const B_val = try vm.getInt(module);
+
+                    // TODO check that B_val is small enough
+                    A_val.kind.Int <<= @intCast(u6, B_val);
+                },
+                .DirectRShift => {
+                    const A_val = try vm.getIntRef(module);
+                    const B_val = try vm.getInt(module);
+
+                    A_val.kind.Int >>= @intCast(u6, B_val);
+                },
+                .DirectDiv => return vm.reportErr("TODO Op.DirectDiv"),
+                .DirectMod => return vm.reportErr("TODO Op.DirectMod"),
                 .BoolNot => {
                     const A = vm.getVal(module, RegRef);
                     const B_val = try vm.getBool(module);
@@ -248,6 +312,71 @@ pub const Vm = struct {
                     };
                     stack[A] = ref;
                 },
+                .BitAnd => {
+                    const A = vm.getVal(module, RegRef);
+                    const B_val = try vm.getInt(module);
+                    const C_val = try vm.getInt(module);
+
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Int = B_val & C_val,
+                        },
+                    };
+                    stack[A] = ref;
+                },
+                .BitOr => {
+                    const A = vm.getVal(module, RegRef);
+                    const B_val = try vm.getInt(module);
+                    const C_val = try vm.getInt(module);
+
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Int = B_val | C_val,
+                        },
+                    };
+                    stack[A] = ref;
+                },
+                .BitXor => {
+                    const A = vm.getVal(module, RegRef);
+                    const B_val = try vm.getInt(module);
+                    const C_val = try vm.getInt(module);
+
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Int = B_val ^ C_val,
+                        },
+                    };
+                    stack[A] = ref;
+                },
+                .LShift => {
+                    const A = vm.getVal(module, RegRef);
+                    const B_val = try vm.getInt(module);
+                    const C_val = try vm.getInt(module);
+
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Int = B_val << @intCast(u6, B_val),
+                        },
+                    };
+                    stack[A] = ref;
+                },
+                .RShift => {
+                    const A = vm.getVal(module, RegRef);
+                    const B_val = try vm.getInt(module);
+                    const C_val = try vm.getInt(module);
+
+                    const ref = try vm.gc.alloc();
+                    ref.value.?.* = .{
+                        .kind = .{
+                            .Int = B_val >> @intCast(u6, B_val),
+                        },
+                    };
+                    stack[A] = ref;
+                },
                 .Negate => {
                     const A = vm.getVal(module, RegRef);
                     const B_val = try vm.getNumeric(module);
@@ -261,6 +390,7 @@ pub const Vm = struct {
                     };
                     stack[A] = ref;
                 },
+                .Try => return vm.reportErr("TODO Op.Try"),
                 .JumpFalse => {
                     const A_val = try vm.getBool(module);
                     const addr = vm.getVal(module, u32);
@@ -273,6 +403,9 @@ pub const Vm = struct {
                     const addr = vm.getVal(module, u32);
                     vm.ip += addr;
                 },
+                .JumpTrue => return vm.reportErr("TODO Op.JumpTrue"),
+                .JumpNotError => return vm.reportErr("TODO Op.JumpNotError"),
+                .Import => return vm.reportErr("TODO Op.Import"),
                 .Discard => {
                     const A = vm.getVal(module, RegRef);
                     if (vm.repl and vm.call_stack.len == 1) {
@@ -304,6 +437,7 @@ pub const Vm = struct {
                     };
                     stack[A] = ref;
                 },
+                .BuildError => return vm.reportErr("TODO Op.BuildError"),
                 .Subscript => {
                     const A = vm.getVal(module, RegRef);
                     const B = vm.getVal(module, RegRef);
@@ -338,8 +472,8 @@ pub const Vm = struct {
 
                     stack[A].value = if (stack[B].value.?.kind == type_id) &Value.True else &Value.False;
                 },
-                else => {
-                    std.debug.warn("Unimplemented: {}\n", .{op});
+                _ => {
+                    vm.reportErr("Malformed bytecode") catch return error.MalformedByteCode;
                 },
             }
         }
@@ -377,6 +511,17 @@ pub const Vm = struct {
             return vm.reportErr("expected an integer");
         }
         return val.kind.Int;
+    }
+
+    fn getIntRef(vm: *Vm, module: *lang.Module) !*Value {
+        // TODO
+        const stack = vm.gc.stack.toSlice();
+        const val = stack[vm.getVal(module, RegRef)].value.?;
+
+        if (val.kind != .Int) {
+            return vm.reportErr("expected an integer");
+        }
+        return val;
     }
 
     fn getNumeric(vm: *Vm, module: *lang.Module) !*Value {

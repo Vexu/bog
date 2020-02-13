@@ -147,7 +147,7 @@ pub const Op = enum(u8) {
     JumpFalse,
 
     /// if (not A is error) ip = arg1
-    JumpNotErr,
+    JumpNotError,
 
     /// A = IMPORT(arg1)
     Import,
@@ -158,7 +158,7 @@ pub const Op = enum(u8) {
     /// A = B as TYPEID
     As,
 
-    // _,
+    _,
 };
 
 // TODO optimize size of this
