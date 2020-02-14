@@ -15,10 +15,11 @@ pub const Error = error{CompileError} || Allocator.Error;
 pub const Compiler = struct {
     tree: *Tree,
     arena: *Allocator,
-    root_scope: Scope,
+    root_scope: Scope.Fn,
     cur_scope: *Scope,
     used_regs: RegRef = 0,
-    code: Code,
+    code: *Code,
+    module_code: Code,
 
     pub const Code = std.ArrayList(u8);
 
@@ -44,6 +45,13 @@ pub const Compiler = struct {
         try self.code.append(@enumToInt(op));
         try self.code.appendSlice(@sliceToBytes(([_]RegRef{A})[0..]));
         try self.code.appendSlice(@sliceToBytes(([_]@TypeOf(arg){arg})[0..]));
+    }
+
+    fn emitInstruction_1_2(self: *Compiler, op: lang.Op, A: RegRef, arg: var, arg2: var) !void {
+        try self.code.append(@enumToInt(op));
+        try self.code.appendSlice(@sliceToBytes(([_]RegRef{A})[0..]));
+        try self.code.appendSlice(@sliceToBytes(([_]@TypeOf(arg){arg})[0..]));
+        try self.code.appendSlice(@sliceToBytes(([_]@TypeOf(arg2){arg2})[0..]));
     }
 
     fn emitInstruction_0_1(self: *Compiler, op: lang.Op, arg: var) !void {
@@ -81,7 +89,7 @@ pub const Compiler = struct {
 
         const Fn = struct {
             base: Scope,
-            // code: ArrayList(Code),
+            code: Code,
         };
 
         fn declSymbol(self: *Scope, sym: Symbol) !void {
@@ -165,13 +173,18 @@ pub const Compiler = struct {
             .tree = tree,
             .arena = arena,
             .root_scope = .{
-                .id = .Fn,
-                .parent = null,
-                .syms = Symbol.List.init(arena),
+                .base = .{
+                    .id = .Fn,
+                    .parent = null,
+                    .syms = Symbol.List.init(arena),
+                },
+                .code = Code.init(arena),
             },
-            .code = Code.init(allocator),
+            .module_code = Code.init(allocator),
+            .code = undefined,
             .cur_scope = undefined,
         };
+        compiler.code = &compiler.root_scope.code;
         compiler.cur_scope = &compiler.root_scope;
         var it = tree.nodes.iterator(0);
         while (it.next()) |n| {
@@ -187,15 +200,18 @@ pub const Compiler = struct {
                 try compiler.emitInstruction_1(.Discard, reg);
             }
         }
+        const start_index = compiler.module_code.len;
+        try compiler.module_code.appendSlice(compiler.code.toSliceConst());
         return lang.Module{
             .name = "",
-            .code = compiler.code.toOwnedSlice(),
+            .code = compiler.module_code.toOwnedSlice(),
             .strings = "",
-            .start_index = 0,
+            .start_index = start_index,
         };
     }
 
-    pub fn compileRepl(compiler: *Compiler, node: *Node, module: *lang.Module) Error!void {
+    pub fn compileRepl(compiler: *Compiler, node: *Node, module: *lang.Module) Error!usize {
+        const start_len = compiler.module_code.len;
         const val = try compiler.genNode(node, .Value);
         if (val == .Rt) {
             try compiler.emitInstruction_1(.Discard, val.Rt);
@@ -205,7 +221,12 @@ pub const Compiler = struct {
             try compiler.makeRuntime(reg, val);
             try compiler.emitInstruction_1(.Discard, reg);
         }
-        module.code = compiler.code.toSliceConst();
+        const final_len = compiler.module_code.len;
+        try compiler.module_code.appendSlice(compiler.code.toSliceConst());
+
+        module.code = compiler.module_code.toSliceConst();
+        compiler.module_code.resize(final_len) catch unreachable;
+        return final_len - start_len;
     }
 
     fn genNode(self: *Compiler, node: *Node, res: Result) Error!Value {
@@ -221,7 +242,7 @@ pub const Compiler = struct {
             .Tuple => return self.genTuple(@fieldParentPtr(Node.ListTupleMapBlock, "base", node), res),
             .Discard => return self.reportErr("'_' can only be used to discard unwanted tuple/list items in destructuring assignment", node.firstToken()),
             .TypeInfix => return self.genTypeInfix(@fieldParentPtr(Node.TypeInfix, "base", node), res),
-            .Fn => return self.reportErr("TODO: Fn", node.firstToken()),
+            .Fn => return self.genFn(@fieldParentPtr(Node.Fn, "base", node), res),
             .Suffix => return self.reportErr("TODO: Suffix", node.firstToken()),
             .Import => return self.reportErr("TODO: Import", node.firstToken()),
             .Error => return self.reportErr("TODO: Error", node.firstToken()),
@@ -291,6 +312,71 @@ pub const Compiler = struct {
         }
 
         try self.emitInstruction_2_1(.BuildTuple, res_loc.Rt, args[0], @truncate(u16, args.len));
+        return Value{ .Rt = res_loc.Rt };
+    }
+
+    fn genFn(self: *Compiler, node: *Node.Fn, res: Result) Error!Value {
+        try self.assertNotLval(res, node.fn_tok);
+
+        if (node.params.len > std.math.maxInt(u8)) {
+            return self.reportErr("too many parameters", node.fn_tok);
+        }
+
+        const old_used_regs = self.used_regs;
+        defer self.used_regs = old_used_regs;
+
+        var fn_scope = Scope.Fn{
+            .base = .{
+                .id = .Block,
+                .parent = self.cur_scope,
+                .syms = Symbol.List.init(self.arena),
+            },
+            .code = try Code.initCapacity(self.arena, 256),
+        };
+        defer fn_scope.code.deinit();
+        self.cur_scope = &fn_scope.base;
+        defer self.cur_scope = fn_scope.base.parent.?;
+
+        // function body is emitted to a new arraylist and finally added to module_code
+        const old_code = self.code;
+        self.code = &fn_scope.code;
+
+        // destructure parameters
+        self.used_regs = @truncate(u16, node.params.len);
+        var it = node.params.iterator(0);
+        var i: RegRef = 0;
+        while (it.next()) |n| {
+            const param_res = try self.genNode(n.*, Result{
+                .Lval = .{
+                    .Let = i,
+                },
+            });
+            std.debug.assert(param_res == .Empty);
+            i += 1;
+        }
+
+        // gen body and return result
+        const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
+        const body_res = try self.genNode(node.body, .Value);
+        // TODO if body_res == .Empty because last instruction was a return
+        // then this return is not necessary
+        if (body_res == .Empty or body_res == .None) {
+            try self.code.append(@enumToInt(lang.Op.ReturnNone));
+        } else if (body_res == .Rt) {
+            try self.emitInstruction_1(.Return, body_res.Rt);
+        } else {
+            try self.makeRuntime(res_loc.Rt, body_res);
+            try self.emitInstruction_1(.Return, res_loc.Rt);
+        }
+
+        self.code = old_code;
+        try self.emitInstruction_1_2(
+            .BuildFn,
+            res_loc.Rt,
+            @truncate(u8, node.params.len),
+            @truncate(u32, self.module_code.len),
+        );
+        try self.module_code.appendSlice(fn_scope.code.toSlice());
         return Value{ .Rt = res_loc.Rt };
     }
 
@@ -755,6 +841,7 @@ pub const Compiler = struct {
                     if (self.cur_scope.getSymbol(name)) |sym| {
                         return self.reportErr("redeclaration of identifier", node.tok);
                     }
+                    // TODO this should copy r if r.refs > 1
                     try self.cur_scope.declSymbol(.{
                         .name = name,
                         .mutable = res.Lval == .Let,
@@ -767,6 +854,7 @@ pub const Compiler = struct {
                         if (!sym.mutable) {
                             return self.reportErr("assignment to constant", node.tok);
                         }
+                        // TODO this should copy r if r.refs > 1
                         // TODO this move can usually be avoided
                         try self.emitInstruction_2(.Move, sym.reg, r);
                         return Value.Empty;
@@ -782,6 +870,10 @@ pub const Compiler = struct {
                 },
             }
         } else if (self.cur_scope.getSymbol(name)) |sym| {
+            if (res == .Rt) {
+                try self.emitInstruction_2(.Move, res.Rt, sym.reg);
+                return Value{ .Rt = res.Rt };
+            }
             return Value{ .Rt = sym.reg };
         }
         return self.reportErr("use of undeclared identifier", node.tok);

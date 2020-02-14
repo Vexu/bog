@@ -41,15 +41,20 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
             .tree = &tree,
             .arena = arena,
             .root_scope = .{
-                .id = .Fn,
-                .parent = null,
-                .syms = Compiler.Symbol.List.init(allocator),
+                .base = .{
+                    .id = .Fn,
+                    .parent = null,
+                    .syms = Compiler.Symbol.List.init(allocator),
+                },
+                .code = Compiler.Code.init(allocator),
             },
-            .code = Compiler.Code.init(allocator),
+            .module_code = Compiler.Code.init(allocator),
+            .code = undefined,
             .cur_scope = undefined,
         },
     };
-    repl.compiler.cur_scope = &repl.compiler.root_scope;
+    repl.compiler.code = &repl.compiler.root_scope.code;
+    repl.compiler.cur_scope = &repl.compiler.root_scope.base;
     defer repl.vm.deinit();
     defer repl.buffer.deinit();
 
@@ -118,7 +123,7 @@ const Repl = struct {
             try repl.readLine("... ", in_stream, out_stream);
         }
         const node = (try lang.Parser.parseRepl(repl.tree, begin_index)) orelse return;
-        try repl.compiler.compileRepl(node, &repl.module);
+        repl.vm.ip += try repl.compiler.compileRepl(node, &repl.module);
 
         try repl.vm.exec(&repl.module);
         if (repl.vm.result) |some| {

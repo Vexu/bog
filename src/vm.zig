@@ -369,11 +369,14 @@ pub const Vm = struct {
                 },
                 .Import => return vm.reportErr("TODO Op.Import"),
                 .Discard => {
-                    const A_ref = vm.getRef(module);
+                    const A = vm.getArg(module, RegRef);
+
+                    // TODO
+                    const stack = vm.gc.stack.toSlice();
                     if (vm.repl and vm.call_stack.len == 0) {
-                        vm.result = A_ref.*;
+                        vm.result = stack[A + vm.sp];
                     } else {
-                        if (A_ref.value.?.kind == .Error) {
+                        if (stack[A + vm.sp].value.?.kind == .Error) {
                             return vm.reportErr("error discarded");
                         }
                     }
