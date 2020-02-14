@@ -246,8 +246,8 @@ pub const Compiler = struct {
             .TypeInfix => return self.genTypeInfix(@fieldParentPtr(Node.TypeInfix, "base", node), res),
             .Fn => return self.genFn(@fieldParentPtr(Node.Fn, "base", node), res),
             .Suffix => return self.genSuffix(@fieldParentPtr(Node.Suffix, "base", node), res),
+            .Error => return self.genError(@fieldParentPtr(Node.Error, "base", node), res),
             .Import => return self.reportErr("TODO: Import", node.firstToken()),
-            .Error => return self.reportErr("TODO: Error", node.firstToken()),
             .List => return self.reportErr("TODO: List", node.firstToken()),
             .Map => return self.reportErr("TODO: Map", node.firstToken()),
             .Catch => return self.reportErr("TODO: Catch", node.firstToken()),
@@ -936,6 +936,21 @@ pub const Compiler = struct {
         }
         // if res == .Value nothing needs to be done
         return ret_val;
+    }
+
+    fn genError(self: *Compiler, node: *Node.Error, res: Result) Error!Value {
+        try self.assertNotLval(res, node.tok);
+
+        const val = try self.genNode(node.value, .Value);
+        try self.assertNotEmpty(val, node.value.firstToken());
+
+        const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
+        const reg = self.registerAlloc();
+        defer self.registerFree(reg);
+        try self.makeRuntime(reg, val);
+
+        try self.emitInstruction_2(.BuildError, res_loc.Rt, reg);
+        return Value{ .Rt = res_loc.Rt };
     }
 
     fn addLineInfo(self: *Compiler, node: *Node) !void {

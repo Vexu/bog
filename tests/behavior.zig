@@ -1,3 +1,12 @@
+test "assert" {
+    try expectOutput(
+        \\const assert = fn (ok) if not ok {error(false)}
+        \\assert(not false)
+    ,
+        \\()
+    );
+}
+
 test "functions" {
     try expectOutput(
         \\const add = fn ((a,b)) a + b

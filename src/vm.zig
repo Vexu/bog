@@ -377,12 +377,11 @@ pub const Vm = struct {
 
                     // TODO
                     const stack = vm.gc.stack.toSlice();
+                    if (stack[A + vm.sp].value.?.kind == .Error) {
+                        return vm.reportErr("error discarded");
+                    }
                     if (vm.repl and vm.call_stack.len == 0) {
                         vm.result = stack[A + vm.sp];
-                    } else {
-                        if (stack[A + vm.sp].value.?.kind == .Error) {
-                            return vm.reportErr("error discarded");
-                        }
                     }
                 },
                 .BuildTuple => {
@@ -406,7 +405,16 @@ pub const Vm = struct {
                         },
                     };
                 },
-                .BuildError => return vm.reportErr("TODO Op.BuildError"),
+                .BuildError => {
+                    const A_val = try vm.getNewVal(module);
+                    const B_val = vm.getRef(module);
+
+                    A_val.* = .{
+                        .kind = .{
+                            .Error = B_val,
+                        },
+                    };
+                },
                 .BuildFn => {
                     const A_val = try vm.getNewVal(module);
                     const arg_count = vm.getArg(module, u8);

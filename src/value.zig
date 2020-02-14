@@ -100,9 +100,8 @@ pub const Ref = struct {
                 }
             },
             .Error => |val| {
-                try stream.write("error(...)");
                 if (level == 0) {
-                    try stream.write("(range)");
+                    try stream.write("error(...)");
                 } else {
                     try stream.write("error(");
                     try val.dump(stream, level - 1);
@@ -155,7 +154,7 @@ fn testDump(val: *Value, expected: []const u8) !void {
     }
 }
 
-test "dumping int/num" {
+test "dump int/num" {
     var int = Value{
         .kind = .{ .Int = 2 },
     };
@@ -164,4 +163,18 @@ test "dumping int/num" {
         .kind = .{ .Num = 2.5 },
     };
     try testDump(&num, "2.5e+00");
+}
+
+test "dump error" {
+    var int = Value{
+        .kind = .{ .Int = 2 },
+    };
+    var err = Value{
+        .kind = .{
+            .Error = &Ref{
+                .value = &int,
+            },
+        },
+    };
+    try testDump(&err, "error(2)");
 }

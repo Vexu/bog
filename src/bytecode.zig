@@ -126,7 +126,7 @@ pub const Op = enum(u8) {
     /// A = B[C]
     Subscript,
 
-    /// A = error(A)
+    /// A = error(B)
     BuildError,
 
     /// A = (B, B + 1, ... B + N)
