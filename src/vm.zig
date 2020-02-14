@@ -26,8 +26,8 @@ pub const Vm = struct {
     const CallStack = std.SegmentedList(FunctionFrame, 16);
 
     const FunctionFrame = struct {
-        return_ip: ?usize,
-        result_reg: u8,
+        ip: usize,
+        sp: usize,
     };
 
     pub const Error = error{
@@ -380,15 +380,17 @@ pub const Vm = struct {
                 },
                 .BuildTuple => {
                     const A_val = try vm.getNewVal(module);
-                    const args = vm.getArg(module, []align(1) const RegRef);
+                    const B = vm.getArg(module, RegRef);
+                    const arg_count = vm.getArg(module, u16);
 
                     // TODO
                     const stack = vm.gc.stack.toSlice();
 
                     // TODO gc this
-                    const vals = try vm.call_stack.allocator.alloc(Ref, args.len);
-                    for (args) |a, i| {
-                        vals[i] = stack[a];
+                    const vals = try vm.call_stack.allocator.alloc(Ref, arg_count);
+                    var i: u32 = 0;
+                    while (i < arg_count) : (i += 1) {
+                        vals[i] = stack[B + vm.sp + i];
                     }
 
                     A_val.* = .{
@@ -398,6 +400,20 @@ pub const Vm = struct {
                     };
                 },
                 .BuildError => return vm.reportErr("TODO Op.BuildError"),
+                .BuildFn => {
+                    const A_val = try vm.getNewVal(module);
+                    const arg_count = vm.getArg(module, u8);
+                    const offset = vm.getArg(module, u32);
+
+                    A_val.* = .{
+                        .kind = .{
+                            .Fn = .{
+                                .arg_count = arg_count,
+                                .offset = offset,
+                            },
+                        },
+                    };
+                },
                 .Subscript => {
                     const A_ref = vm.getRef(module);
                     const B_val = vm.getVal(module);
@@ -476,6 +492,47 @@ pub const Vm = struct {
                     const type_id = vm.getArg(module, Value.TypeId);
 
                     A_ref.value = if (B_val.kind == type_id) &Value.True else &Value.False;
+                },
+                .Call => {
+                    const A_val = vm.getVal(module);
+                    const B = vm.getArg(module, RegRef);
+                    const arg_count = vm.getArg(module, u16);
+
+                    if (A_val.kind != .Fn) {
+                        return vm.reportErr("attempt to call non function type");
+                    }
+
+                    if (A_val.kind.Fn.arg_count != arg_count) {
+                        // TODO improve this error message to tell the expected and given counts
+                        return vm.reportErr("unexpecte arg count");
+                    }
+
+                    try vm.call_stack.push(.{
+                        .sp = vm.sp,
+                        .ip = vm.ip,
+                    });
+                    vm.sp += B;
+                    vm.ip = A_val.kind.Fn.offset;
+                },
+                .Return => {
+                    const A_val = vm.getVal(module);
+
+                    // TODO
+                    const stack = vm.gc.stack.toSlice();
+                    stack[vm.sp].value = A_val;
+
+                    const frame = vm.call_stack.pop() orelse return error.MalformedByteCode;
+                    vm.ip = frame.ip;
+                    vm.sp = frame.sp;
+                },
+                .ReturnNone => {
+                    // TODO
+                    const stack = vm.gc.stack.toSlice();
+                    stack[vm.sp].value = &Value.None;
+
+                    const frame = vm.call_stack.pop() orelse return error.MalformedByteCode;
+                    vm.ip = frame.ip;
+                    vm.sp = frame.sp;
                 },
                 _ => {
                     return error.MalformedByteCode;

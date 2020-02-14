@@ -67,13 +67,6 @@ pub const Compiler = struct {
         try self.code.appendSlice(@sliceToBytes(([_]RegRef{ A, B, C })[0..]));
     }
 
-    fn emitInstruction_1_s(self: *Compiler, op: lang.Op, A: RegRef, args: []RegRef) !void {
-        try self.code.append(@enumToInt(op));
-        try self.code.appendSlice(@sliceToBytes(([_]RegRef{A})[0..]));
-        try self.code.appendSlice(@sliceToBytes(([_]u16{@truncate(u16, args.len)})[0..]));
-        try self.code.appendSlice(@sliceToBytes(args));
-    }
-
     const Scope = struct {
         id: Id,
         parent: ?*Scope,
@@ -286,17 +279,18 @@ pub const Compiler = struct {
         }
         const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
         const args = try self.arena.alloc(RegRef, node.values.len);
+        for (args) |*a| {
+            a.* = self.registerAlloc();
+        }
 
         var i: u32 = 0;
         var it = node.values.iterator(0);
         while (it.next()) |n| {
-            args[i] = self.registerAlloc();
             _ = try self.genNode(n.*, Result{ .Rt = args[i] });
-
             i += 1;
         }
 
-        try self.emitInstruction_1_s(.BuildTuple, res_loc.Rt, args);
+        try self.emitInstruction_2_1(.BuildTuple, res_loc.Rt, args[0], @truncate(u16, args.len));
         return Value{ .Rt = res_loc.Rt };
     }
 

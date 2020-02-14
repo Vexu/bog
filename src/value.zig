@@ -33,6 +33,8 @@ pub const Value = struct {
         },
         Str: []const u8,
         Fn: struct {
+            /// offset to the functions first instruction
+            offset: u32,
             arg_count: u8,
         },
 

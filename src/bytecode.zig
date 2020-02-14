@@ -126,16 +126,17 @@ pub const Op = enum(u8) {
     /// IF (A==error) RET A
     Try,
 
-    // Return,
-
     /// A = B[C]
     Subscript,
 
     /// A = error(A)
     BuildError,
 
-    /// A = (arg1, ... argN)
+    /// A = (B, B + 1, ... B + N)
     BuildTuple,
+
+    /// A = Fn(arg_count, offset)
+    BuildFn,
 
     /// ip = arg1
     Jump,
@@ -157,6 +158,15 @@ pub const Op = enum(u8) {
 
     /// A = B as TYPEID
     As,
+
+    /// B = A(C, C + 1, ... C + N)
+    Call,
+
+    /// 0 = A
+    Return,
+
+    /// 0 = ()
+    ReturnNone,
 
     _,
 };
