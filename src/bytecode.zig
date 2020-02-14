@@ -10,9 +10,6 @@ pub const Op = enum(u8) {
     /// A <- B
     Move,
 
-    // /// CALL(A)
-    // Call,
-
     // /// STACK(A, B) = C
     // PushStack,
 
@@ -167,6 +164,9 @@ pub const Op = enum(u8) {
 
     /// 0 = ()
     ReturnNone,
+
+    /// TODO better debug info
+    LineInfo,
 
     _,
 };

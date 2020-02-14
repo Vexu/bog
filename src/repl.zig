@@ -65,7 +65,10 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
         repl.handleLine(in_stream, out_stream) catch |err| switch (err) {
             error.EndOfStream => return,
             error.TokenizeError, error.ParseError, error.CompileError => try repl.renderErrors(&repl.tree.errors, in_stream, out_stream),
-            error.RuntimeError => try repl.renderErrors(&repl.vm.errors, in_stream, out_stream),
+            error.RuntimeError => {
+                repl.vm.ip = repl.module.code.len;
+                try repl.renderErrors(&repl.vm.errors, in_stream, out_stream);
+            },
             else => |e| return e,
         };
     }

@@ -23,11 +23,15 @@ pub const Vm = struct {
 
     errors: lang.Error.List,
 
+    // TODO come up with better debug info
+    line_loc: u32 = 0,
+
     const CallStack = std.SegmentedList(FunctionFrame, 16);
 
     const FunctionFrame = struct {
         ip: usize,
         sp: usize,
+        line_loc: u32,
     };
 
     pub const Error = error{
@@ -513,6 +517,7 @@ pub const Vm = struct {
                     try vm.call_stack.push(.{
                         .sp = vm.sp,
                         .ip = vm.ip,
+                        .line_loc = vm.line_loc,
                     });
                     vm.sp += B;
                     vm.ip = A_val.kind.Fn.offset;
@@ -527,6 +532,7 @@ pub const Vm = struct {
                     const frame = vm.call_stack.pop() orelse return error.MalformedByteCode;
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
+                    vm.line_loc = frame.line_loc;
                 },
                 .ReturnNone => {
                     // TODO
@@ -536,6 +542,11 @@ pub const Vm = struct {
                     const frame = vm.call_stack.pop() orelse return error.MalformedByteCode;
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
+                    vm.line_loc = frame.line_loc;
+                },
+                .LineInfo => {
+                    const line = vm.getArg(module, u32);
+                    vm.line_loc = line;
                 },
                 _ => {
                     return error.MalformedByteCode;
@@ -616,13 +627,13 @@ pub const Vm = struct {
         try vm.errors.push(.{
             .msg = msg,
             .kind = .Error,
-            .index = 0, // TODO debug info
+            .index = vm.line_loc,
         });
         while (vm.call_stack.pop()) |some| {
             try vm.errors.push(.{
                 .msg = "called here",
                 .kind = .Trace,
-                .index = 0, // TODO debug info
+                .index = some.line_loc,
             });
         }
         return error.RuntimeError;

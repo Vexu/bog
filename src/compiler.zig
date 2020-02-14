@@ -188,6 +188,7 @@ pub const Compiler = struct {
         compiler.cur_scope = &compiler.root_scope.base;
         var it = tree.nodes.iterator(0);
         while (it.next()) |n| {
+            try compiler.addLineInfo(n.*);
             const val = try compiler.genNode(n.*, .Value);
             if (val == .Rt) {
                 // discard unused runtime value
@@ -212,6 +213,7 @@ pub const Compiler = struct {
 
     pub fn compileRepl(compiler: *Compiler, node: *Node, module: *lang.Module) Error!usize {
         const start_len = compiler.module_code.len;
+        try compiler.addLineInfo(node);
         const val = try compiler.genNode(node, .Value);
         if (val == .Rt) {
             try compiler.emitInstruction_1(.Discard, val.Rt);
@@ -357,6 +359,7 @@ pub const Compiler = struct {
 
         // gen body and return result
         const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
+        try self.addLineInfo(node.body);
         const body_res = try self.genNode(node.body, .Value);
         // TODO if body_res == .Empty because last instruction was a return
         // then this return is not necessary
@@ -394,6 +397,7 @@ pub const Compiler = struct {
 
         var it = node.values.iterator(0);
         while (it.next()) |n| {
+            try self.addLineInfo(n.*);
             if (it.peek() == null) {
                 return self.genNode(n.*, res);
             }
@@ -932,6 +936,13 @@ pub const Compiler = struct {
         }
         // if res == .Value nothing needs to be done
         return ret_val;
+    }
+
+    fn addLineInfo(self: *Compiler, node: *Node) !void {
+        const token = node.firstToken();
+        const tok = self.tree.tokens.at(token);
+
+        try self.emitInstruction_0_1(.LineInfo, tok.start);
     }
 
     fn tokenSlice(self: *Compiler, token: TokenIndex) []const u8 {
