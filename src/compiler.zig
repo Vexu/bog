@@ -185,7 +185,7 @@ pub const Compiler = struct {
             .cur_scope = undefined,
         };
         compiler.code = &compiler.root_scope.code;
-        compiler.cur_scope = &compiler.root_scope;
+        compiler.cur_scope = &compiler.root_scope.base;
         var it = tree.nodes.iterator(0);
         while (it.next()) |n| {
             const val = try compiler.genNode(n.*, .Value);
@@ -206,7 +206,7 @@ pub const Compiler = struct {
             .name = "",
             .code = compiler.module_code.toOwnedSlice(),
             .strings = "",
-            .start_index = start_index,
+            .start_index = @truncate(u32, start_index),
         };
     }
 
@@ -243,7 +243,7 @@ pub const Compiler = struct {
             .Discard => return self.reportErr("'_' can only be used to discard unwanted tuple/list items in destructuring assignment", node.firstToken()),
             .TypeInfix => return self.genTypeInfix(@fieldParentPtr(Node.TypeInfix, "base", node), res),
             .Fn => return self.genFn(@fieldParentPtr(Node.Fn, "base", node), res),
-            .Suffix => return self.reportErr("TODO: Suffix", node.firstToken()),
+            .Suffix => return self.genSuffix(@fieldParentPtr(Node.Suffix, "base", node), res),
             .Import => return self.reportErr("TODO: Import", node.firstToken()),
             .Error => return self.reportErr("TODO: Error", node.firstToken()),
             .List => return self.reportErr("TODO: List", node.firstToken()),
@@ -646,6 +646,43 @@ pub const Compiler = struct {
         }
         // if res == .Value nothing needs to be done
         return ret;
+    }
+
+    fn genSuffix(self: *Compiler, node: *Node.Suffix, res: Result) Error!Value {
+        if (node.op == .Call) {
+            try self.assertNotLval(res, node.r_tok);
+        }
+        const l_val = try self.genNode(node.lhs, .Value);
+        if (l_val != .Rt) {
+            return self.reportErr("Invalid left hand side to suffix op", node.lhs.firstToken());
+        }
+        switch (node.op) {
+            .Call => |*args| {
+                const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
+                const len = if (args.len == 0) 1 else args.len;
+                const arg_locs = try self.arena.alloc(RegRef, len);
+                for (arg_locs) |*a| {
+                    a.* = self.registerAlloc();
+                }
+
+                var i: u32 = 0;
+                var it = args.iterator(0);
+                while (it.next()) |n| {
+                    _ = try self.genNode(n.*, Result{ .Rt = arg_locs[i] });
+                    i += 1;
+                }
+
+                try self.emitInstruction_2_1(.Call, l_val.Rt, arg_locs[0], @truncate(u16, len));
+                if (res == .Rt) {
+                    // TODO probably should handle this better
+                    try self.emitInstruction_2(.Move, res.Rt, arg_locs[0]);
+                    return Value{ .Rt = res.Rt };
+                }
+                return Value{ .Rt = arg_locs[0] };
+            },
+            .Member => return self.reportErr("TODO: member access", node.l_tok),
+            .ArrAccess => return self.reportErr("TODO: subscript", node.l_tok),
+        }
     }
 
     fn genInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {

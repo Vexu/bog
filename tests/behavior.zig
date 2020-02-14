@@ -1,3 +1,20 @@
+test "functions" {
+    try expectOutput(
+        \\const add = fn ((a,b)) a + b
+        \\const tuplify = fn (a,b) (a,b)
+        \\add(tuplify(1,2))
+    ,
+        \\3
+    );
+    try expectOutput(
+        \\const add = fn (a,b) a + b
+        \\const sub = fn (a,b) a - b
+        \\sub(add(3,4), add(1,2))
+    ,
+        \\4
+    );
+}
+
 test "type casting" {
     try expectOutput(
         \\1 as none
@@ -156,6 +173,8 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
     var tree = try lang.parse(alloc, source);
     var module = try tree.compile(alloc);
 
+    // TODO this should happen in vm.exec but currently that would break repl
+    vm.ip = module.start_index;
     try vm.exec(&module);
     if (vm.result) |some| {
         var out_buf = try std.Buffer.initSize(alloc, 0);
