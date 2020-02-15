@@ -375,6 +375,7 @@ pub const Tokenizer = struct {
                 // check if more input is expected
                 return if (self.paren_level != 0 or
                     self.string or
+                    self.expect_indent or
                     self.indent_level != 0)
                     false
                 else
@@ -400,6 +401,9 @@ pub const Tokenizer = struct {
             if (c == '\n' or c == '\r') {
                 // empty line; rest count
                 count = 0;
+                if (self.repl) {
+                    break;
+                }
             } else if (self.indent_char != null and c == self.indent_char.?) {
                 count += 1;
             } else if (isWhiteSpace(c)) {
@@ -410,6 +414,10 @@ pub const Tokenizer = struct {
                 break;
             }
         } else {
+            if (self.repl) {
+                self.expect_indent = true;
+                return null;
+            }
             // EOF level goes to zero
             count = 0;
         }

@@ -12,7 +12,7 @@ expr
     | bool_expr assign?
     | block
 
-block : (NL stmt)+ NL
+block : NL BEGIN (stmt NL)+ END
 
 assign : ("=" | "+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") expr
 

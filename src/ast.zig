@@ -72,7 +72,8 @@ pub const Node = struct {
             },
             .Import => @fieldParentPtr(Node.Import, "base", node).tok,
             .Error => @fieldParentPtr(Node.Error, "base", node).tok,
-            .List, .Tuple, .Map, .Block => @fieldParentPtr(Node.ListTupleMapBlock, "base", node).l_tok,
+            .List, .Tuple, .Map => @fieldParentPtr(Node.ListTupleMap, "base", node).l_tok,
+            .Block => @fieldParentPtr(Node.Block, "base", node).stmts.at(0).*.firstToken(),
             .Grouped => @fieldParentPtr(Node.Grouped, "base", node).l_tok,
             .MapItem => {
                 const map = @fieldParentPtr(Node.MapItem, "base", node);
@@ -104,7 +105,11 @@ pub const Node = struct {
             .Literal => @fieldParentPtr(Node.Literal, "base", node).tok,
             .Import => @fieldParentPtr(Node.Import, "base", node).str_tok + 1,
             .Error => @fieldParentPtr(Node.Error, "base", node).r_paren,
-            .List, .Tuple, .Map, .Block => @fieldParentPtr(Node.ListTupleMapBlock, "base", node).r_tok,
+            .List, .Tuple, .Map => @fieldParentPtr(Node.ListTupleMap, "base", node).r_tok,
+            .Block => {
+                const block = @fieldParentPtr(Node.Block, "base", node);
+                return block.stmts.at(block.stmts.len - 1).*.lastToken();
+            },
             .Grouped => @fieldParentPtr(Node.Grouped, "base", node).r_tok,
             .MapItem => @fieldParentPtr(Node.MapItem, "base", node).value.lastToken(),
             .Catch => @fieldParentPtr(Node.Catch, "base", node).rhs.lastToken(),
@@ -115,7 +120,10 @@ pub const Node = struct {
             },
             .For => @fieldParentPtr(Node.For, "base", node).body.lastToken(),
             .While => @fieldParentPtr(Node.While, "base", node).body.lastToken(),
-            .Match => @fieldParentPtr(Node.Match, "base", node).body_r_brace,
+            .Match => {
+                const match = @fieldParentPtr(Node.Match, "base", node);
+                return match.body.at(match.body.len - 1).*.lastToken();
+            },
             .MatchCatchAll => @fieldParentPtr(Node.MatchCatchAll, "base", node).expr.lastToken(),
             .MatchLet => @fieldParentPtr(Node.MatchLet, "base", node).expr.lastToken(),
             .MatchCase => @fieldParentPtr(Node.MatchCase, "base", node).expr.lastToken(),
@@ -260,11 +268,16 @@ pub const Node = struct {
         r_paren: TokenIndex,
     };
 
-    pub const ListTupleMapBlock = struct {
+    pub const ListTupleMap = struct {
         base: Node,
         values: List,
         l_tok: TokenIndex,
         r_tok: TokenIndex,
+    };
+
+    pub const Block = struct {
+        base: Node,
+        stmts: List,
     };
 
     pub const Grouped = struct {
@@ -287,6 +300,7 @@ pub const Node = struct {
         lhs: *Node,
         capture: ?*Node,
         rhs: *Node,
+        let_const: ?TokenIndex,
     };
 
     pub const If = struct {
@@ -298,6 +312,7 @@ pub const Node = struct {
         eq_tok: ?TokenIndex,
         else_tok: ?TokenIndex,
         if_tok: TokenIndex,
+        r_paren: TokenIndex,
     };
 
     pub const For = struct {
@@ -307,6 +322,7 @@ pub const Node = struct {
         body: *Node,
         in_tok: ?TokenIndex,
         for_tok: TokenIndex,
+        r_paren: TokenIndex,
     };
 
     pub const While = struct {
@@ -316,6 +332,7 @@ pub const Node = struct {
         capture: ?*Node,
         eq_tok: ?TokenIndex,
         while_tok: TokenIndex,
+        r_paren: TokenIndex,
     };
 
     pub const Match = struct {
@@ -323,8 +340,7 @@ pub const Node = struct {
         expr: *Node,
         body: List,
         match_tok: TokenIndex,
-        body_l_brace: TokenIndex,
-        body_r_brace: TokenIndex,
+        r_paren: TokenIndex,
     };
 
     pub const MatchCatchAll = struct {
@@ -338,12 +354,14 @@ pub const Node = struct {
         capture: *Node,
         expr: *Node,
         let_const: TokenIndex,
+        colon: TokenIndex,
     };
 
     pub const MatchCase = struct {
         base: Node = Node{ .id = .MatchCase },
         lhs: List,
         expr: *Node,
+        colon: TokenIndex,
     };
 
     pub const Jump = struct {
