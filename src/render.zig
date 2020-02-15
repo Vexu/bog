@@ -179,24 +179,30 @@ const Renderer = struct {
                 const while_expr = @fieldParentPtr(Node.While, "base", node);
 
                 try self.renderToken(while_expr.while_tok, stream, indent, .Space);
+                try self.renderToken(self.nextToken(while_expr.while_tok), stream, indent, .None);
                 if (while_expr.capture) |some| {
                     try self.renderToken(self.nextToken(while_expr.while_tok), stream, indent, .Space);
                     try self.renderNode(some, stream, indent, .Space);
                     try self.renderToken(while_expr.eq_tok.?, stream, indent, .Space);
                 }
-                try self.renderNode(while_expr.cond, stream, indent, .Space);
+                try self.renderNode(while_expr.cond, stream, indent, .None);
+                try self.renderToken(while_expr.r_paren, stream, indent, .Space);
+
                 return self.renderNode(while_expr.body, stream, indent, space);
             },
             .For => {
                 const for_expr = @fieldParentPtr(Node.For, "base", node);
 
                 try self.renderToken(for_expr.for_tok, stream, indent, .Space);
+                try self.renderToken(self.nextToken(for_expr.for_tok), stream, indent, .None);
                 if (for_expr.capture) |some| {
-                    try self.renderToken(self.nextToken(for_expr.for_tok), stream, indent, .Space);
+                    try self.renderToken(self.nextToken(self.nextToken(for_expr.for_tok)), stream, indent, .Space);
                     try self.renderNode(some, stream, indent, .Space);
                     try self.renderToken(for_expr.in_tok.?, stream, indent, .Space);
                 }
-                try self.renderNode(for_expr.cond, stream, indent, .Space);
+                try self.renderNode(for_expr.cond, stream, indent, .None);
+                try self.renderToken(for_expr.r_paren, stream, indent, .Space);
+
                 return self.renderNode(for_expr.body, stream, indent, space);
             },
             .Fn => {

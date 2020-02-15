@@ -808,7 +808,7 @@ pub const Parser = struct {
             .eq_tok = if (capture != null) try parser.expectToken(.Equal, true) else null,
             .cond = try parser.expr(true),
             .r_paren = try parser.expectToken(.RParen, true),
-            .if_body = try parser.expr(true),
+            .if_body = try parser.expr(skip_nl),
             .else_tok = parser.eatToken(.Keyword_else, skip_nl),
             .else_body = null,
         };
@@ -834,7 +834,7 @@ pub const Parser = struct {
             .eq_tok = if (capture != null) try parser.expectToken(.Equal, true) else null,
             .cond = try parser.expr(true),
             .r_paren = try parser.expectToken(.RParen, true),
-            .body = try parser.expr(true),
+            .body = try parser.expr(skip_nl),
         };
         return &node.base;
     }
@@ -855,7 +855,7 @@ pub const Parser = struct {
             .in_tok = if (capture != null) try parser.expectToken(.Keyword_in, true) else null,
             .cond = try parser.expr(true),
             .r_paren = try parser.expectToken(.RParen, true),
-            .body = try parser.expr(true),
+            .body = try parser.expr(skip_nl),
         };
         return &node.base;
     }
@@ -895,7 +895,7 @@ pub const Parser = struct {
                 const node = try parser.arena.create(Node.MatchCatchAll);
                 node.* = .{
                     .tok = let_const,
-                    .expr = try parser.expr(true),
+                    .expr = try parser.expr(false),
                 };
                 return &node.base;
             }
@@ -905,7 +905,7 @@ pub const Parser = struct {
                 .let_const = let_const,
                 .capture = capture,
                 .colon = try parser.expectToken(.Colon, true),
-                .expr = try parser.expr(true),
+                .expr = try parser.expr(false),
             };
             return &node.base;
         } else if (parser.eatToken(.Underscore, false)) |u| {
@@ -913,7 +913,7 @@ pub const Parser = struct {
             _ = try parser.expectToken(.Colon, true);
             node.* = .{
                 .tok = u,
-                .expr = try parser.expr(true),
+                .expr = try parser.expr(false),
             };
             return &node.base;
         } else {
@@ -935,7 +935,7 @@ pub const Parser = struct {
                 try node.lhs.push(try parser.expr(true));
                 if (parser.eatToken(.Comma, true) == null) end = true;
             }
-            node.expr = try parser.expr(true);
+            node.expr = try parser.expr(false);
             return &node.base;
         }
     }
