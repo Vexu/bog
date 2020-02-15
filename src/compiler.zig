@@ -235,13 +235,13 @@ pub const Compiler = struct {
         switch (node.id) {
             .Grouped => return self.genNode(@fieldParentPtr(Node.Grouped, "base", node).expr, res),
             .Literal => return self.genLiteral(@fieldParentPtr(Node.Literal, "base", node), res),
-            .Block => return self.genBlock(@fieldParentPtr(Node.ListTupleMapBlock, "base", node), res),
+            .Block => return self.genBlock(@fieldParentPtr(Node.Block, "base", node), res),
             .Prefix => return self.genPrefix(@fieldParentPtr(Node.Prefix, "base", node), res),
             .Decl => return self.genDecl(@fieldParentPtr(Node.Decl, "base", node), res),
             .Identifier => return self.genIdentifier(@fieldParentPtr(Node.SingleToken, "base", node), res),
             .Infix => return self.genInfix(@fieldParentPtr(Node.Infix, "base", node), res),
             .If => return self.genIf(@fieldParentPtr(Node.If, "base", node), res),
-            .Tuple => return self.genTuple(@fieldParentPtr(Node.ListTupleMapBlock, "base", node), res),
+            .Tuple => return self.genTuple(@fieldParentPtr(Node.ListTupleMap, "base", node), res),
             .Discard => return self.reportErr("'_' can only be used to discard unwanted tuple/list items in destructuring assignment", node.firstToken()),
             .TypeInfix => return self.genTypeInfix(@fieldParentPtr(Node.TypeInfix, "base", node), res),
             .Fn => return self.genFn(@fieldParentPtr(Node.Fn, "base", node), res),
@@ -263,7 +263,7 @@ pub const Compiler = struct {
         }
     }
 
-    fn genTuple(self: *Compiler, node: *Node.ListTupleMapBlock, res: Result) Error!Value {
+    fn genTuple(self: *Compiler, node: *Node.ListTupleMap, res: Result) Error!Value {
         if (res == .Lval) {
             switch (res.Lval) {
                 .Const, .Let, .Assign => |reg| {
@@ -383,8 +383,8 @@ pub const Compiler = struct {
         return Value{ .Rt = res_loc.Rt };
     }
 
-    fn genBlock(self: *Compiler, node: *Node.ListTupleMapBlock, res: Result) Error!Value {
-        try self.assertNotLval(res, node.r_tok);
+    fn genBlock(self: *Compiler, node: *Node.Block, res: Result) Error!Value {
+        try self.assertNotLval(res, node.stmts.at(0).*.firstToken());
         var block_scope = Scope{
             .id = .Block,
             .parent = self.cur_scope,
@@ -395,7 +395,7 @@ pub const Compiler = struct {
         const start_reg_count = self.used_regs;
         defer self.used_regs = start_reg_count;
 
-        var it = node.values.iterator(0);
+        var it = node.stmts.iterator(0);
         while (it.next()) |n| {
             try self.addLineInfo(n.*);
             if (it.peek() == null) {

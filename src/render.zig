@@ -35,7 +35,10 @@ const Renderer = struct {
     fn prevToken(self: *Renderer, tok: TokenIndex) TokenIndex {
         var it = self.tokens.iterator(tok);
         while (it.prev()) |some| {
-            if (some.id != .Comment and some.id != .Nl) break;
+            switch (some.id) {
+                .Comment, .Nl, .End, .Begin => {},
+                else => break,
+            }
         }
         return @truncate(TokenIndex, it.index);
     }
@@ -43,7 +46,10 @@ const Renderer = struct {
     fn nextToken(self: *Renderer, tok: TokenIndex) TokenIndex {
         var it = self.tokens.iterator(tok + 1);
         while (it.next()) |some| {
-            if (some.id != .Comment and some.id != .Nl) break;
+            switch (some.id) {
+                .Comment, .Nl, .End, .Begin => {},
+                else => break,
+            }
         }
         return @truncate(TokenIndex, it.index - 1);
     }
@@ -61,8 +67,10 @@ const Renderer = struct {
             .Infix => {
                 const infix = @fieldParentPtr(Node.Infix, "base", node);
 
-                try self.renderNode(infix.lhs, stream, indent, .Space);
-                try self.renderToken(infix.tok, stream, indent, .Space);
+                const after_tok_space = if (infix.op == .Range) .None else Space.Space;
+
+                try self.renderNode(infix.lhs, stream, indent, after_tok_space);
+                try self.renderToken(infix.tok, stream, indent, after_tok_space);
                 return self.renderNode(infix.rhs, stream, indent, space);
             },
             .Prefix => {
@@ -225,28 +233,24 @@ const Renderer = struct {
                 try self.renderToken(fn_expr.r_paren, stream, indent, .Space);
                 return self.renderNode(fn_expr.body, stream, indent, space);
             },
-            .List, .Tuple, .Map, .Block => {
-                const ltmb = @fieldParentPtr(Node.ListTupleMapBlock, "base", node);
+            .List, .Tuple, .Map => {
+                const ltm = @fieldParentPtr(Node.ListTupleMap, "base", node);
 
-                try self.renderToken(ltmb.l_tok, stream, indent, .None);
+                try self.renderToken(ltm.l_tok, stream, indent, .None);
 
-                var it = ltmb.values.iterator(0);
-                const prev = self.tokens.at(ltmb.r_tok - 1).id;
-                if (prev == .Comma or prev == .Nl or node.id == .Block) {
+                var it = ltm.values.iterator(0);
+                const prev = self.tokens.at(ltm.r_tok - 1).id;
+                if (prev == .Comma or prev == .Nl) {
                     try stream.writeByte('\n');
                     const new_indet = indent + indent_delta;
                     while (it.next()) |param| {
                         try stream.writeByteNTimes(' ', new_indet);
-                        if (node.id == .Block)
-                            try self.renderNode(param.*, stream, new_indet, .Newline)
-                        else {
-                            try self.renderNode(param.*, stream, new_indet, .None);
-                            const comma = self.nextToken(param.*.lastToken());
-                            if (self.tokens.at(comma).id == .Comma)
-                                try self.renderToken(comma, stream, indent, .Newline)
-                            else
-                                try stream.write(",\n");
-                        }
+                        try self.renderNode(param.*, stream, new_indet, .None);
+                        const comma = self.nextToken(param.*.lastToken());
+                        if (self.tokens.at(comma).id == .Comma)
+                            try self.renderToken(comma, stream, indent, .Newline)
+                        else
+                            try stream.write(",\n");
                     }
                     try stream.writeByteNTimes(' ', indent);
                 } else {
@@ -260,7 +264,17 @@ const Renderer = struct {
                     }
                 }
 
-                return self.renderToken(ltmb.r_tok, stream, indent, space);
+                return self.renderToken(ltm.r_tok, stream, indent, space);
+            },
+            .Block => {
+                const blk = @fieldParentPtr(Node.Block, "base", node);
+
+                const new_indet = indent + indent_delta;
+                var it = blk.stmts.iterator(0);
+                while (it.next()) |stmt| {
+                    try stream.writeByteNTimes(' ', new_indet);
+                    try self.renderNode(stmt.*, stream, new_indet, .Newline);
+                }
             },
             .MapItem => {
                 const item = @fieldParentPtr(Node.MapItem, "base", node);
@@ -279,8 +293,10 @@ const Renderer = struct {
                 try self.renderToken(catch_expr.tok, stream, indent, .Space);
 
                 if (catch_expr.capture) |some| {
-                    try self.renderToken(self.nextToken(catch_expr.tok), stream, indent, .Space);
-                    try self.renderNode(some, stream, indent, .Space);
+                    try self.renderToken(self.nextToken(catch_expr.tok), stream, indent, .None);
+                    try self.renderToken(catch_expr.let_const.?, stream, indent, .Space);
+                    try self.renderNode(some, stream, indent, .None);
+                    try self.renderToken(self.nextToken(some.lastToken()), stream, indent, .Space);
                 }
                 return self.renderNode(catch_expr.rhs, stream, indent, space);
             },
@@ -288,13 +304,15 @@ const Renderer = struct {
                 const if_expr = @fieldParentPtr(Node.If, "base", node);
 
                 try self.renderToken(if_expr.if_tok, stream, indent, .Space);
+                try self.renderToken(self.nextToken(if_expr.if_tok), stream, indent, .None);
                 if (if_expr.capture) |some| {
-                    try self.renderToken(self.nextToken(if_expr.if_tok), stream, indent, .Space);
+                    try self.renderToken(self.nextToken(self.nextToken(if_expr.if_tok)), stream, indent, .Space);
                     try self.renderNode(some, stream, indent, .Space);
                     try self.renderToken(if_expr.eq_tok.?, stream, indent, .Space);
                 }
 
-                try self.renderNode(if_expr.cond, stream, indent, .Space);
+                try self.renderNode(if_expr.cond, stream, indent, .None);
+                try self.renderToken(if_expr.r_paren, stream, indent, .Space);
 
                 if (if_expr.else_body) |some| {
                     try self.renderNode(if_expr.if_body, stream, indent, .Space);
@@ -309,9 +327,10 @@ const Renderer = struct {
                 const match_expr = @fieldParentPtr(Node.Match, "base", node);
 
                 try self.renderToken(match_expr.match_tok, stream, indent, .Space);
-                try self.renderNode(match_expr.expr, stream, indent, .Space);
+                try self.renderToken(self.nextToken(match_expr.match_tok), stream, indent, .None);
+                try self.renderNode(match_expr.expr, stream, indent, .None);
+                try self.renderToken(match_expr.r_paren, stream, indent, .Newline);
 
-                try self.renderToken(match_expr.body_l_brace, stream, indent, .Newline);
                 const new_indet = indent + indent_delta;
                 var it = match_expr.body.iterator(0);
                 while (it.next()) |n| {
@@ -319,8 +338,6 @@ const Renderer = struct {
                     try self.renderNode(n.*, stream, new_indet, .Newline);
                 }
                 try stream.writeByteNTimes(' ', indent);
-
-                return self.renderToken(match_expr.body_r_brace, stream, indent, space);
             },
             .MatchCatchAll => {
                 const case = @fieldParentPtr(Node.MatchCatchAll, "base", node);
@@ -335,7 +352,8 @@ const Renderer = struct {
                 const case = @fieldParentPtr(Node.MatchLet, "base", node);
 
                 try self.renderToken(case.let_const, stream, indent, .Space);
-                try self.renderNode(case.capture, stream, indent, .Space);
+                try self.renderNode(case.capture, stream, indent, .None);
+                try self.renderToken(case.colon, stream, indent, .Space);
                 return self.renderNode(case.expr, stream, indent, space);
             },
             .MatchCase => {
