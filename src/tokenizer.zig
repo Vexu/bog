@@ -117,6 +117,8 @@ pub const Token = struct {
 
     pub const Id = enum {
         Eof,
+        Begin,
+        End,
         Comment,
         Identifier,
         String,
@@ -237,12 +239,14 @@ pub const Token = struct {
     pub fn string(id: Id) []const u8 {
         return switch (id) {
             .Comment => "<Comment>",
-            .Identifier => "Identifier",
             .Eof => "<EOF>",
+            .Nl => "<NL>",
+            .Begin => "<BEGIN>",
+            .End => "<END>",
+            .Identifier => "Identifier",
             .String => "String",
             .Integer => "Integer",
             .Number => "Number",
-            .Nl => "<NL>",
             .Pipe => "|",
             .PipeEqual => "|=",
             .Equal => "=",
@@ -317,11 +321,26 @@ pub const Token = struct {
 pub const Tokenizer = struct {
     tree: *Tree,
     it: unicode.Utf8Iterator,
+
+    /// beginning index of the next token
     start_index: usize = 0,
-    level: u32 = 0,
+
+    /// level of parentheses
+    paren_level: u32 = 0,
+
+    /// indentation specific variables
+    pending_ends: u32 = 0,
+    indent_char: ?u32 = null,
+
+    /// how many of `indent_char` are in one indentation level
+    chars_per_indent: ?u8 = null,
+    indent_level: u8 = 0,
+
+    /// saw a nl, need to check for indentation
+    expect_indent: bool = false,
+
+    /// currently in a multiline string
     string: bool = false,
-    prev_nl: bool = true,
-    no_eof: bool = false,
     repl: bool,
 
     pub const Error = error{TokenizeError} || mem.Allocator.Error;
@@ -345,6 +364,7 @@ pub const Tokenizer = struct {
     }
 
     pub fn tokenizeRepl(self: *Tokenizer, input: []const u8) Error!bool {
+        // remove previous eof
         self.it.bytes = input;
         _ = self.tree.tokens.pop();
         self.tree.source = input;
@@ -352,7 +372,10 @@ pub const Tokenizer = struct {
             const tok = try self.tree.tokens.addOne();
             tok.* = try self.next();
             if (tok.id == .Eof) {
-                return if (self.repl and (self.level != 0 or self.string or self.no_eof))
+                // check if more input is expected
+                return if (self.paren_level != 0 or
+                    self.string or
+                    self.indent_level != 0)
                     false
                 else
                     true;
@@ -370,8 +393,93 @@ pub const Tokenizer = struct {
         return error.TokenizeError;
     }
 
+    fn getIndent(self: *Tokenizer) !?Token {
+        var count: u8 = 0;
+        // get all indentation characters
+        while (self.it.nextCodepoint()) |c| {
+            if (c == '\n' or c == '\r') {
+                // empty line; rest count
+                count = 0;
+            } else if (self.indent_char != null and c == self.indent_char.?) {
+                count += 1;
+            } else if (isWhiteSpace(c)) {
+                self.indent_char = c;
+                count += 1;
+            } else {
+                self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                break;
+            }
+        } else {
+            // EOF level goes to zero
+            count = 0;
+        }
+        if (count == 0) {
+            // back to level zero, close all blocks
+            self.indent_char = null;
+            self.chars_per_indent = null;
+            self.pending_ends = self.indent_level;
+            self.indent_level = 0;
+            return null;
+        }
+
+        errdefer if (self.repl) {
+            // reset indentation in case of error
+            self.indent_char = null;
+            self.chars_per_indent = null;
+            self.indent_level = 0;
+        };
+        if (self.chars_per_indent) |some| {
+            if (count % some != 0) {
+                // inconsistent amount of `ìndent_char`s per level
+                return self.reportErr("inconsistent indentation", 'a');
+            }
+        } else {
+            self.chars_per_indent = count;
+        }
+        const level = @divExact(count, self.chars_per_indent.?);
+
+        if (level > 50) {
+            return self.reportErr("indentation exceeds maximum of 50 levels", 'a');
+        }
+        if (level == self.indent_level) {
+            // no change
+            return null;
+        }
+        if (level > self.indent_level + 1) {
+            // indentation grew more than one level
+            return self.reportErr("unexpected indentation", 'a');
+        }
+        if (level < self.indent_level) {
+            // indentation shrunk, close blocks
+            self.pending_ends = self.indent_level - level;
+            self.indent_level = level;
+            return null;
+        }
+        self.indent_level = level;
+        return Token{
+            .id = .Begin,
+            .start = @truncate(u32, self.start_index),
+            .end = @truncate(u32, self.it.i),
+        };
+    }
+
     fn next(self: *Tokenizer) !Token {
         self.start_index = self.it.i;
+        // get any block begins
+        if (self.expect_indent) {
+            self.expect_indent = false;
+            if (try self.getIndent()) |some|
+                return some;
+        }
+        // clear pending block ends
+        if (self.pending_ends > 0) {
+            self.pending_ends -= 1;
+            return Token{
+                .id = .End,
+                .start = @truncate(u32, self.start_index),
+                .end = @truncate(u32, self.it.i),
+            };
+        }
         var state: enum {
             Start,
             String,
@@ -421,12 +529,9 @@ pub const Tokenizer = struct {
                         state = .LineComment;
                     },
                     '\n' => {
-                        if (self.prev_nl) {
-                            self.start_index = self.it.i;
-                        } else {
-                            res = .Nl;
-                            break;
-                        }
+                        res = .Nl;
+                        self.expect_indent = true;
+                        break;
                     },
                     '"', '\'' => {
                         self.string = true;
@@ -443,28 +548,28 @@ pub const Tokenizer = struct {
                         state = .Pipe;
                     },
                     '(' => {
-                        self.level += 1;
+                        self.paren_level += 1;
                         res = .LParen;
                         break;
                     },
                     ')' => {
-                        if (self.level == 0) {
+                        if (self.paren_level == 0) {
                             return self.reportErr("unmatched ')'", c);
                         }
-                        self.level -= 1;
+                        self.paren_level -= 1;
                         res = .RParen;
                         break;
                     },
                     '[' => {
-                        self.level += 1;
+                        self.paren_level += 1;
                         res = .LBracket;
                         break;
                     },
                     ']' => {
-                        if (self.level == 0) {
+                        if (self.paren_level == 0) {
                             return self.reportErr("unmatched ']'", c);
                         }
-                        self.level -= 1;
+                        self.paren_level -= 1;
                         res = .RBracket;
                         break;
                     },
@@ -491,15 +596,15 @@ pub const Tokenizer = struct {
                         state = .Caret;
                     },
                     '{' => {
-                        self.level += 1;
+                        self.paren_level += 1;
                         res = .LBrace;
                         break;
                     },
                     '}' => {
-                        if (self.level == 0) {
+                        if (self.paren_level == 0) {
                             return self.reportErr("unmatched '}'", c);
                         }
-                        self.level -= 1;
+                        self.paren_level -= 1;
                         res = .RBrace;
                         break;
                     },
@@ -977,6 +1082,7 @@ pub const Tokenizer = struct {
 
                 .String => {
                     if (self.repl) {
+                        // if running in repl this might be a multiline string
                         self.it.i = self.start_index;
                         res = .Eof;
                     } else
@@ -1005,9 +1111,6 @@ pub const Tokenizer = struct {
                 },
             }
         }
-        self.prev_nl = res == .Nl or res == .Eof;
-        if (state != .Start)
-            self.no_eof = false;
         return Token{
             .id = res,
             .start = @truncate(u32, self.start_index),
@@ -1133,5 +1236,26 @@ test "keywords" {
         .Keyword_fn,
         .Keyword_as,
         .Keyword_const,
+    });
+}
+
+test "indentation" {
+    expectTokens(
+        \\if
+        \\    if
+        \\
+        \\        if
+        \\
+    , &[_]Token.Id{
+        .Keyword_if,
+        .Nl,
+        .Begin,
+        .Keyword_if,
+        .Nl,
+        .Begin,
+        .Keyword_if,
+        .Nl,
+        .End,
+        .End,
     });
 }
