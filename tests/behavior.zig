@@ -1,3 +1,12 @@
+test "subscript" {
+    try expectOutput(
+        \\const y = (1,2)
+        \\y[-1]
+    ,
+        \\2
+    );
+}
+
 test "assert" {
     try expectOutput(
         \\const assert = fn (ok) if not ok {error(false)}

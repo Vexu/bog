@@ -126,7 +126,7 @@ const Renderer = struct {
                             }
                         }
                     },
-                    .ArrAccess => |arr_node| try self.renderNode(arr_node, stream, indent, .None),
+                    .Subscript => |arr_node| try self.renderNode(arr_node, stream, indent, .None),
                     .Member => {},
                 }
                 return self.renderToken(suffix.r_tok, stream, indent, space);

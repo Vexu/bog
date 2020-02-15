@@ -685,7 +685,27 @@ pub const Compiler = struct {
                 return Value{ .Rt = arg_locs[0] };
             },
             .Member => return self.reportErr("TODO: member access", node.l_tok),
-            .ArrAccess => return self.reportErr("TODO: subscript", node.l_tok),
+            .Subscript => |val| {
+                const res_reg = switch (res) {
+                    .Rt => |r| r,
+                    .Lval => |l| switch (l) {
+                        .Let, .Const => return self.reportErr("cannot declare to subscript", node.l_tok),
+                        .AugAssign => self.registerAlloc(),
+                        else => return self.reportErr("TODO: assign to subscript", node.l_tok),
+                    },
+                    .Value => self.registerAlloc(),
+                };
+
+                const val_res = try self.genNode(val, .Value);
+                try self.assertNotEmpty(val_res, val.firstToken());
+
+                const reg = self.registerAlloc();
+                defer self.registerFree(reg);
+                try self.makeRuntime(reg, val_res);
+
+                try self.emitInstruction_3(.Subscript, res_reg, l_val.Rt, reg);
+                return Value{ .Rt = res_reg };
+            },
         }
     }
 

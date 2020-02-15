@@ -493,7 +493,7 @@ pub const Parser = struct {
                 node.* = .{
                     .lhs = lhs,
                     .l_tok = tok,
-                    .op = .{ .ArrAccess = try parser.expr(true) },
+                    .op = .{ .Subscript = try parser.expr(true) },
                     .r_tok = try parser.expectToken(.RBracket, true),
                 };
                 lhs = &node.base;

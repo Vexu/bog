@@ -434,10 +434,29 @@ pub const Vm = struct {
                     const B_val = vm.getVal(module);
                     const C_val = vm.getVal(module);
 
-                    A_ref.* = switch (B_val.kind) {
-                        .Tuple => |val| val[@intCast(u32, C_val.kind.Int)],
-                        else => return vm.reportErr("TODO: subscript for more types"),
-                    };
+                    switch (B_val.kind) {
+                        .Tuple => |val| if (C_val.kind == .Int) {
+                            var index = C_val.kind.Int;
+                            if (index < 0)
+                                index += @intCast(i64, val.len);
+                            if (index < 0 or index > val.len)
+                                return vm.reportErr("index out of bounds");
+
+                            A_ref.* = val[@intCast(u32, index)];
+                        } else {
+                            return vm.reportErr("TODO subscript with ranges");
+                        },
+                        .Map => |val| {
+                            return vm.reportErr("TODO subscript map");
+                        },
+                        .List => |val| {
+                            return vm.reportErr("TODO subscript list");
+                        },
+                        .Str => |val| {
+                            return vm.reportErr("TODO subscript string");
+                        },
+                        else => return vm.reportErr("invalid subscript type"),
+                    }
                 },
                 .As => {
                     const A_ref = vm.getRef(module);

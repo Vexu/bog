@@ -227,7 +227,7 @@ pub const Node = struct {
         lhs: *Node,
         op: union(enum) {
             Call: List,
-            ArrAccess: *Node,
+            Subscript: *Node,
             Member,
         },
         l_tok: TokenIndex,
