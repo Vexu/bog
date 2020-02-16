@@ -392,8 +392,6 @@ pub const Compiler = struct {
         };
         self.cur_scope = &block_scope;
         defer self.cur_scope = block_scope.parent.?;
-        const start_reg_count = self.used_regs;
-        defer self.used_regs = start_reg_count;
 
         var it = node.stmts.iterator(0);
         while (it.next()) |n| {

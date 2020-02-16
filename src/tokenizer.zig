@@ -368,12 +368,15 @@ pub const Tokenizer = struct {
         self.it.bytes = input;
         _ = self.tree.tokens.pop();
         self.tree.source = input;
+        const start_len = self.tree.tokens.len;
         while (true) {
             const tok = try self.tree.tokens.addOne();
             tok.* = try self.next();
             if (tok.id == .Eof) {
                 // check if more input is expected
-                return if (self.paren_level != 0 or
+                return if (self.tree.tokens.len == start_len + 2)
+                    true
+                else if (self.paren_level != 0 or
                     self.string or
                     self.expect_indent or
                     self.indent_level != 0)
@@ -417,12 +420,23 @@ pub const Tokenizer = struct {
             }
         } else {
             if (self.repl) {
-                // this hack tries to avoid asking for indentation when it is not expected.
-                // false positives include tuples, none-literals and function calls
                 if (self.indent_level == 0 and self.tree.tokens.len > 2) {
                     switch (self.tree.tokens.at(self.tree.tokens.len - 3).id) {
-                        .RParen, .Keyword_else => {},
-                        else => return null,
+                        // no further input is expected after these tokens
+                        // so we can stop asking for more input
+                        .Comment,
+                        .Identifier,
+                        .String,
+                        .Integer,
+                        .Number,
+                        .RBrace,
+                        .RBracket,
+                        .Underscore,
+                        .Keyword_continue,
+                        .Keyword_false,
+                        .Keyword_true,
+                        => return null,
+                        else => {},
                     }
                 }
                 self.expect_indent = true;

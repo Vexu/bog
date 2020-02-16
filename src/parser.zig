@@ -63,11 +63,12 @@ pub const Parser = struct {
             .it = tree.tokens.iterator(start_index),
             .tree = tree,
         };
-        if (parser.eatToken(.Nl, false)) |_| return null;
+        if (parser.eatToken(.Eof, true)) |_| return null;
         const ret = try parser.stmt();
         try tree.nodes.push(ret);
-        // TODO this doesn't work with blocks
-        // _ = try parser.expectToken(.Nl, false);
+        _ = parser.eatToken(.Nl, false) orelse {
+            _ = try parser.expectToken(.Eof, true);
+        };
         return ret;
     }
 
