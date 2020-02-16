@@ -111,7 +111,7 @@ const Renderer = struct {
                     .Call => |*params| {
                         var it = params.iterator(0);
                         const prev = self.tokens.at(suffix.r_tok - 1).id;
-                        if (prev == .Comma or prev == .Nl) {
+                        if (prev == .Comma or prev == .Nl or prev == .End) {
                             try stream.writeByte('\n');
                             const new_indet = indent + indent_delta;
                             while (it.next()) |param| {
@@ -213,7 +213,7 @@ const Renderer = struct {
 
                 var it = fn_expr.params.iterator(0);
                 const prev = self.tokens.at(fn_expr.r_paren - 1).id;
-                if (prev == .Comma or prev == .Nl) {
+                if (prev == .Comma or prev == .Nl or prev == .End) {
                     try stream.writeByte('\n');
                     const new_indet = indent + indent_delta;
                     while (it.next()) |param| {
@@ -246,7 +246,7 @@ const Renderer = struct {
 
                 var it = ltm.values.iterator(0);
                 const prev = self.tokens.at(ltm.r_tok - 1).id;
-                if (prev == .Comma or prev == .Nl) {
+                if (prev == .Comma or prev == .Nl or prev == .End) {
                     try stream.writeByte('\n');
                     const new_indet = indent + indent_delta;
                     while (it.next()) |param| {
@@ -348,10 +348,13 @@ const Renderer = struct {
             .MatchCatchAll => {
                 const case = @fieldParentPtr(Node.MatchCatchAll, "base", node);
 
-                try self.renderToken(case.tok, stream, indent, .Space);
                 if (self.tokens.at(case.tok).id != .Underscore) {
-                    try self.renderToken(self.nextToken(case.tok), stream, indent, .Space);
+                    try self.renderToken(case.tok, stream, indent, .Space);
+                    try self.renderToken(self.nextToken(case.tok), stream, indent, .None);
+                } else {
+                    try self.renderToken(case.tok, stream, indent, .None);
                 }
+                try self.renderToken(case.colon, stream, indent, .Space);
                 return self.renderNode(case.expr, stream, indent, space);
             },
             .MatchLet => {
@@ -366,14 +369,16 @@ const Renderer = struct {
                 const case = @fieldParentPtr(Node.MatchCase, "base", node);
 
                 var it = case.lhs.iterator(0);
+                // TODO trailing comma
                 while (it.next()) |param| {
                     if (it.peek() == null) {
-                        try self.renderNode(param.*, stream, indent, .Space);
+                        try self.renderNode(param.*, stream, indent, .None);
                         break;
                     }
                     try self.renderNode(param.*, stream, indent, .None);
                     try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .Space);
                 }
+                try self.renderToken(case.colon, stream, indent, .Space);
 
                 return self.renderNode(case.expr, stream, indent, space);
             },
@@ -392,15 +397,22 @@ const Renderer = struct {
         switch (space) {
             .None => if (tok.id == .Comment) try stream.writeByte('\n'),
             .Newline => try stream.writeByte('\n'),
-            .Space => try stream.writeByte(' '),
+            .Space => if (self.tokens.len > token + 2 and self.tokens.at(token + 2).id == .Begin) {
+                try stream.writeByte('\n');
+            } else {
+                try stream.writeByte(' ');
+            },
         }
         var i = token;
         tok = self.tokens.at(i);
         while (true) {
             i += 1;
             tok = self.tokens.at(i);
-            if (tok.id == .Nl) continue;
-            if (tok.id != .Comment) break;
+            switch (tok.id) {
+                .Nl, .End, .Begin => continue,
+                .Comment => {},
+                else => break,
+            }
 
             try stream.write(self.source[tok.start..tok.end]);
             try stream.writeByte('\n');

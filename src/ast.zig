@@ -345,8 +345,9 @@ pub const Node = struct {
 
     pub const MatchCatchAll = struct {
         base: Node = Node{ .id = .MatchCatchAll },
-        tok: TokenIndex,
         expr: *Node,
+        tok: TokenIndex,
+        colon: TokenIndex,
     };
 
     pub const MatchLet = struct {

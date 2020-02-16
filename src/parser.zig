@@ -132,8 +132,7 @@ pub const Parser = struct {
             try node.params.push(try parser.primaryExpr(true));
             if (parser.eatToken(.Comma, true) == null) end = true;
         }
-        parser.skipNl();
-        node.body = try parser.expr(false);
+        node.body = try parser.expr(skip_nl);
         return &node.base;
     }
 
@@ -579,7 +578,7 @@ pub const Parser = struct {
                     .CaretEqual => .BitXOrAssign,
                     else => unreachable,
                 },
-                .rhs = try parser.expr(skip_nl),
+                .rhs = try parser.expr(false),
             };
             return &node.base;
         }
@@ -891,10 +890,10 @@ pub const Parser = struct {
             parser.eatToken(.Keyword_const, false)) |let_const|
         {
             if (parser.eatToken(.Identifier, true)) |_| {
-                _ = try parser.expectToken(.Colon, true);
                 const node = try parser.arena.create(Node.MatchCatchAll);
                 node.* = .{
                     .tok = let_const,
+                    .colon = try parser.expectToken(.Colon, true),
                     .expr = try parser.expr(false),
                 };
                 return &node.base;
@@ -910,9 +909,9 @@ pub const Parser = struct {
             return &node.base;
         } else if (parser.eatToken(.Underscore, false)) |u| {
             const node = try parser.arena.create(Node.MatchCatchAll);
-            _ = try parser.expectToken(.Colon, true);
             node.* = .{
                 .tok = u,
+                .colon = try parser.expectToken(.Colon, true),
                 .expr = try parser.expr(false),
             };
             return &node.base;
@@ -962,13 +961,14 @@ pub const Parser = struct {
     fn eatTokenId(parser: *Parser, id: Token.Id, skip_nl: bool) ?TokAndId {
         var next_tok = parser.it.next().?;
         while (true) {
-            if (next_tok.id == .Comment or next_tok.id == .Nl and (parser.it.peek() orelse break).id == .Comment)
-                next_tok = parser.it.next().?
-            else
-                break;
-        }
-        if (skip_nl and (next_tok.id == .Nl or next_tok.id == .Begin or next_tok.id == .End))
+            switch (next_tok.id) {
+                .End => if (id == .End) break,
+                .Nl, .Begin => if (!skip_nl) break,
+                .Comment => {},
+                else => break,
+            }
             next_tok = parser.it.next().?;
+        }
         if (next_tok.id == id) {
             return TokAndId{
                 .index = @intCast(TokenIndex, parser.it.index - 1),
