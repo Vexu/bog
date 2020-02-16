@@ -417,6 +417,14 @@ pub const Tokenizer = struct {
             }
         } else {
             if (self.repl) {
+                // this hack tries to avoid asking for indentation when it is not expected.
+                // false positives include tuples, none-literals and function calls
+                if (self.indent_level == 0 and self.tree.tokens.len > 2) {
+                    switch (self.tree.tokens.at(self.tree.tokens.len - 3).id) {
+                        .RParen, .Keyword_else => {},
+                        else => return null,
+                    }
+                }
                 self.expect_indent = true;
                 return null;
             }

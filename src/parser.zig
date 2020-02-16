@@ -63,7 +63,7 @@ pub const Parser = struct {
             .it = tree.tokens.iterator(start_index),
             .tree = tree,
         };
-        if (parser.eatToken(.Nl, true)) |_| return null;
+        if (parser.eatToken(.Nl, false)) |_| return null;
         const ret = try parser.stmt();
         try tree.nodes.push(ret);
         // TODO this doesn't work with blocks
@@ -661,7 +661,7 @@ pub const Parser = struct {
             return &node.base;
         }
         if (parser.eatToken(.LParen, skip_nl)) |tok| {
-            if (parser.eatToken(.RParen, true)) |rparen| {
+            if (parser.eatToken(.RParen, false)) |rparen| {
                 const node = try parser.arena.create(Node.Literal);
                 node.* = .{
                     .tok = rparen,

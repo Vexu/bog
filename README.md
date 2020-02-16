@@ -2,9 +2,9 @@ Small, strongly typed, embeddable language.
 ---
 Not much is done but this is how it is going to look like
 ```rust
-let {print} = import('io')
+const {print} = import('io')
 
-let assert = fn(ok) if (not ok) error("assertion failure")
+const assert = fn(ok) if (not ok) error("assertion failure")
 
 let x = 0
 
@@ -13,7 +13,7 @@ let x = 0
 x + (true as int)
 assert(x == 1)
 
-let foo = fn(arg)
+const foo = fn(arg)
     if (arg == 4)
         return error(4)
     arg += if (arg == 2) 1 else 2
@@ -23,7 +23,7 @@ let y = foo(x)
 assert(x == 2 and y == x)
 
 # copy on assign
-let baz = fn(x)
+const baz = fn(x)
     let z = x
     z += 2
     z
