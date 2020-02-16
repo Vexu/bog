@@ -398,7 +398,9 @@ pub const Tokenizer = struct {
         var count: u8 = 0;
         // get all indentation characters
         while (self.it.nextCodepoint()) |c| {
-            if (c == '\n' or c == '\r') {
+            if (c == '\r')
+                continue;
+            if (c == '\n') {
                 // empty line; rest count
                 count = 0;
                 if (self.repl) {
@@ -488,6 +490,7 @@ pub const Tokenizer = struct {
                 .end = @truncate(u32, self.it.i),
             };
         }
+        self.start_index = self.it.i;
         var state: enum {
             Start,
             String,

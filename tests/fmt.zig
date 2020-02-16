@@ -1,3 +1,16 @@
+test "nested blocks" {
+    try testCanonical(
+        \\if (false)
+        \\    if (false)
+        \\        3
+        \\    else if (true)
+        \\        4
+        \\    else
+        \\        5
+        \\
+    );
+}
+
 test "preserve comment after comma" {
     try testCanonical(
         \\(1, #hello world

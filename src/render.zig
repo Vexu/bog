@@ -322,6 +322,8 @@ const Renderer = struct {
 
                 if (if_expr.else_body) |some| {
                     try self.renderNode(if_expr.if_body, stream, indent, .Space);
+                    if (if_expr.if_body.id == .Block)
+                        try stream.writeByteNTimes(' ', indent);
 
                     try self.renderToken(if_expr.else_tok.?, stream, indent, .Space);
                     return self.renderNode(some, stream, indent, space);

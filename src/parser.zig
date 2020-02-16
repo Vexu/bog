@@ -784,11 +784,14 @@ pub const Parser = struct {
         };
         while (true) {
             try node.stmts.push(try parser.stmt());
-            _ = try parser.expectToken(.Nl, false);
-            if (parser.eatToken(.End, false)) |_| {
-                return &node.base;
-            }
+            _ = parser.eatToken(.Nl, false) orelse {
+                _ = try parser.expectToken(.End, false);
+                break;
+            };
+            if (parser.eatToken(.End, false)) |_|
+                break;
         }
+        return &node.base;
     }
 
     /// if : "if" "(" (decl "=")? expr ")" expr ("else" expr)?
@@ -874,10 +877,12 @@ pub const Parser = struct {
         _ = try parser.expectToken(.Begin, false);
         while (true) {
             try node.body.push(try parser.matchCase());
-            _ = try parser.expectToken(.Nl, false);
-            if (parser.eatToken(.End, true)) |_| {
+            _ = parser.eatToken(.Nl, false) orelse {
+                _ = try parser.expectToken(.End, false);
                 break;
-            }
+            };
+            if (parser.eatToken(.End, false)) |_|
+                break;
         }
         return &node.base;
     }
@@ -948,6 +953,7 @@ pub const Parser = struct {
         return error.ParseError;
     }
 
+    /// skips nl begins and ends
     fn skipNl(parser: *Parser) void {
         _ = parser.eatToken(.Nl, true);
     }
@@ -962,8 +968,9 @@ pub const Parser = struct {
         var next_tok = parser.it.next().?;
         while (true) {
             switch (next_tok.id) {
-                .End => if (id == .End) break,
-                .Nl, .Begin => if (!skip_nl) break,
+                // skip nl, begin and end if they are not meaningful
+                .Nl, .Begin, .End => if (!skip_nl) break,
+                // always skip comments
                 .Comment => {},
                 else => break,
             }
@@ -971,6 +978,7 @@ pub const Parser = struct {
         }
         if (next_tok.id == id) {
             return TokAndId{
+                // parser.it.index points to the next token
                 .index = @intCast(TokenIndex, parser.it.index - 1),
                 .id = id,
                 .tok = next_tok,
@@ -988,7 +996,6 @@ pub const Parser = struct {
 
     fn expectToken(parser: *Parser, id: Token.Id, skip_nl: bool) !TokenIndex {
         if (parser.eatToken(id, skip_nl)) |tok| return tok;
-        std.debug.warn("{}\n", .{parser.it.peek().?});
         return parser.reportErr("unexpected token", parser.it.peek().?);
     }
 };
