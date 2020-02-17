@@ -183,7 +183,7 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
     var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const alloc = &buf_alloc.allocator;
 
-    var vm = Vm.init(alloc, true);
+    var vm = Vm.init(alloc, false);
 
     // TODO move this
     try vm.gc.stackAlloc(250);
@@ -193,8 +193,8 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
 
     // TODO this should happen in vm.exec but currently that would break repl
     vm.ip = module.start_index;
-    try vm.exec(&module);
-    if (vm.result) |some| {
+    const res = try vm.exec(&module);
+    if (res) |some| {
         var out_buf = try std.Buffer.initSize(alloc, 0);
         var out_stream = std.io.BufferOutStream.init(&out_buf);
         try some.dump(&out_stream.stream, 2);

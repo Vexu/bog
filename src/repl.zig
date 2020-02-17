@@ -128,12 +128,11 @@ const Repl = struct {
         const node = (try lang.Parser.parseRepl(repl.tree, begin_index)) orelse return;
         repl.vm.ip += try repl.compiler.compileRepl(node, &repl.module);
 
-        try repl.vm.exec(&repl.module);
-        if (repl.vm.result) |some| {
+        const res = try repl.vm.exec(&repl.module);
+        if (res) |some| {
             try some.dump(out_stream, 2);
             try out_stream.writeByte('\n');
             // vm.result.deref();
-            repl.vm.result = null;
         }
 
         // reset arena

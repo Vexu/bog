@@ -165,6 +165,9 @@ pub const Compiler = struct {
 
         /// A value, runtime or constant, is expected
         Value,
+
+        /// No value is expected if some is given it will be discarded
+        Discard,
     };
 
     pub fn compile(tree: *Tree, allocator: *Allocator) (Error || lang.Parser.Error)!lang.Module {
@@ -186,21 +189,35 @@ pub const Compiler = struct {
         };
         compiler.code = &compiler.root_scope.code;
         compiler.cur_scope = &compiler.root_scope.base;
+
         var it = tree.nodes.iterator(0);
         while (it.next()) |n| {
             try compiler.addLineInfo(n.*);
-            const val = try compiler.genNode(n.*, .Value);
+
+            const last = it.peek() == null;
+            const res = if (last)
+                Result{ .Value = {} }
+            else
+                Result{ .Discard = {} };
+
+            const val = try compiler.genNode(n.*, res);
+            if (last) {
+                if (val == .Rt) {
+                    try compiler.emitInstruction_1(.Return, val.Rt);
+                    break;
+                }
+                const reg = compiler.registerAlloc();
+                defer compiler.registerFree(reg);
+                try compiler.makeRuntime(reg, val);
+                try compiler.emitInstruction_1(.Return, reg);
+            }
             if (val == .Rt) {
                 // discard unused runtime value
                 try compiler.emitInstruction_1(.Discard, val.Rt);
                 compiler.registerFree(val.Rt);
-            } else if (it.peek() == null and val != .Empty) {
-                const reg = compiler.registerAlloc();
-                defer compiler.registerFree(reg);
-                try compiler.makeRuntime(reg, val);
-                try compiler.emitInstruction_1(.Discard, reg);
             }
         }
+
         const start_index = compiler.module_code.len;
         try compiler.module_code.appendSlice(compiler.code.toSliceConst());
         return lang.Module{
@@ -396,47 +413,57 @@ pub const Compiler = struct {
         var it = node.stmts.iterator(0);
         while (it.next()) |n| {
             try self.addLineInfo(n.*);
-            if (it.peek() == null) {
+
+            // return value of last instruction if it is not discarded
+            if (it.peek() == null and res != .Discard) {
                 return self.genNode(n.*, res);
             }
-            const val = try self.genNode(n.*, .Value);
+
+            const val = try self.genNode(n.*, .Discard);
             if (val == .Rt) {
                 // discard unused runtime value
                 try self.emitInstruction_1(.Discard, val.Rt);
                 self.registerFree(val.Rt);
             }
         }
-        unreachable;
+        return Value{ .Empty = {} };
     }
 
     fn genIf(self: *Compiler, node: *Node.If, res: Result) Error!Value {
         try self.assertNotLval(res, node.if_tok);
 
-        if (node.capture != null) return self.reportErr("TODO if let", node.capture.?.firstToken());
+        if (node.capture) |some| return self.reportErr("TODO if let", some.firstToken());
 
         const cond_val = try self.genNode(node.cond, .Value);
-        if (cond_val == .Bool) {
+        if (cond_val != .Rt) {
+            try self.assertBool(cond_val, node.cond.firstToken());
+
             if (cond_val.Bool) {
                 return self.genNode(node.if_body, res);
             } else if (node.else_body) |some| {
                 return self.genNode(some, res);
             }
+
             const res_val = Value{ .None = {} };
             if (res == .Rt) {
                 try self.makeRuntime(res.Rt, res_val);
                 return Value{ .Rt = res.Rt };
             } else return res_val;
-        } else if (cond_val != .Rt) {
-            return self.reportErr("expected a boolean value", node.cond.firstToken());
         }
-        const res_loc = if (res == .Rt) res else Result{
-            .Rt = self.registerAlloc(),
+        const sub_res = switch (res) {
+            .Rt, .Discard => res,
+            else => Result{
+                .Rt = self.registerAlloc(),
+            },
         };
 
         // jump past if_body if cond == false
         try self.emitInstruction_1_1(.JumpFalse, cond_val.Rt, @as(u32, 0));
         const addr = self.code.len - @sizeOf(u32);
-        _ = try self.genNode(node.if_body, res_loc);
+        const if_val = try self.genNode(node.if_body, sub_res);
+        if (sub_res != .Rt and if_val == .Rt) {
+            try self.emitInstruction_1(.Discard, if_val.Rt);
+        }
 
         // jump past else_body since if_body was executed
         try self.emitInstruction_0_1(.Jump, @as(u32, 0));
@@ -444,15 +471,22 @@ pub const Compiler = struct {
 
         @ptrCast(*align(1) u32, self.code.toSlice()[addr..].ptr).* = @truncate(u32, self.code.len - addr - @sizeOf(u32));
         if (node.else_body) |some| {
-            _ = try self.genNode(some, res_loc);
-        } else {
-            try self.emitInstruction_1_1(.ConstPrimitive, res_loc.Rt, @as(u8, 0));
+            const else_val = try self.genNode(some, sub_res);
+            if (sub_res != .Rt and else_val == .Rt) {
+                try self.emitInstruction_1(.Discard, else_val.Rt);
+            }
+        } else if (sub_res == .Rt) {
+            try self.emitInstruction_1_1(.ConstPrimitive, sub_res.Rt, @as(u8, 0));
         }
 
         @ptrCast(*align(1) u32, self.code.toSlice()[addr2..].ptr).* = @truncate(u32, self.code.len - addr2 - @sizeOf(u32));
-        return Value{
-            .Rt = res_loc.Rt,
-        };
+
+        return if (sub_res == .Rt)
+            Value{
+                .Rt = sub_res.Rt,
+            }
+        else
+            Value{ .Empty = {} };
     }
 
     fn assertNotLval(self: *Compiler, res: Result, tok: TokenIndex) !void {
@@ -482,6 +516,9 @@ pub const Compiler = struct {
     fn assertNumeric(self: *Compiler, val: Value, tok: TokenIndex) !void {
         if (val != .Int and val != .Num) {
             return self.reportErr("expected a number", tok);
+        }
+        if (val == .Num) {
+            return self.reportErr("TODO operations on real numbers", tok);
         }
     }
 
@@ -691,7 +728,7 @@ pub const Compiler = struct {
                         .AugAssign => self.registerAlloc(),
                         else => return self.reportErr("TODO: assign to subscript", node.l_tok),
                     },
-                    .Value => self.registerAlloc(),
+                    .Discard, .Value => self.registerAlloc(),
                 };
 
                 const val_res = try self.genNode(val, .Value);

@@ -19,7 +19,6 @@ pub const Vm = struct {
     gc: Gc,
 
     repl: bool,
-    result: ?Ref = null,
 
     errors: lang.Error.List,
 
@@ -58,7 +57,7 @@ pub const Vm = struct {
 
     // TODO some safety
     // TODO rename to step and execute 1 instruction
-    pub fn exec(vm: *Vm, module: *lang.Module) Error!void {
+    pub fn exec(vm: *Vm, module: *lang.Module) Error!?Ref {
         while (vm.ip < module.code.len) {
             const op = @intToEnum(Op, vm.getArg(module, u8));
             switch (op) {
@@ -381,7 +380,7 @@ pub const Vm = struct {
                         return vm.reportErr("error discarded");
                     }
                     if (vm.repl and vm.call_stack.len == 0) {
-                        vm.result = stack[A + vm.sp];
+                        return stack[A + vm.sp];
                     }
                 },
                 .BuildTuple => {
@@ -550,11 +549,15 @@ pub const Vm = struct {
                     vm.ip = A_val.kind.Fn.offset;
                 },
                 .Return => {
-                    const A_val = vm.getVal(module);
+                    const A = vm.getArg(module, RegRef);
 
                     // TODO
                     const stack = vm.gc.stack.toSlice();
-                    stack[vm.sp].value = A_val;
+                    if (vm.call_stack.len == 0) {
+                        // module result
+                        return stack[A + vm.sp];
+                    }
+                    stack[vm.sp] = stack[A + vm.sp];
 
                     const frame = vm.call_stack.pop() orelse return error.MalformedByteCode;
                     vm.ip = frame.ip;
@@ -580,6 +583,7 @@ pub const Vm = struct {
                 },
             }
         }
+        return null;
     }
 
     fn getArg(vm: *Vm, module: *lang.Module, comptime T: type) T {
@@ -646,6 +650,9 @@ pub const Vm = struct {
 
         if (val.kind != .Int and val.kind != .Num) {
             return vm.reportErr("expected a number");
+        }
+        if (val.kind == .Num) {
+            return vm.reportErr("TODO operations on real numbers");
         }
         return val;
     }
