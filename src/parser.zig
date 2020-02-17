@@ -137,14 +137,14 @@ pub const Parser = struct {
         return &node.base;
     }
 
-    /// jump_expr : "return" expr? | "break" expr? | "continue"
+    /// jump_expr : "return" expr? | "break" | "continue"
     fn jumpExpr(parser: *Parser) Error!?*Node {
         const tok = parser.eatTokenId(.Keyword_return, false) orelse
             parser.eatTokenId(.Keyword_break, false) orelse
             parser.eatTokenId(.Keyword_continue, false) orelse
             return null;
         const peek = parser.it.peek().?;
-        const res = if (tok.id != .Keyword_continue and switch (peek.id) {
+        const res = if (tok.id == .Keyword_return and switch (peek.id) {
             .Nl, .RParen, .RBrace, .RBracket, .Keyword_else, .Comma, .Colon => false,
             else => true,
         })
@@ -156,7 +156,7 @@ pub const Parser = struct {
             .tok = tok.index,
             .op = switch (tok.id) {
                 .Keyword_return => .{ .Return = res },
-                .Keyword_break => .{ .Break = res },
+                .Keyword_break => .Break,
                 .Keyword_continue => .Continue,
                 else => unreachable,
             },

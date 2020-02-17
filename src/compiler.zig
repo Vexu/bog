@@ -92,6 +92,14 @@ pub const Compiler = struct {
             code: Code,
         };
 
+        const Loop = struct {
+            base: Scope,
+            breaks: BreakList,
+            cond_begin: u32,
+
+            const BreakList = std.SegmentedList(u32, 4);
+        };
+
         fn declSymbol(self: *Scope, sym: Symbol) !void {
             try self.syms.push(sym);
         }
@@ -264,14 +272,14 @@ pub const Compiler = struct {
             .Fn => return self.genFn(@fieldParentPtr(Node.Fn, "base", node), res),
             .Suffix => return self.genSuffix(@fieldParentPtr(Node.Suffix, "base", node), res),
             .Error => return self.genError(@fieldParentPtr(Node.Error, "base", node), res),
+            .While => return self.genWhile(@fieldParentPtr(Node.While, "base", node), res),
+            .Jump => return self.genJump(@fieldParentPtr(Node.Jump, "base", node), res),
             .Import => return self.reportErr("TODO: Import", node.firstToken()),
             .List => return self.reportErr("TODO: List", node.firstToken()),
             .Map => return self.reportErr("TODO: Map", node.firstToken()),
             .Catch => return self.reportErr("TODO: Catch", node.firstToken()),
             .For => return self.reportErr("TODO: For", node.firstToken()),
-            .While => return self.reportErr("TODO: While", node.firstToken()),
             .Match => return self.reportErr("TODO: Match", node.firstToken()),
-            .Jump => return self.reportErr("TODO: Jump", node.firstToken()),
             .MapItem,
             .MatchCatchAll,
             .MatchLet,
@@ -469,7 +477,8 @@ pub const Compiler = struct {
         try self.emitInstruction_0_1(.Jump, @as(u32, 0));
         const addr2 = self.code.len - @sizeOf(u32);
 
-        @ptrCast(*align(1) u32, self.code.toSlice()[addr..].ptr).* = @truncate(u32, self.code.len - addr - @sizeOf(u32));
+        @ptrCast(*align(1) u32, self.code.toSlice()[addr..].ptr).* =
+            @truncate(u32, self.code.len - addr - @sizeOf(u32));
         if (node.else_body) |some| {
             const else_val = try self.genNode(some, sub_res);
             if (sub_res != .Rt and else_val == .Rt) {
@@ -479,7 +488,120 @@ pub const Compiler = struct {
             try self.emitInstruction_1_1(.ConstPrimitive, sub_res.Rt, @as(u8, 0));
         }
 
-        @ptrCast(*align(1) u32, self.code.toSlice()[addr2..].ptr).* = @truncate(u32, self.code.len - addr2 - @sizeOf(u32));
+        @ptrCast(*align(1) u32, self.code.toSlice()[addr2..].ptr).* =
+            @truncate(u32, self.code.len - addr2 - @sizeOf(u32));
+
+        return if (sub_res == .Rt)
+            Value{
+                .Rt = sub_res.Rt,
+            }
+        else
+            Value{ .Empty = {} };
+    }
+
+    fn genJump(self: *Compiler, node: *Node.Jump, res: Result) Error!Value {
+        if (res != .Discard) {
+            return self.reportErr("jump expression produces no value", node.tok);
+        }
+        if (node.op == .Return) {
+            if (node.op.Return) |some| {
+                const reg = self.registerAlloc();
+                defer self.registerFree(reg);
+                _ = try self.genNode(some, Result{ .Rt = reg });
+                try self.emitInstruction_1(.Return, reg);
+            } else {
+                try self.code.append(@enumToInt(lang.Op.ReturnNone));
+            }
+            return Value{ .Empty = {} };
+        }
+
+        // find inner most loop
+        const loop_scope = blk: {
+            var scope = self.cur_scope;
+            while (true) switch (scope.id) {
+                .Fn => return self.reportErr(if (node.op == .Continue)
+                    "continue outside of loop"
+                else
+                    "break outside of loop", node.tok),
+                .Loop => break,
+                else => scope = scope.parent.?,
+            };
+            break :blk @fieldParentPtr(Scope.Loop, "base", scope);
+        };
+        if (node.op == .Continue) {
+            try self.emitInstruction_0_1(
+                .Jump,
+                @truncate(i32, -@intCast(isize, self.code.len - loop_scope.cond_begin)),
+            );
+        } else {
+            try self.emitInstruction_0_1(.Jump, @as(u32, 0));
+            try loop_scope.breaks.push(@intCast(u32, self.code.len - @sizeOf(u32)));
+        }
+
+        return Value{ .Empty = {} };
+    }
+
+    fn genWhile(self: *Compiler, node: *Node.While, res: Result) Error!Value {
+        try self.assertNotLval(res, node.while_tok);
+
+        var loop_scope = Scope.Loop{
+            .base = .{
+                .id = .Loop,
+                .parent = self.cur_scope,
+                .syms = Symbol.List.init(self.arena),
+            },
+            .breaks = Scope.Loop.BreakList.init(self.arena),
+            .cond_begin = @intCast(u32, self.code.len),
+        };
+        self.cur_scope = &loop_scope.base;
+        defer self.cur_scope = loop_scope.base.parent.?;
+
+        if (node.capture) |some| return self.reportErr("TODO while let", some.firstToken());
+
+        // beginning of condition
+        var cond_jump: ?usize = null;
+
+        const cond_val = try self.genNode(node.cond, .Value);
+        if (cond_val == .Rt) {
+            try self.emitInstruction_1_1(.JumpFalse, cond_val.Rt, @as(u32, 0));
+            cond_jump = self.code.len - @sizeOf(u32);
+        } else {
+            try self.assertBool(cond_val, node.cond.firstToken());
+            if (cond_val.Bool == false) {
+                // never executed
+                const res_val = Value{ .None = {} };
+                if (res == .Rt) {
+                    try self.makeRuntime(res.Rt, res_val);
+                    return Value{ .Rt = res.Rt };
+                } else return res_val;
+            }
+        }
+
+        const sub_res = switch (res) {
+            .Discard => res,
+            else => return self.reportErr("TODO while expr", node.while_tok),
+        };
+
+        const body_val = try self.genNode(node.body, sub_res);
+        if (sub_res != .Rt and body_val == .Rt) {
+            try self.emitInstruction_1(.Discard, body_val.Rt);
+        }
+
+        // jump back to condition
+        try self.emitInstruction_0_1(
+            .Jump,
+            @truncate(i32, -@intCast(isize, self.code.len - loop_scope.cond_begin)),
+        );
+
+        // exit loop if cond == false
+        if (cond_jump) |some| {
+            @ptrCast(*align(1) u32, self.code.toSlice()[some..].ptr).* =
+                @truncate(u32, self.code.len - some);
+        }
+        while (loop_scope.breaks.pop()) |some| {
+            @ptrCast(*align(1) u32, self.code.toSlice()[some..].ptr).* =
+                @truncate(u32, self.code.len - some);
+        }
 
         return if (sub_res == .Rt)
             Value{

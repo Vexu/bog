@@ -130,8 +130,8 @@ pub const Node = struct {
             .Jump => {
                 const jump = @fieldParentPtr(Node.Jump, "base", node);
                 switch (jump.op) {
-                    .Break, .Return => |n| return if (n) |some| some.lastToken() else jump.tok,
-                    .Continue => return jump.tok,
+                    .Return => |n| return if (n) |some| some.lastToken() else jump.tok,
+                    .Break, .Continue => return jump.tok,
                 }
             },
         };
@@ -369,7 +369,7 @@ pub const Node = struct {
         base: Node = Node{ .id = .Jump },
         tok: TokenIndex,
         op: union(enum) {
-            Break: ?*Node,
+            Break,
             Continue,
             Return: ?*Node,
         },

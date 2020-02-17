@@ -1,3 +1,18 @@
+test "while loop" {
+    try expectOutput(
+        \\const cond = true
+        \\while (cond)
+        \\    if (not cond)
+        \\        break
+        \\    else
+        \\        let x = 2
+        \\    break
+        \\true
+    ,
+        \\true
+    );
+}
+
 test "subscript" {
     try expectOutput(
         \\const y = (1,2)

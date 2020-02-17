@@ -351,8 +351,8 @@ pub const Vm = struct {
                     }
                 },
                 .Jump => {
-                    const addr = vm.getArg(module, u32);
-                    vm.ip += addr;
+                    const addr = vm.getArg(module, i32);
+                    vm.ip = @intCast(usize, @intCast(isize, vm.ip) + addr);
                 },
                 .JumpTrue => {
                     const A_val = try vm.getBool(module);

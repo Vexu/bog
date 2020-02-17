@@ -16,7 +16,7 @@ block : NL BEGIN (stmt NL)+ END
 
 assign : ("=" | "+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") expr
 
-jump_expr : "return" expr? | "break" expr? | "continue"
+jump_expr : "return" expr? | "break" | "continue"
 
 fn : "fn" "(" (primary_expr ",")* primary_expr? ")" expr
 

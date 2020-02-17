@@ -167,12 +167,12 @@ const Renderer = struct {
                 const jump = @fieldParentPtr(Node.Jump, "base", node);
 
                 switch (jump.op) {
-                    .Return, .Break => |expr| {
+                    .Return => |expr| {
                         const after_tok_space = if (expr != null) .Space else space;
                         try self.renderToken(jump.tok, stream, indent, after_tok_space);
                         if (expr) |some| try self.renderNode(some, stream, indent, space);
                     },
-                    .Continue => try self.renderToken(jump.tok, stream, indent, space),
+                    .Continue, .Break => try self.renderToken(jump.tok, stream, indent, space),
                 }
             },
             .While => {
