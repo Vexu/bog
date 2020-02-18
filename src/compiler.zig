@@ -590,7 +590,7 @@ pub const Compiler = struct {
         // jump back to condition
         try self.emitInstruction_0_1(
             .Jump,
-            @truncate(i32, -@intCast(isize, self.code.len + @sizeOf(lang.Op) - loop_scope.cond_begin)),
+            @truncate(i32, -@intCast(isize, self.code.len + @sizeOf(lang.Op) + @sizeOf(u32) - loop_scope.cond_begin)),
         );
 
         // exit loop if cond == false

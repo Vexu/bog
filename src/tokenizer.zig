@@ -432,6 +432,7 @@ pub const Tokenizer = struct {
                         .RBrace,
                         .RBracket,
                         .Underscore,
+                        .Keyword_break,
                         .Keyword_continue,
                         .Keyword_false,
                         .Keyword_true,

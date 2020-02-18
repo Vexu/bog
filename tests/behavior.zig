@@ -1,11 +1,11 @@
 test "comparision" {
     try expectOutput(
         \\let a = 0
-        \\while (a != 10)
+        \\while (a != 127)
         \\    a += 1
         \\a
     ,
-        \\10
+        \\127
     );
 }
 

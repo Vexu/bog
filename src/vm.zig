@@ -586,6 +586,10 @@ pub const Vm = struct {
                 .ReturnNone => {
                     // TODO
                     const stack = vm.gc.stack.toSlice();
+                    if (vm.call_stack.len == 0) {
+                        // module result
+                        return Ref{ .value = &Value.None };
+                    }
                     stack[vm.sp].value = &Value.None;
 
                     const frame = vm.call_stack.pop() orelse return error.MalformedByteCode;
