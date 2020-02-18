@@ -1052,13 +1052,11 @@ pub const Compiler = struct {
 
         if (r_val == .Rt or l_val == .Rt) {
             if (r_val != .Rt) {
-                try self.assertNumeric(r_val, node.tok);
                 const reg = self.registerAlloc();
                 try self.makeRuntime(reg, r_val);
                 r_val = Value{ .Rt = reg };
             }
             if (l_val != .Rt) {
-                try self.assertNumeric(l_val, node.tok);
                 const reg = self.registerAlloc();
                 try self.makeRuntime(reg, l_val);
                 l_val = Value{ .Rt = reg };
@@ -1105,13 +1103,17 @@ pub const Compiler = struct {
                         else => false,
                     },
                     .Int => |a_val| switch (r_val) {
+                        .Int => |b_val| a_val == b_val,
+                        .Num => |b_val| @intToFloat(f64, a_val) == b_val,
                         else => false,
                     },
                     .Num => |a_val| switch (r_val) {
+                        .Int => |b_val| a_val == @intToFloat(f64, b_val),
+                        .Num => |b_val| a_val == b_val,
                         else => false,
                     },
                     .Bool => |a_val| switch (r_val) {
-                        // .Bool => |b_val| a_val == b_val,
+                        .Bool => |b_val| a_val == b_val,
                         else => false,
                     },
                     .Str => |a_val| switch (r_val) {

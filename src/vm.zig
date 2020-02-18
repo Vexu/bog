@@ -323,11 +323,48 @@ pub const Vm = struct {
 
                     A_ref.value = if (B_val.eql(C_val)) &Value.False else &Value.True;
                 },
-                .LessThan => return vm.reportErr("TODO Op.LessThan"),
-                .LessThanEqual => return vm.reportErr("TODO Op.LessThanEqual"),
-                .GreaterThan => return vm.reportErr("TODO Op.GreaterThan"),
-                .GreaterThanEqual => return vm.reportErr("TODO Op.GreaterThanEqual"),
-                .In => return vm.reportErr("TODO Op.In"),
+                .LessThan => {
+                    const A_ref = vm.getRef(module);
+                    const B_val = try vm.getNumeric(module);
+                    const C_val = try vm.getNumeric(module);
+
+                    A_ref.value = if (B_val.kind.Int < C_val.kind.Int) &Value.True else &Value.False;
+                },
+                .LessThanEqual => {
+                    const A_ref = vm.getRef(module);
+                    const B_val = try vm.getNumeric(module);
+                    const C_val = try vm.getNumeric(module);
+
+                    A_ref.value = if (B_val.kind.Int <= C_val.kind.Int) &Value.True else &Value.False;
+                },
+                .GreaterThan => {
+                    const A_ref = vm.getRef(module);
+                    const B_val = try vm.getNumeric(module);
+                    const C_val = try vm.getNumeric(module);
+
+                    A_ref.value = if (B_val.kind.Int > C_val.kind.Int) &Value.True else &Value.False;
+                },
+                .GreaterThanEqual => {
+                    const A_ref = vm.getRef(module);
+                    const B_val = try vm.getNumeric(module);
+                    const C_val = try vm.getNumeric(module);
+
+                    A_ref.value = if (B_val.kind.Int >= C_val.kind.Int) &Value.True else &Value.False;
+                },
+                .In => {
+                    const A_ref = vm.getRef(module);
+                    const B_val = vm.getVal(module);
+                    const C_val = vm.getVal(module);
+
+                    const bool_val = switch (B_val.kind) {
+                        .Str => return vm.reportErr("TODO in str"),
+                        .Tuple => return vm.reportErr("TODO in tuple"),
+                        .List => return vm.reportErr("TODO in list"),
+                        .Map => return vm.reportErr("TODO in map"),
+                        .Range => return vm.reportErr("TODO in range"),
+                        else => return vm.reportErr("invalid type for 'in'"),
+                    };
+                },
                 .LShift => {
                     const A_val = try vm.getNewVal(module);
                     const B_val = try vm.getInt(module);
