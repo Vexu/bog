@@ -696,7 +696,7 @@ pub const Tokenizer = struct {
                     },
                 },
                 .EscapeSequence => switch (c) {
-                    '\'', '"', '\\', 'r', 't', '\n' => {
+                    '\'', '"', '\\', 'r', 't', 'n' => {
                         state = .String;
                     },
                     'x' => {
@@ -721,6 +721,7 @@ pub const Tokenizer = struct {
                         if (counter != 2) {
                             return self.reportErr("\\x pattern must be followed by 2 hex digits", c);
                         }
+                        self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         state = .String;
                     },
                 },

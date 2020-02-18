@@ -20,6 +20,7 @@ pub const Compiler = struct {
     used_regs: RegRef = 0,
     code: *Code,
     module_code: Code,
+    strings: Code,
 
     pub const Code = std.ArrayList(u8);
 
@@ -137,7 +138,7 @@ pub const Compiler = struct {
         Int: i64,
         Num: f64,
         Bool: bool,
-        Str: []const u8,
+        Str: []u8,
     };
 
     fn makeRuntime(self: *Compiler, res: RegRef, val: Value) Error!void {
@@ -154,7 +155,11 @@ pub const Compiler = struct {
             },
             .Num => |v| try self.emitInstruction_1_1(.ConstNum, res, v),
             .Bool => |v| try self.emitInstruction_1_1(.ConstPrimitive, res, @as(u8, @boolToInt(v)) + 1),
-            // .Str => |v| try self.builder.constStr(res, v),
+            .Str => |v| {
+                try self.emitInstruction_1_1(.ConstString, res, @truncate(u32, self.strings.len));
+                try self.strings.appendSlice(@sliceToBytes(([_]u32{@intCast(u32, v.len)})[0..]));
+                try self.strings.appendSlice(v);
+            },
             else => unreachable,
         };
     }
@@ -192,6 +197,7 @@ pub const Compiler = struct {
                 .code = Code.init(arena),
             },
             .module_code = Code.init(allocator),
+            .strings = Code.init(allocator),
             .code = undefined,
             .cur_scope = undefined,
         };
@@ -231,7 +237,7 @@ pub const Compiler = struct {
         return lang.Module{
             .name = "",
             .code = compiler.module_code.toOwnedSlice(),
-            .strings = "",
+            .strings = compiler.strings.toOwnedSlice(),
             .start_index = @truncate(u32, start_index),
         };
     }
@@ -253,6 +259,7 @@ pub const Compiler = struct {
 
         module.code = compiler.module_code.toSliceConst();
         compiler.module_code.resize(final_len) catch unreachable;
+        module.strings = compiler.strings.toSliceConst();
         return final_len - start_len;
     }
 
@@ -782,9 +789,9 @@ pub const Compiler = struct {
                 },
                 .Str => Value{
                     .Str = switch (l_val) {
-                        // .Int => |val| val != 0,
-                        // .Num => |val| val != 0,
-                        .Bool => |val| if (val) "true" else "false",
+                        .Int => |val| try std.fmt.allocPrint(self.arena, "{}", .{val}),
+                        .Num => |val| try std.fmt.allocPrint(self.arena, "{d}", .{val}),
+                        .Bool => |val| try mem.dupe(self.arena, u8, if (val) "true" else "false"),
                         .Str => |val| val,
                         else => return self.reportErr("invalid cast to string", node.lhs.firstToken()),
                     },
@@ -1117,7 +1124,7 @@ pub const Compiler = struct {
                         else => false,
                     },
                     .Str => |a_val| switch (r_val) {
-                        .Str => |b_val| std.mem.eql(u8, a_val, b_val),
+                        .Str => |b_val| mem.eql(u8, a_val, b_val),
                         else => false,
                     },
                     .Empty, .Rt => unreachable,
@@ -1131,7 +1138,7 @@ pub const Compiler = struct {
                 try self.assertString(l_val, node.lhs.firstToken());
                 try self.assertString(r_val, node.rhs.firstToken());
 
-                break :blk Value{ .Bool = std.mem.indexOf(u8, l_val.Str, r_val.Str) != null };
+                break :blk Value{ .Bool = mem.indexOf(u8, l_val.Str, r_val.Str) != null };
             },
             else => unreachable,
         };
@@ -1210,8 +1217,8 @@ pub const Compiler = struct {
             .True => .{ .Bool = true },
             .False => .{ .Bool = false },
             .None => .None,
-            .Str => return self.reportErr("TODO genLiteral string", node.tok),
-            .Num => .{ .Num = try self.parseNum(node.tok) },
+            .Str => .{ .Str = try self.parseStr(node.tok) },
+            .Num => .{ .Num = self.parseNum(node.tok) },
         };
         if (res == .Rt) {
             try self.makeRuntime(res.Rt, ret_val);
@@ -1248,6 +1255,36 @@ pub const Compiler = struct {
         return self.tree.source[tok.start..tok.end];
     }
 
+    fn parseStr(self: *Compiler, tok: TokenIndex) ![]u8 {
+        var slice = self.tokenSlice(tok);
+        slice = slice[1 .. slice.len - 1];
+
+        var buf = try self.arena.alloc(u8, slice.len);
+        var slice_i: u32 = 0;
+        var i: u32 = 0;
+        while (slice_i < slice.len) : (slice_i += 1) {
+            const c = slice[slice_i];
+            switch (c) {
+                '\\' => {
+                    slice_i += 1;
+                    buf[i] = switch (slice[slice_i]) {
+                        '\\' => '\\',
+                        'n' => '\n',
+                        'r' => '\r',
+                        't' => '\t',
+                        '\'' => '\'',
+                        '"' => '"',
+                        'x', 'u' => return self.reportErr("TODO: more escape sequences", tok),
+                        else => unreachable,
+                    };
+                },
+                else => buf[i] = c,
+            }
+            i += 1;
+        }
+        return buf[0..i];
+    }
+
     fn parseInt(self: *Compiler, tok: TokenIndex) !i64 {
         var buf = self.tokenSlice(tok);
         var radix: u8 = if (buf.len > 2) switch (buf[1]) {
@@ -1268,10 +1305,8 @@ pub const Compiler = struct {
                 else => unreachable,
             };
 
-            x = std.math.mul(i64, x, radix) catch {
-                // try self.adderr("TODO bigint");
-                return error.CompileError;
-            };
+            x = std.math.mul(i64, x, radix) catch
+                return self.reportErr("TODO: bigint", tok);
             // why is this cast needed?
             x += @intCast(i32, digit);
         }
@@ -1279,7 +1314,7 @@ pub const Compiler = struct {
         return x;
     }
 
-    fn parseNum(self: *Compiler, tok: TokenIndex) !f64 {
+    fn parseNum(self: *Compiler, tok: TokenIndex) f64 {
         var buf: [256]u8 = undefined;
         const slice = self.tokenSlice(tok);
 
@@ -1291,10 +1326,7 @@ pub const Compiler = struct {
             }
         }
 
-        return std.fmt.parseFloat(f64, buf[0..i]) catch {
-            // "invalid real number"
-            return error.CompileError;
-        };
+        return std.fmt.parseFloat(f64, buf[0..i]) catch unreachable;
     }
 
     fn reportErr(self: *Compiler, msg: []const u8, tok: TokenIndex) Error {

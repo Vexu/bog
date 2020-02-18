@@ -49,6 +49,7 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
                 .code = Compiler.Code.init(allocator),
             },
             .module_code = Compiler.Code.init(allocator),
+            .strings = Compiler.Code.init(allocator),
             .code = undefined,
             .cur_scope = undefined,
         },

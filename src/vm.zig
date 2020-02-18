@@ -111,7 +111,18 @@ pub const Vm = struct {
                         A_ref.value = if (val == 2) &Value.True else &Value.False;
                     }
                 },
-                .ConstString => return vm.reportErr("TODO Op.ConstString"),
+                .ConstString => {
+                    const A_val = try vm.getNewVal(module);
+                    const val = vm.getArg(module, u32);
+
+                    const len = @ptrCast(*align(1) const u32, module.strings[val..].ptr).*;
+                    const slice = module.strings[val + @sizeOf(u32)..][0..len];
+                    A_val.* = .{
+                        .kind = .{
+                            .Str = slice,
+                        },
+                    };
+                },
                 .Add => {
                     const A_val = try vm.getNewVal(module);
                     const B_val = try vm.getNumeric(module);

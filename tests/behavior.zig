@@ -1,3 +1,12 @@
+test "strigs" {
+    try expectOutput(
+        \\const a = "hello"
+        \\if (a == "world") 2 as str else 1.5 as str
+    ,
+        \\"1.5"
+    );
+}
+
 test "comparision" {
     try expectOutput(
         \\let a = 0
