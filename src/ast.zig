@@ -18,6 +18,7 @@ pub const Tree = struct {
         arena.deinit();
     }
 
+    pub const tokenize = lang.Tokenizer.tokenize;
     pub const render = @import("render.zig").render;
     pub const compile = lang.Compiler.compile;
     pub const compileRepl = lang.Compiler.compileRepl;

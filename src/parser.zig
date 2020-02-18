@@ -50,6 +50,7 @@ pub const Parser = struct {
             if (parser.eatToken(.Eof, true)) |_| break;
             try tree.nodes.push(try parser.stmt());
             _ = parser.eatToken(.Nl, false) orelse {
+                if (parser.sawEnd()) continue;
                 _ = try parser.expectToken(.Eof, true);
                 break;
             };
@@ -785,7 +786,8 @@ pub const Parser = struct {
         };
         while (true) {
             try node.stmts.push(try parser.stmt());
-            _ = parser.eatToken(.Nl, false) orelse {
+            _ = parser.eatToken(.Nl, false) orelse blk: {
+                if (parser.sawEnd()) break :blk;
                 _ = try parser.expectToken(.End, false);
                 break;
             };
@@ -964,6 +966,12 @@ pub const Parser = struct {
         id: Token.Id,
         tok: *Token,
     };
+    
+    fn sawEnd(parser: *Parser) bool {
+        const res = parser.it.prev().?.id == .End;
+        _ = parser.it.next();
+        return res;
+    }
 
     fn eatTokenId(parser: *Parser, id: Token.Id, skip_nl: bool) ?TokAndId {
         var next_tok = parser.it.next().?;

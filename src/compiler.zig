@@ -596,11 +596,11 @@ pub const Compiler = struct {
         // exit loop if cond == false
         if (cond_jump) |some| {
             @ptrCast(*align(1) u32, self.code.toSlice()[some..].ptr).* =
-                @truncate(u32, self.code.len - some);
+                @truncate(u32, self.code.len - some - @sizeOf(u32));
         }
         while (loop_scope.breaks.pop()) |some| {
             @ptrCast(*align(1) u32, self.code.toSlice()[some..].ptr).* =
-                @truncate(u32, self.code.len - some);
+                @truncate(u32, self.code.len - some - @sizeOf(u32));
         }
 
         return if (sub_res == .Rt)
