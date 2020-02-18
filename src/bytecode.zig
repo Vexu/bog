@@ -69,6 +69,27 @@ pub const Op = enum(u8) {
     /// A = B ^ C
     BitXor,
 
+    /// A = B == C
+    Equal,
+
+    /// A = B != C
+    NotEqual,
+
+    /// A = B < C
+    LessThan,
+
+    /// A = B <= C
+    LessThanEqual,
+
+    /// A = B > C
+    GreaterThan,
+
+    /// A = B >= C
+    GreaterThanEqual,
+
+    /// A = B in C
+    In,
+
     /// A //= B
     DirectDivFloor,
 

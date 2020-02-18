@@ -309,6 +309,25 @@ pub const Vm = struct {
                         },
                     };
                 },
+                .Equal => {
+                    const A_ref = vm.getRef(module);
+                    const B_val = vm.getVal(module);
+                    const C_val = vm.getVal(module);
+
+                    A_ref.value = if (B_val.eql(C_val)) &Value.True else &Value.False;
+                },
+                .NotEqual => {
+                    const A_ref = vm.getRef(module);
+                    const B_val = vm.getVal(module);
+                    const C_val = vm.getVal(module);
+
+                    A_ref.value = if (B_val.eql(C_val)) &Value.False else &Value.True;
+                },
+                .LessThan => return vm.reportErr("TODO Op.LessThan"),
+                .LessThanEqual => return vm.reportErr("TODO Op.LessThanEqual"),
+                .GreaterThan => return vm.reportErr("TODO Op.GreaterThan"),
+                .GreaterThanEqual => return vm.reportErr("TODO Op.GreaterThanEqual"),
+                .In => return vm.reportErr("TODO Op.In"),
                 .LShift => {
                     const A_val = try vm.getNewVal(module);
                     const B_val = try vm.getInt(module);

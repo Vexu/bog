@@ -239,7 +239,7 @@ pub const Compiler = struct {
     pub fn compileRepl(compiler: *Compiler, node: *Node, module: *lang.Module) Error!usize {
         const start_len = compiler.module_code.len;
         try compiler.addLineInfo(node);
-        const val = try compiler.genNode(node, .Value);
+        const val = try compiler.genNode(node, .Discard);
         if (val == .Rt) {
             try compiler.emitInstruction_1(.Discard, val.Rt);
         } else if (val != .Empty) {
@@ -590,7 +590,7 @@ pub const Compiler = struct {
         // jump back to condition
         try self.emitInstruction_0_1(
             .Jump,
-            @truncate(i32, -@intCast(isize, self.code.len - loop_scope.cond_begin)),
+            @truncate(i32, -@intCast(isize, self.code.len + @sizeOf(lang.Op) - loop_scope.cond_begin)),
         );
 
         // exit loop if cond == false
@@ -641,6 +641,12 @@ pub const Compiler = struct {
         }
         if (val == .Num) {
             return self.reportErr("TODO operations on real numbers", tok);
+        }
+    }
+
+    fn assertString(self: *Compiler, val: Value, tok: TokenIndex) !void {
+        if (val != .Str) {
+            return self.reportErr("expected a string", tok);
         }
     }
 
@@ -880,7 +886,7 @@ pub const Compiler = struct {
             .Equal,
             .NotEqual,
             .In,
-            => {},
+            => return self.genComparisionInfix(node, res),
 
             .Range => {},
 
@@ -1026,6 +1032,104 @@ pub const Compiler = struct {
                     .Int = std.math.powi(i64, l_val.Int, r_val.Int) catch
                         return self.reportErr("TODO integer overflow", node.tok),
                 };
+            },
+            else => unreachable,
+        };
+        if (res == .Rt) {
+            try self.makeRuntime(res.Rt, ret_val);
+            return Value{ .Rt = res.Rt };
+        }
+        // if res == .Value nothing needs to be done
+        return ret_val;
+    }
+
+    fn genComparisionInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
+        var l_val = try self.genNode(node.lhs, .Value);
+        try self.assertNotEmpty(l_val, node.lhs.firstToken());
+
+        var r_val = try self.genNode(node.rhs, .Value);
+        try self.assertNotEmpty(r_val, node.rhs.firstToken());
+
+        if (r_val == .Rt or l_val == .Rt) {
+            if (r_val != .Rt) {
+                try self.assertNumeric(r_val, node.tok);
+                const reg = self.registerAlloc();
+                try self.makeRuntime(reg, r_val);
+                r_val = Value{ .Rt = reg };
+            }
+            if (l_val != .Rt) {
+                try self.assertNumeric(l_val, node.tok);
+                const reg = self.registerAlloc();
+                try self.makeRuntime(reg, l_val);
+                l_val = Value{ .Rt = reg };
+            }
+            const op_id = switch (node.op) {
+                .LessThan => .LessThan,
+                .LessThanEqual => .LessThanEqual,
+                .GreaterThan => .GreaterThan,
+                .GreaterThanEqual => .GreaterThanEqual,
+                .Equal => .Equal,
+                .NotEqual => .NotEqual,
+                .In => lang.Op.In,
+                else => unreachable,
+            };
+            // TODO r_val and l_val should be freed here
+            if (res == .Rt) {
+                try self.emitInstruction_3(op_id, res.Rt, l_val.Rt, r_val.Rt);
+                return Value{ .Rt = res.Rt };
+            } else {
+                const reg = self.registerAlloc();
+                try self.emitInstruction_3(op_id, reg, l_val.Rt, r_val.Rt);
+                return Value{ .Rt = reg };
+            }
+        }
+        switch (node.op) {
+            .In, .Equal, .NotEqual => {},
+            else => {
+                try self.assertNumeric(l_val, node.lhs.firstToken());
+                try self.assertNumeric(r_val, node.rhs.firstToken());
+            },
+        }
+
+        const ret_val = switch (node.op) {
+            .LessThan => Value{ .Bool = l_val.Int < r_val.Int },
+            .LessThanEqual => Value{ .Bool = l_val.Int <= r_val.Int },
+            .GreaterThan => Value{ .Bool = l_val.Int > r_val.Int },
+            .GreaterThanEqual => Value{ .Bool = l_val.Int >= r_val.Int },
+            .Equal, .NotEqual => blk: {
+                try self.assertNotEmpty(l_val, node.lhs.firstToken());
+                try self.assertNotEmpty(r_val, node.rhs.firstToken());
+                const eql = switch (l_val) {
+                    .None => |a_val| switch (r_val) {
+                        .None => true,
+                        else => false,
+                    },
+                    .Int => |a_val| switch (r_val) {
+                        else => false,
+                    },
+                    .Num => |a_val| switch (r_val) {
+                        else => false,
+                    },
+                    .Bool => |a_val| switch (r_val) {
+                        // .Bool => |b_val| a_val == b_val,
+                        else => false,
+                    },
+                    .Str => |a_val| switch (r_val) {
+                        .Str => |b_val| std.mem.eql(u8, a_val, b_val),
+                        else => false,
+                    },
+                    .Empty, .Rt => unreachable,
+                };
+                // broken LLVM module found: Terminator found in the middle of a basic block!
+                // break :blk Value{ .Bool = if (node.op == .Equal) eql else !eql };
+                const copy = if (node.op == .Equal) eql else !eql;
+                break :blk Value{ .Bool = copy };
+            },
+            .In => blk: {
+                try self.assertString(l_val, node.lhs.firstToken());
+                try self.assertString(r_val, node.rhs.firstToken());
+
+                break :blk Value{ .Bool = std.mem.indexOf(u8, l_val.Str, r_val.Str) != null };
             },
             else => unreachable,
         };

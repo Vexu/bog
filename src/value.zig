@@ -23,7 +23,7 @@ pub const Value = struct {
     kind: union(TypeId) {
         Tuple: []Ref,
         Map: Map,
-        List: *List,
+        List: List,
         Error: *Ref,
         Int: i64,
         Num: f64,
@@ -52,6 +52,46 @@ pub const Value = struct {
     pub var False = Value{
         .kind = .{ .Bool = false },
     };
+
+    pub fn eql(a: *Value, b: *Value) bool {
+        switch (a.kind) {
+            .Int => |val| return switch (b.kind) {
+                .Int => |b_val| val == b_val,
+                .Num => |b_val| @intToFloat(f64, val) == b_val,
+                else => false,
+            },
+            .Num => |val| return switch (b.kind) {
+                .Int => |b_val| val == @intToFloat(f64, b_val),
+                .Num => |b_val| val == b_val,
+                else => false,
+            },
+            else => if (a.kind != @as(@TagType(@TypeOf(b.kind)), b.kind)) return false,
+        }
+        return switch (a.kind) {
+            .None => true,
+            .Bool => |val| val == b.kind.Bool,
+            .Str => |val| {
+                const b_val = b.kind.Str;
+                return std.mem.eql(u8, val, b_val);
+            },
+            .Tuple => |val| {
+                const b_val = b.kind.Tuple;
+                return val.len == b_val.len;
+            },
+            .Map => |val| @panic("TODO eql for maps"),
+            .List => |val| {
+                const b_val = b.kind.List;
+                return val.len == b_val.len;
+            },
+            .Error => |val| @panic("TODO eql for errors"),
+            .Range => |val| @panic("TODO eql for ranges"),
+            .Fn => |val| {
+                const b_val = b.kind.Fn;
+                return val.offset == b_val.offset and val.arg_count == b_val.arg_count;
+            },
+            else => unreachable,
+        };
+    }
 };
 
 pub const Ref = struct {
@@ -61,7 +101,7 @@ pub const Ref = struct {
         const value = ref.value.?;
         switch (value.kind) {
             .Int => |val| try stream.print("{}", .{val}),
-            .Num => |val| try stream.print("{}", .{val}),
+            .Num => |val| try stream.print("{d}", .{val}),
             .Bool => |val| try stream.write(if (val) "true" else "false"),
             .None => try stream.write("()"),
             .Range => |val| {
@@ -162,7 +202,7 @@ test "dump int/num" {
     var num = Value{
         .kind = .{ .Num = 2.5 },
     };
-    try testDump(&num, "2.5e+00");
+    try testDump(&num, "2.5");
 }
 
 test "dump error" {

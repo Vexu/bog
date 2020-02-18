@@ -1,3 +1,14 @@
+test "comparision" {
+    try expectOutput(
+        \\let a = 0
+        \\while (a != 10)
+        \\    a += 1
+        \\a
+    ,
+        \\10
+    );
+}
+
 test "while loop" {
     try expectOutput(
         \\const cond = true
@@ -99,7 +110,7 @@ test "tuple" {
     try expectOutput(
         \\(1, 2, 3, 4, 22.4)
     ,
-        \\(1, 2, 3, 4, 2.24e+01)
+        \\(1, 2, 3, 4, 22.4)
     );
 }
 
