@@ -282,10 +282,10 @@ pub const Compiler = struct {
             .While => return self.genWhile(@fieldParentPtr(Node.While, "base", node), res),
             .Jump => return self.genJump(@fieldParentPtr(Node.Jump, "base", node), res),
             .List => return self.genTupleList(@fieldParentPtr(Node.ListTupleMap, "base", node), res),
+            .Catch => return self.genCatch(@fieldParentPtr(Node.Catch, "base", node), res),
 
             .Import => return self.reportErr("TODO: Import", node.firstToken()),
             .Map => return self.reportErr("TODO: Map", node.firstToken()),
-            .Catch => return self.reportErr("TODO: Catch", node.firstToken()),
             .For => return self.reportErr("TODO: For", node.firstToken()),
             .Match => return self.reportErr("TODO: Match", node.firstToken()),
             .MapItem => return self.reportErr("TODO: MapItem", node.firstToken()),
@@ -477,7 +477,7 @@ pub const Compiler = struct {
 
         // jump past if_body if cond == false
         try self.emitInstruction_1_1(.JumpFalse, cond_val.Rt, @as(u32, 0));
-        const addr = self.code.len - @sizeOf(u32);
+        const addr = self.code.len;
         const if_val = try self.genNode(node.if_body, sub_res);
         if (sub_res != .Rt and if_val == .Rt) {
             try self.emitInstruction_1(.Discard, if_val.Rt);
@@ -485,10 +485,10 @@ pub const Compiler = struct {
 
         // jump past else_body since if_body was executed
         try self.emitInstruction_0_1(.Jump, @as(u32, 0));
-        const addr2 = self.code.len - @sizeOf(u32);
+        const addr2 = self.code.len;
 
-        @ptrCast(*align(1) u32, self.code.toSlice()[addr..].ptr).* =
-            @truncate(u32, self.code.len - addr - @sizeOf(u32));
+        @ptrCast(*align(1) u32, self.code.toSlice()[addr - @sizeOf(u32) ..].ptr).* =
+            @truncate(u32, self.code.len - addr);
         if (node.else_body) |some| {
             const else_val = try self.genNode(some, sub_res);
             if (sub_res != .Rt and else_val == .Rt) {
@@ -498,8 +498,8 @@ pub const Compiler = struct {
             try self.emitInstruction_1_1(.ConstPrimitive, sub_res.Rt, @as(u8, 0));
         }
 
-        @ptrCast(*align(1) u32, self.code.toSlice()[addr2..].ptr).* =
-            @truncate(u32, self.code.len - addr2 - @sizeOf(u32));
+        @ptrCast(*align(1) u32, self.code.toSlice()[addr2 - @sizeOf(u32) ..].ptr).* =
+            @truncate(u32, self.code.len - addr2);
 
         return if (sub_res == .Rt)
             Value{
@@ -545,7 +545,7 @@ pub const Compiler = struct {
             );
         } else {
             try self.emitInstruction_0_1(.Jump, @as(u32, 0));
-            try loop_scope.breaks.push(@intCast(u32, self.code.len - @sizeOf(u32)));
+            try loop_scope.breaks.push(@intCast(u32, self.code.len));
         }
 
         return Value{ .Empty = {} };
@@ -574,7 +574,7 @@ pub const Compiler = struct {
         const cond_val = try self.genNode(node.cond, .Value);
         if (cond_val == .Rt) {
             try self.emitInstruction_1_1(.JumpFalse, cond_val.Rt, @as(u32, 0));
-            cond_jump = self.code.len - @sizeOf(u32);
+            cond_jump = self.code.len;
         } else {
             try self.assertBool(cond_val, node.cond.firstToken());
             if (cond_val.Bool == false) {
@@ -605,12 +605,12 @@ pub const Compiler = struct {
 
         // exit loop if cond == false
         if (cond_jump) |some| {
-            @ptrCast(*align(1) u32, self.code.toSlice()[some..].ptr).* =
-                @truncate(u32, self.code.len - some - @sizeOf(u32));
+            @ptrCast(*align(1) u32, self.code.toSlice()[some - @sizeOf(u32) ..].ptr).* =
+                @truncate(u32, self.code.len - some);
         }
         while (loop_scope.breaks.pop()) |some| {
-            @ptrCast(*align(1) u32, self.code.toSlice()[some..].ptr).* =
-                @truncate(u32, self.code.len - some - @sizeOf(u32));
+            @ptrCast(*align(1) u32, self.code.toSlice()[some - @sizeOf(u32) ..].ptr).* =
+                @truncate(u32, self.code.len - some);
         }
 
         return if (sub_res == .Rt)
@@ -658,6 +658,35 @@ pub const Compiler = struct {
         if (val != .Str) {
             return self.reportErr("expected a string", tok);
         }
+    }
+
+    fn genCatch(self: *Compiler, node: *Node.Catch, res: Result) Error!Value {
+        try self.assertNotLval(res, node.tok);
+
+        const res_loc = switch (res) {
+            .Rt => res,
+            .Discard => .Value,
+            .Value => Result{ .Rt = self.registerAlloc() },
+            .Lval => unreachable,
+        };
+        const l_val = try self.genNode(node.lhs, res_loc);
+        try self.assertNotEmpty(l_val, node.lhs.firstToken());
+        if (l_val != .Rt) {
+            return l_val;
+        }
+
+        try self.emitInstruction_1_1(.JumpNotError, l_val.Rt, @as(u32, 0));
+        const addr = self.code.len;
+
+        if (node.capture) |some| {
+            return self.reportErr("TODO: capture value", some.firstToken());
+        }
+
+        const r_val = try self.genNode(node.rhs, Result{ .Rt = l_val.Rt });
+
+        @ptrCast(*align(1) u32, self.code.toSlice()[addr - @sizeOf(u32) ..].ptr).* =
+            @truncate(u32, self.code.len - addr);
+        return Value{ .Rt = l_val.Rt };
     }
 
     fn genPrefix(self: *Compiler, node: *Node.Prefix, res: Result) Error!Value {
@@ -849,7 +878,7 @@ pub const Compiler = struct {
                     i += 1;
                 }
 
-                try self.emitInstruction_2_1(.Call, l_val.Rt, arg_locs[0], @truncate(u16, len));
+                try self.emitInstruction_2_1(.Call, l_val.Rt, arg_locs[0], @truncate(u16, args.len));
                 if (res == .Rt) {
                     // TODO probably should handle this better
                     try self.emitInstruction_2(.Move, res.Rt, arg_locs[0]);

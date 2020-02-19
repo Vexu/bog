@@ -141,7 +141,7 @@ pub const Op = enum(u8) {
     /// A = -B
     Negate,
 
-    /// IF (A==error) RET A
+    /// IF (B==error) RET B ELSE A = B
     Try,
 
     /// A = B[C]
@@ -180,7 +180,7 @@ pub const Op = enum(u8) {
     /// A = B as TYPEID
     As,
 
-    /// B = A(C, C + 1, ... C + N)
+    /// B = A(B, B + 1, ... B + N)
     Call,
 
     /// 0 = A

@@ -36,6 +36,7 @@ pub const Gc = struct {
 
     pub fn stackAlloc(gc: *Gc, count: u8) !void {
         try gc.stack.resize(count);
+        mem.set(Ref, gc.stack.toSlice()[gc.stack.len - count ..], Ref{ .value = null });
     }
 
     pub fn stackFree(gc: *Gc, count: usize) void {

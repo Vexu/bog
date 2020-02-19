@@ -408,7 +408,28 @@ pub const Vm = struct {
                         },
                     };
                 },
-                .Try => return vm.reportErr("TODO Op.Try"),
+                .Try => {
+                    const A_ref = vm.getRef(module);
+                    const B = vm.getArg(module, RegRef);
+
+                    // TODO
+                    const stack = vm.gc.stack.toSlice();
+                    if (stack[B + vm.sp].value.?.kind != .Error) {
+                        A_ref.value = stack[B + vm.sp].value;
+                        continue;
+                    }
+
+                    if (vm.call_stack.len == 0) {
+                        // module result
+                        return stack[B + vm.sp];
+                    }
+                    stack[vm.sp] = stack[B + vm.sp];
+
+                    const frame = vm.call_stack.pop() orelse unreachable;
+                    vm.ip = frame.ip;
+                    vm.sp = frame.sp;
+                    vm.line_loc = frame.line_loc;
+                },
                 .JumpFalse => {
                     const A_val = try vm.getBool(module);
                     const addr = vm.getArg(module, u32);
@@ -623,7 +644,7 @@ pub const Vm = struct {
 
                     if (A_val.kind.Fn.arg_count != arg_count) {
                         // TODO improve this error message to tell the expected and given counts
-                        return vm.reportErr("unexpecte arg count");
+                        return vm.reportErr("unexpected arg count");
                     }
 
                     try vm.call_stack.push(.{
@@ -645,7 +666,7 @@ pub const Vm = struct {
                     }
                     stack[vm.sp] = stack[A + vm.sp];
 
-                    const frame = vm.call_stack.pop() orelse return error.MalformedByteCode;
+                    const frame = vm.call_stack.pop() orelse unreachable;
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;

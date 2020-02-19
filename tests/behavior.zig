@@ -1,3 +1,21 @@
+test "try" {
+    try expectOutput(
+        \\const err = fn() error("foo")
+        \\try err()
+    ,
+        \\error("foo")
+    );
+}
+
+test "catch" {
+    try expectOutput(
+        \\const err = fn() error("foo")
+        \\err() catch "success"
+    ,
+        \\"success"
+    );
+}
+
 test "strigs" {
     try expectOutput(
         \\const a = "hello"
