@@ -273,7 +273,7 @@ pub const Compiler = struct {
             .Identifier => return self.genIdentifier(@fieldParentPtr(Node.SingleToken, "base", node), res),
             .Infix => return self.genInfix(@fieldParentPtr(Node.Infix, "base", node), res),
             .If => return self.genIf(@fieldParentPtr(Node.If, "base", node), res),
-            .Tuple => return self.genTuple(@fieldParentPtr(Node.ListTupleMap, "base", node), res),
+            .Tuple => return self.genTupleList(@fieldParentPtr(Node.ListTupleMap, "base", node), res),
             .Discard => return self.reportErr("'_' can only be used to discard unwanted tuple/list items in destructuring assignment", node.firstToken()),
             .TypeInfix => return self.genTypeInfix(@fieldParentPtr(Node.TypeInfix, "base", node), res),
             .Fn => return self.genFn(@fieldParentPtr(Node.Fn, "base", node), res),
@@ -281,21 +281,21 @@ pub const Compiler = struct {
             .Error => return self.genError(@fieldParentPtr(Node.Error, "base", node), res),
             .While => return self.genWhile(@fieldParentPtr(Node.While, "base", node), res),
             .Jump => return self.genJump(@fieldParentPtr(Node.Jump, "base", node), res),
+            .List => return self.genTupleList(@fieldParentPtr(Node.ListTupleMap, "base", node), res),
+
             .Import => return self.reportErr("TODO: Import", node.firstToken()),
-            .List => return self.reportErr("TODO: List", node.firstToken()),
             .Map => return self.reportErr("TODO: Map", node.firstToken()),
             .Catch => return self.reportErr("TODO: Catch", node.firstToken()),
             .For => return self.reportErr("TODO: For", node.firstToken()),
             .Match => return self.reportErr("TODO: Match", node.firstToken()),
-            .MapItem,
-            .MatchCatchAll,
-            .MatchLet,
-            .MatchCase,
-            => unreachable,
+            .MapItem => return self.reportErr("TODO: MapItem", node.firstToken()),
+            .MatchCatchAll => return self.reportErr("TODO: MatchCatchAll", node.firstToken()),
+            .MatchLet => return self.reportErr("TODO: MatchLet", node.firstToken()),
+            .MatchCase => return self.reportErr("TODO: MatchCase", node.firstToken()),
         }
     }
 
-    fn genTuple(self: *Compiler, node: *Node.ListTupleMap, res: Result) Error!Value {
+    fn genTupleList(self: *Compiler, node: *Node.ListTupleMap, res: Result) Error!Value {
         if (res == .Lval) {
             switch (res.Lval) {
                 .Const, .Let, .Assign => |reg| {
@@ -333,19 +333,22 @@ pub const Compiler = struct {
             }
         }
         const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
-        const args = try self.arena.alloc(RegRef, node.values.len);
-        for (args) |*a| {
-            a.* = self.registerAlloc();
-        }
+        const start = self.used_regs;
+        self.used_regs += @intCast(u16, node.values.len);
 
-        var i: u32 = 0;
         var it = node.values.iterator(0);
+        var i = start;
         while (it.next()) |n| {
-            _ = try self.genNode(n.*, Result{ .Rt = args[i] });
+            _ = try self.genNode(n.*, Result{ .Rt = i });
             i += 1;
         }
 
-        try self.emitInstruction_2_1(.BuildTuple, res_loc.Rt, args[0], @truncate(u16, args.len));
+        const command = switch (node.base.id) {
+            .Tuple => .BuildTuple,
+            .List => lang.Op.BuildList,
+            else => unreachable,
+        };
+        try self.emitInstruction_2_1(command, res_loc.Rt, start, @intCast(u16, node.values.len));
         return Value{ .Rt = res_loc.Rt };
     }
 

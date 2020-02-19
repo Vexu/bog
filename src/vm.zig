@@ -116,7 +116,7 @@ pub const Vm = struct {
                     const val = vm.getArg(module, u32);
 
                     const len = @ptrCast(*align(1) const u32, module.strings[val..].ptr).*;
-                    const slice = module.strings[val + @sizeOf(u32)..][0..len];
+                    const slice = module.strings[val + @sizeOf(u32) ..][0..len];
                     A_val.* = .{
                         .kind = .{
                             .Str = slice,
@@ -470,6 +470,25 @@ pub const Vm = struct {
                             .Tuple = vals,
                         },
                     };
+                },
+                .BuildList => {
+                    const A_val = try vm.getNewVal(module);
+                    const B = vm.getArg(module, RegRef);
+                    const arg_count = vm.getArg(module, u16);
+
+                    A_val.* = .{
+                        .kind = .{
+                            // TODO gc this
+                            .List = try lang.Value.List.initCapacity(vm.call_stack.allocator, arg_count),
+                        },
+                    };
+
+                    // TODO
+                    const stack = vm.gc.stack.toSlice();
+                    var i: u32 = 0;
+                    while (i < arg_count) : (i += 1) {
+                        A_val.kind.List.append(stack[B + vm.sp + i]) catch unreachable;
+                    }
                 },
                 .BuildError => {
                     const A_val = try vm.getNewVal(module);

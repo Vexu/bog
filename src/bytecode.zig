@@ -153,6 +153,9 @@ pub const Op = enum(u8) {
     /// A = (B, B + 1, ... B + N)
     BuildTuple,
 
+    /// A = [B, B + 1, ... B + N]
+    BuildList,
+
     /// A = Fn(arg_count, offset)
     BuildFn,
 

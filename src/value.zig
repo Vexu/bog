@@ -17,7 +17,7 @@ pub const Value = struct {
     };
 
     pub const Map = std.StringHashMap(*Ref);
-    pub const List = std.ArrayList(*Ref);
+    pub const List = std.ArrayList(Ref);
 
     // ref: u32 = 0,
     kind: union(TypeId) {
@@ -132,11 +132,16 @@ pub const Ref = struct {
                     return error.Unimplemented;
                 }
             },
-            .List => {
+            .List => |val| {
                 if (level == 0) {
                     try stream.write("[...]");
                 } else {
-                    return error.Unimplemented;
+                    try stream.writeByte('[');
+                    for (val.toSliceConst()) |v, i| {
+                        if (i != 0) try stream.write(", ");
+                        try v.dump(stream, level - 1);
+                    }
+                    try stream.writeByte(']');
                 }
             },
             .Error => |val| {
