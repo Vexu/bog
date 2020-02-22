@@ -459,6 +459,8 @@ pub const Vm = struct {
                     }
                 },
                 .Import => return vm.reportErr("TODO Op.Import"),
+                .Native => return vm.reportErr("TODO Op.Native"),
+                .NativeExtern => return vm.reportErr("TODO Op.NativeExtern"),
                 .Discard => {
                     const A = vm.getArg(module, RegRef);
 

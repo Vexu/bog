@@ -174,6 +174,12 @@ pub const Op = enum(u8) {
     /// A = IMPORT(arg1)
     Import,
 
+    /// A = NATIVE(arg1)
+    Native,
+
+    /// A = NATIVE(arg1, arg2)
+    NativeExtern,
+
     /// A = B is TYPEID
     Is,
 

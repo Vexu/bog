@@ -155,13 +155,16 @@ pub const Compiler = struct {
             },
             .Num => |v| try self.emitInstruction_1_1(.ConstNum, res, v),
             .Bool => |v| try self.emitInstruction_1_1(.ConstPrimitive, res, @as(u8, @boolToInt(v)) + 1),
-            .Str => |v| {
-                try self.emitInstruction_1_1(.ConstString, res, @truncate(u32, self.strings.len));
-                try self.strings.appendSlice(@sliceToBytes(([_]u32{@intCast(u32, v.len)})[0..]));
-                try self.strings.appendSlice(v);
-            },
+            .Str => |v| try self.emitInstruction_1_1(.ConstString, res, try self.putString(v)),
             else => unreachable,
         };
+    }
+
+    fn putString(self: *Compiler, str: []const u8) !u32 {
+        const len = @intCast(u32, self.strings.len);
+        try self.strings.appendSlice(@sliceToBytes(([_]u32{@intCast(u32, str.len)})[0..]));
+        try self.strings.appendSlice(str);
+        return len;
     }
 
     const Result = union(enum) {
@@ -283,9 +286,9 @@ pub const Compiler = struct {
             .Jump => return self.genJump(@fieldParentPtr(Node.Jump, "base", node), res),
             .List => return self.genTupleList(@fieldParentPtr(Node.ListTupleMap, "base", node), res),
             .Catch => return self.genCatch(@fieldParentPtr(Node.Catch, "base", node), res),
+            .Import => return self.genImport(@fieldParentPtr(Node.Import, "base", node), res),
+            .Native => return self.genNative(@fieldParentPtr(Node.Native, "base", node), res),
 
-            .Import => return self.reportErr("TODO: Import", node.firstToken()),
-            .Native => return self.reportErr("TODO: Native", node.firstToken()),
             .Map => return self.reportErr("TODO: Map", node.firstToken()),
             .For => return self.reportErr("TODO: For", node.firstToken()),
             .Match => return self.reportErr("TODO: Match", node.firstToken()),
@@ -1259,6 +1262,36 @@ pub const Compiler = struct {
         }
         // if res == .Value nothing needs to be done
         return ret_val;
+    }
+
+    fn genImport(self: *Compiler, node: *Node.Import, res: Result) Error!Value {
+        try self.assertNotLval(res, node.tok);
+
+        const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
+        const str = try self.parseStr(node.str_tok);
+        const str_loc = try self.putString(str);
+
+        try self.emitInstruction_1_1(.Import, res_loc.Rt, str_loc);
+        return Value{ .Rt = res_loc.Rt };
+    }
+
+    fn genNative(self: *Compiler, node: *Node.Native, res: Result) Error!Value {
+        try self.assertNotLval(res, node.tok);
+
+        const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
+
+        const name = try self.parseStr(node.name_tok);
+        const name_loc = try self.putString(name);
+        if (node.lib_tok) |some| {
+            const lib = try self.parseStr(some);
+            const lib_loc = try self.putString(lib);
+
+            try self.emitInstruction_1_2(.NativeExtern, res_loc.Rt, res_loc, name_loc);
+        } else {
+            try self.emitInstruction_1_1(.Native, res_loc.Rt, name_loc);
+        }
+
+        return Value{ .Rt = res_loc.Rt };
     }
 
     fn genError(self: *Compiler, node: *Node.Error, res: Result) Error!Value {
