@@ -134,17 +134,90 @@ pub const Compiler = struct {
         Empty,
         Rt: RegRef,
 
+        /// reference to a variable
+        Ref: RegRef,
+
         None,
         Int: i64,
         Num: f64,
         Bool: bool,
         Str: []u8,
+
+        fn isRt(val: Value) bool {
+            return switch (val) {
+                .Rt, .Ref => true,
+                else => false,
+            };
+        }
+
+        fn maybeRt(val: Value, self: *Compiler, res: Result) !Value {
+            if (res == .Rt) {
+                try self.makeRuntime(res.Rt, val);
+                return res.toVal();
+            }
+            return val;
+        }
+
+        fn free(val: Value, self: *Compiler) void {
+            if (val == .Rt) {
+                self.registerFree(val.Rt);
+            }
+        }
+
+        fn toRt(val: Value, self: *Compiler) !RegRef {
+            switch (val) {
+                .Rt, .Ref => |r| return r,
+                .Empty => unreachable,
+                else => {
+                    const reg = self.registerAlloc();
+                    try self.makeRuntime(reg, val);
+                    return reg;
+                },
+            }
+        }
+
+        fn getRt(val: Value) RegRef {
+            switch (val) {
+                .Rt, .Ref => |r| return r,
+                else => unreachable,
+            }
+        }
+
+        fn getBool(val: Value, self: *Compiler, tok: TokenIndex) !bool {
+            if (val != .Bool) {
+                return self.reportErr("expected a boolean", tok);
+            }
+            return val.Bool;
+        }
+
+        fn getInt(val: Value, self: *Compiler, tok: TokenIndex) !i64 {
+            if (val != .Int) {
+                return self.reportErr("expected an integer", tok);
+            }
+            return val.Int;
+        }
+
+        fn getStr(val: Value, self: *Compiler, tok: TokenIndex) ![]const u8 {
+            if (val != .Str) {
+                return self.reportErr("expected a string", tok);
+            }
+            return val.Str;
+        }
+
+        fn checkNum(val: Value, self: *Compiler, tok: TokenIndex) !void {
+            if (val != .Int and val != .Num) {
+                return self.reportErr("expected a number", tok);
+            }
+            if (val == .Num) {
+                return self.reportErr("TODO operations on real numbers", tok);
+            }
+        }
     };
 
     fn makeRuntime(self: *Compiler, res: RegRef, val: Value) Error!void {
         return switch (val) {
             .Empty => unreachable,
-            .Rt => |v| assert(v == res),
+            .Ref, .Rt => |v| assert(v == res),
             .None => try self.emitInstruction_1_1(.ConstPrimitive, res, @as(u8, 0)),
             .Int => |v| if (v > std.math.minInt(i8) and v < std.math.maxInt(i8)) {
                 try self.emitInstruction_1_1(.ConstInt8, res, @truncate(i8, v));
@@ -156,7 +229,6 @@ pub const Compiler = struct {
             .Num => |v| try self.emitInstruction_1_1(.ConstNum, res, v),
             .Bool => |v| try self.emitInstruction_1_1(.ConstPrimitive, res, @as(u8, @boolToInt(v)) + 1),
             .Str => |v| try self.emitInstruction_1_1(.ConstString, res, try self.putString(v)),
-            else => unreachable,
         };
     }
 
@@ -184,6 +256,20 @@ pub const Compiler = struct {
 
         /// No value is expected if some is given it will be discarded
         Discard,
+
+        fn toRt(res: Result, compiler: *Compiler) Result {
+            return if (res == .Rt) res else Result{ .Rt = compiler.registerAlloc() };
+        }
+
+        fn toVal(res: Result) Value {
+            return .{ .Rt = res.Rt };
+        }
+
+        fn notLval(res: Result, self: *Compiler, tok: TokenIndex) !void {
+            if (res == .Lval) {
+                return self.reportErr("invalid left hand side to assignment", tok);
+            }
+        }
     };
 
     pub fn compile(tree: *Tree, allocator: *Allocator) (Error || lang.Parser.Error)!lang.Module {
@@ -219,19 +305,16 @@ pub const Compiler = struct {
 
             const val = try compiler.genNode(n.*, res);
             if (last) {
-                if (val == .Rt) {
-                    try compiler.emitInstruction_1(.Return, val.Rt);
-                    break;
-                }
-                const reg = compiler.registerAlloc();
+                const reg = try val.toRt(&compiler);
                 defer compiler.registerFree(reg);
-                try compiler.makeRuntime(reg, val);
+
                 try compiler.emitInstruction_1(.Return, reg);
             }
-            if (val == .Rt) {
+            if (val.isRt()) {
+                const reg = val.getRt();
+                defer val.free(&compiler);
                 // discard unused runtime value
-                try compiler.emitInstruction_1(.Discard, val.Rt);
-                compiler.registerFree(val.Rt);
+                try compiler.emitInstruction_1(.Discard, reg);
             }
         }
 
@@ -245,24 +328,22 @@ pub const Compiler = struct {
         };
     }
 
-    pub fn compileRepl(compiler: *Compiler, node: *Node, module: *lang.Module) Error!usize {
-        const start_len = compiler.module_code.len;
-        try compiler.addLineInfo(node);
-        const val = try compiler.genNode(node, .Discard);
-        if (val == .Rt) {
-            try compiler.emitInstruction_1(.Discard, val.Rt);
-        } else if (val != .Empty) {
-            const reg = compiler.registerAlloc();
-            defer compiler.registerFree(reg);
-            try compiler.makeRuntime(reg, val);
-            try compiler.emitInstruction_1(.Discard, reg);
-        }
-        const final_len = compiler.module_code.len;
-        try compiler.module_code.appendSlice(compiler.code.toSliceConst());
+    pub fn compileRepl(self: *Compiler, node: *Node, module: *lang.Module) Error!usize {
+        const start_len = self.module_code.len;
+        try self.addLineInfo(node);
+        const val = try self.genNode(node, .Discard);
+        if (val.isRt() and val != .Empty) {
+            const reg = try val.toRt(self);
+            defer if (val != .Ref) self.registerFree(reg);
 
-        module.code = compiler.module_code.toSliceConst();
-        compiler.module_code.resize(final_len) catch unreachable;
-        module.strings = compiler.strings.toSliceConst();
+            try self.emitInstruction_1(.Discard, reg);
+        }
+        const final_len = self.module_code.len;
+        try self.module_code.appendSlice(self.code.toSliceConst());
+
+        module.code = self.module_code.toSliceConst();
+        self.module_code.resize(final_len) catch unreachable;
+        module.strings = self.strings.toSliceConst();
         return final_len - start_len;
     }
 
@@ -297,6 +378,15 @@ pub const Compiler = struct {
             .MatchLet => return self.reportErr("TODO: MatchLet", node.firstToken()),
             .MatchCase => return self.reportErr("TODO: MatchCase", node.firstToken()),
         }
+    }
+
+    fn genNodeNonEmpty(self: *Compiler, node: *Node, res: Result) Error!Value {
+        const val = try self.genNode(node, res);
+
+        if (val == .Empty) {
+            return self.reportErr("expected a value", node.firstToken());
+        }
+        return val;
     }
 
     fn genTupleList(self: *Compiler, node: *Node.ListTupleMap, res: Result) Error!Value {
@@ -336,7 +426,7 @@ pub const Compiler = struct {
                 },
             }
         }
-        const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
+        const sub_res = res.toRt(self);
         const start = self.used_regs;
         self.used_regs += @intCast(u16, node.values.len);
 
@@ -352,12 +442,12 @@ pub const Compiler = struct {
             .List => lang.Op.BuildList,
             else => unreachable,
         };
-        try self.emitInstruction_2_1(command, res_loc.Rt, start, @intCast(u16, node.values.len));
-        return Value{ .Rt = res_loc.Rt };
+        try self.emitInstruction_2_1(command, sub_res.Rt, start, @intCast(u16, node.values.len));
+        return sub_res.toVal();
     }
 
     fn genFn(self: *Compiler, node: *Node.Fn, res: Result) Error!Value {
-        try self.assertNotLval(res, node.fn_tok);
+        try res.notLval(self, node.fn_tok);
 
         if (node.params.len > std.math.maxInt(u8)) {
             return self.reportErr("too many parameters", node.fn_tok);
@@ -397,33 +487,33 @@ pub const Compiler = struct {
         }
 
         // gen body and return result
-        const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
+        const sub_res = res.toRt(self);
         try self.addLineInfo(node.body);
-        const body_res = try self.genNode(node.body, .Value);
-        // TODO if body_res == .Empty because last instruction was a return
+        const body_val = try self.genNode(node.body, .Value);
+        // TODO if body_val == .Empty because last instruction was a return
         // then this return is not necessary
-        if (body_res == .Empty or body_res == .None) {
+        if (body_val == .Empty or body_val == .None) {
             try self.code.append(@enumToInt(lang.Op.ReturnNone));
-        } else if (body_res == .Rt) {
-            try self.emitInstruction_1(.Return, body_res.Rt);
         } else {
-            try self.makeRuntime(res_loc.Rt, body_res);
-            try self.emitInstruction_1(.Return, res_loc.Rt);
+            const reg = try body_val.toRt(self);
+            defer body_val.free(self);
+
+            try self.emitInstruction_1(.Return, reg);
         }
 
         self.code = old_code;
         try self.emitInstruction_1_2(
             .BuildFn,
-            res_loc.Rt,
+            sub_res.Rt,
             @truncate(u8, node.params.len),
             @truncate(u32, self.module_code.len),
         );
         try self.module_code.appendSlice(fn_scope.code.toSlice());
-        return Value{ .Rt = res_loc.Rt };
+        return sub_res.toVal();
     }
 
     fn genBlock(self: *Compiler, node: *Node.Block, res: Result) Error!Value {
-        try self.assertNotLval(res, node.stmts.at(0).*.firstToken());
+        try res.notLval(self, node.stmts.at(0).*.firstToken());
         var block_scope = Scope{
             .id = .Block,
             .parent = self.cur_scope,
@@ -442,25 +532,27 @@ pub const Compiler = struct {
             }
 
             const val = try self.genNode(n.*, .Discard);
-            if (val == .Rt) {
+            if (val.isRt()) {
+                const reg = val.getRt();
+                defer val.free(self);
+
                 // discard unused runtime value
-                try self.emitInstruction_1(.Discard, val.Rt);
-                self.registerFree(val.Rt);
+                try self.emitInstruction_1(.Discard, reg);
             }
         }
         return Value{ .Empty = {} };
     }
 
     fn genIf(self: *Compiler, node: *Node.If, res: Result) Error!Value {
-        try self.assertNotLval(res, node.if_tok);
+        try res.notLval(self, node.if_tok);
 
         if (node.capture) |some| return self.reportErr("TODO if let", some.firstToken());
 
-        const cond_val = try self.genNode(node.cond, .Value);
-        if (cond_val != .Rt) {
-            try self.assertBool(cond_val, node.cond.firstToken());
+        const cond_val = try self.genNodeNonEmpty(node.cond, .Value);
+        if (!cond_val.isRt()) {
+            const bool_val = try cond_val.getBool(self, node.cond.firstToken());
 
-            if (cond_val.Bool) {
+            if (bool_val) {
                 return self.genNode(node.if_body, res);
             } else if (node.else_body) |some| {
                 return self.genNode(some, res);
@@ -480,11 +572,11 @@ pub const Compiler = struct {
         };
 
         // jump past if_body if cond == false
-        try self.emitInstruction_1_1(.JumpFalse, cond_val.Rt, @as(u32, 0));
+        try self.emitInstruction_1_1(.JumpFalse, cond_val.getRt(), @as(u32, 0));
         const addr = self.code.len;
         const if_val = try self.genNode(node.if_body, sub_res);
-        if (sub_res != .Rt and if_val == .Rt) {
-            try self.emitInstruction_1(.Discard, if_val.Rt);
+        if (sub_res != .Rt and if_val.isRt()) {
+            try self.emitInstruction_1(.Discard, if_val.getRt());
         }
 
         // jump past else_body since if_body was executed
@@ -495,8 +587,8 @@ pub const Compiler = struct {
             @truncate(u32, self.code.len - addr);
         if (node.else_body) |some| {
             const else_val = try self.genNode(some, sub_res);
-            if (sub_res != .Rt and else_val == .Rt) {
-                try self.emitInstruction_1(.Discard, else_val.Rt);
+            if (sub_res != .Rt and else_val.isRt()) {
+                try self.emitInstruction_1(.Discard, else_val.getRt());
             }
         } else if (sub_res == .Rt) {
             try self.emitInstruction_1_1(.ConstPrimitive, sub_res.Rt, @as(u8, 0));
@@ -506,9 +598,7 @@ pub const Compiler = struct {
             @truncate(u32, self.code.len - addr2);
 
         return if (sub_res == .Rt)
-            Value{
-                .Rt = sub_res.Rt,
-            }
+            Value{ .Rt = sub_res.Rt }
         else
             Value{ .Empty = {} };
     }
@@ -556,7 +646,7 @@ pub const Compiler = struct {
     }
 
     fn genWhile(self: *Compiler, node: *Node.While, res: Result) Error!Value {
-        try self.assertNotLval(res, node.while_tok);
+        try res.notLval(self, node.while_tok);
 
         var loop_scope = Scope.Loop{
             .base = .{
@@ -576,12 +666,12 @@ pub const Compiler = struct {
         var cond_jump: ?usize = null;
 
         const cond_val = try self.genNode(node.cond, .Value);
-        if (cond_val == .Rt) {
-            try self.emitInstruction_1_1(.JumpFalse, cond_val.Rt, @as(u32, 0));
+        if (cond_val.isRt()) {
+            try self.emitInstruction_1_1(.JumpFalse, cond_val.getRt(), @as(u32, 0));
             cond_jump = self.code.len;
         } else {
-            try self.assertBool(cond_val, node.cond.firstToken());
-            if (cond_val.Bool == false) {
+            const bool_val = try cond_val.getBool(self, node.cond.firstToken());
+            if (bool_val == false) {
                 // never executed
                 const res_val = Value{ .None = {} };
                 if (res == .Rt) {
@@ -597,8 +687,8 @@ pub const Compiler = struct {
         };
 
         const body_val = try self.genNode(node.body, sub_res);
-        if (sub_res != .Rt and body_val == .Rt) {
-            try self.emitInstruction_1(.Discard, body_val.Rt);
+        if (sub_res != .Rt and body_val.isRt()) {
+            try self.emitInstruction_1(.Discard, body_val.getRt());
         }
 
         // jump back to condition
@@ -618,86 +708,47 @@ pub const Compiler = struct {
         }
 
         return if (sub_res == .Rt)
-            Value{
-                .Rt = sub_res.Rt,
-            }
+            Value{ .Rt = sub_res.Rt }
         else
             Value{ .Empty = {} };
     }
 
-    fn assertNotLval(self: *Compiler, res: Result, tok: TokenIndex) !void {
-        if (res == .Lval) {
-            return self.reportErr("invalid left hand side to assignment", tok);
-        }
-    }
-
-    fn assertNotEmpty(self: *Compiler, val: Value, tok: TokenIndex) !void {
-        if (val == .Empty) {
-            return self.reportErr("expected a value", tok);
-        }
-    }
-
-    fn assertBool(self: *Compiler, val: Value, tok: TokenIndex) !void {
-        if (val != .Bool) {
-            return self.reportErr("expected a boolean", tok);
-        }
-    }
-
-    fn assertInt(self: *Compiler, val: Value, tok: TokenIndex) !void {
-        if (val != .Int) {
-            return self.reportErr("expected an integer", tok);
-        }
-    }
-
-    fn assertNumeric(self: *Compiler, val: Value, tok: TokenIndex) !void {
-        if (val != .Int and val != .Num) {
-            return self.reportErr("expected a number", tok);
-        }
-        if (val == .Num) {
-            return self.reportErr("TODO operations on real numbers", tok);
-        }
-    }
-
-    fn assertString(self: *Compiler, val: Value, tok: TokenIndex) !void {
-        if (val != .Str) {
-            return self.reportErr("expected a string", tok);
-        }
-    }
-
     fn genCatch(self: *Compiler, node: *Node.Catch, res: Result) Error!Value {
-        try self.assertNotLval(res, node.tok);
+        try res.notLval(self, node.tok);
 
-        const res_loc = switch (res) {
+        var sub_res = switch (res) {
             .Rt => res,
             .Discard => .Value,
             .Value => Result{ .Rt = self.registerAlloc() },
             .Lval => unreachable,
         };
-        const l_val = try self.genNode(node.lhs, res_loc);
-        try self.assertNotEmpty(l_val, node.lhs.firstToken());
-        if (l_val != .Rt) {
+        const l_val = try self.genNodeNonEmpty(node.lhs, sub_res);
+        if (!l_val.isRt()) {
             return l_val;
         }
+        sub_res = .{
+            .Rt = try l_val.toRt(self),
+        };
 
-        try self.emitInstruction_1_1(.JumpNotError, l_val.Rt, @as(u32, 0));
+        try self.emitInstruction_1_1(.JumpNotError, sub_res.Rt, @as(u32, 0));
         const addr = self.code.len;
 
         if (node.capture) |some| {
             return self.reportErr("TODO: capture value", some.firstToken());
         }
 
-        const r_val = try self.genNode(node.rhs, Result{ .Rt = l_val.Rt });
+        const r_val = try self.genNode(node.rhs, sub_res);
 
         @ptrCast(*align(1) u32, self.code.toSlice()[addr - @sizeOf(u32) ..].ptr).* =
             @truncate(u32, self.code.len - addr);
-        return Value{ .Rt = l_val.Rt };
+        return sub_res.toVal();
     }
 
     fn genPrefix(self: *Compiler, node: *Node.Prefix, res: Result) Error!Value {
-        try self.assertNotLval(res, node.tok);
-        const r_val = try self.genNode(node.rhs, .Value);
-        try self.assertNotEmpty(r_val, node.rhs.firstToken());
-        if (r_val == .Rt) {
+        try res.notLval(self, node.tok);
+        const r_val = try self.genNodeNonEmpty(node.rhs, .Value);
+
+        if (r_val.isRt()) {
             const op_id = switch (node.op) {
                 .BoolNot => .BoolNot,
                 .BitNot => .BitNot,
@@ -706,27 +757,17 @@ pub const Compiler = struct {
                 .Plus => return r_val,
                 .Try => lang.Op.Try,
             };
-            // TODO r_val should be freed here
-            if (res == .Rt) {
-                try self.emitInstruction_2(op_id, res.Rt, r_val.Rt);
-                return Value{ .Rt = res.Rt };
-            } else {
-                const reg = self.registerAlloc();
-                try self.emitInstruction_2(op_id, reg, r_val.Rt);
-                return Value{ .Rt = reg };
-            }
+            defer r_val.free(self);
+
+            const sub_res = res.toRt(self);
+            try self.emitInstruction_2(op_id, sub_res.Rt, r_val.getRt());
+            return sub_res.toVal();
         }
-        const ret_val = switch (node.op) {
-            .BoolNot => blk: {
-                try self.assertBool(r_val, node.rhs.firstToken());
-                break :blk Value{ .Bool = !r_val.Bool };
-            },
-            .BitNot => blk: {
-                try self.assertInt(r_val, node.rhs.firstToken());
-                break :blk Value{ .Int = ~r_val.Int };
-            },
+        const ret_val: Value = switch (node.op) {
+            .BoolNot => .{ .Bool = !try r_val.getBool(self, node.rhs.firstToken()) },
+            .BitNot => .{ .Int = ~try r_val.getInt(self, node.rhs.firstToken()) },
             .Minus => blk: {
-                try self.assertNumeric(r_val, node.rhs.firstToken());
+                try r_val.checkNum(self, node.rhs.firstToken());
                 if (r_val == .Int) {
                     // TODO check for overflow
                     break :blk Value{ .Int = -r_val.Int };
@@ -735,25 +776,19 @@ pub const Compiler = struct {
                 }
             },
             .Plus => blk: {
-                try self.assertNumeric(r_val, node.rhs.firstToken());
+                try r_val.checkNum(self, node.rhs.firstToken());
                 break :blk r_val;
             },
             // errors are runtime only currently, so ret_val does not need to be checked
             // TODO should this be an error?
             .Try => r_val,
         };
-        if (res == .Rt) {
-            try self.makeRuntime(res.Rt, ret_val);
-            return Value{ .Rt = res.Rt };
-        }
-        // if res == .Value nothing needs to be done
-        return ret_val;
+        return ret_val.maybeRt(self, res);
     }
 
     fn genTypeInfix(self: *Compiler, node: *Node.TypeInfix, res: Result) Error!Value {
-        try self.assertNotLval(res, node.tok);
-        const l_val = try self.genNode(node.lhs, .Value);
-        try self.assertNotEmpty(l_val, node.lhs.firstToken());
+        try res.notLval(self, node.tok);
+        const l_val = try self.genNodeNonEmpty(node.lhs, .Value);
 
         const type_str = self.tokenSlice(node.type_tok);
         const type_id = if (mem.eql(u8, type_str, "none"))
@@ -781,14 +816,16 @@ pub const Compiler = struct {
         else
             return self.reportErr("expected a type name", node.type_tok);
 
-        if (l_val == .Rt) {
-            const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
+        if (l_val.isRt()) {
+            const sub_res = res.toRt(self);
+            defer l_val.free(self);
+
             const op: lang.Op = if (node.op == .As) .As else .Is;
-            try self.emitInstruction_2_1(op, res_loc.Rt, l_val.Rt, type_id);
-            return Value{ .Rt = res_loc.Rt };
+            try self.emitInstruction_2_1(op, sub_res.Rt, l_val.getRt(), type_id);
+            return sub_res.toVal();
         }
 
-        const ret = switch (node.op) {
+        const ret_val = switch (node.op) {
             .As => switch (type_id) {
                 .None => Value{ .None = {} },
                 .Int => Value{
@@ -850,25 +887,19 @@ pub const Compiler = struct {
             },
         };
 
-        if (res == .Rt) {
-            try self.makeRuntime(res.Rt, ret);
-            return Value{ .Rt = res.Rt };
-        }
-        // if res == .Value nothing needs to be done
-        return ret;
+        return ret_val.maybeRt(self, res);
     }
 
     fn genSuffix(self: *Compiler, node: *Node.Suffix, res: Result) Error!Value {
         if (node.op == .Call) {
-            try self.assertNotLval(res, node.r_tok);
+            try res.notLval(self, node.r_tok);
         }
         const l_val = try self.genNode(node.lhs, .Value);
-        if (l_val != .Rt) {
+        if (!l_val.isRt()) {
             return self.reportErr("Invalid left hand side to suffix op", node.lhs.firstToken());
         }
         switch (node.op) {
             .Call => |*args| {
-                const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
                 const len = if (args.len == 0) 1 else args.len;
                 const arg_locs = try self.arena.alloc(RegRef, len);
                 for (arg_locs) |*a| {
@@ -882,7 +913,7 @@ pub const Compiler = struct {
                     i += 1;
                 }
 
-                try self.emitInstruction_2_1(.Call, l_val.Rt, arg_locs[0], @truncate(u16, args.len));
+                try self.emitInstruction_2_1(.Call, l_val.getRt(), arg_locs[0], @truncate(u16, args.len));
                 if (res == .Rt) {
                     // TODO probably should handle this better
                     try self.emitInstruction_2(.Move, res.Rt, arg_locs[0]);
@@ -902,21 +933,20 @@ pub const Compiler = struct {
                     .Discard, .Value => self.registerAlloc(),
                 };
 
-                const val_res = try self.genNode(val, .Value);
-                try self.assertNotEmpty(val_res, val.firstToken());
+                const val_res = try self.genNodeNonEmpty(val, .Value);
 
                 const reg = self.registerAlloc();
                 defer self.registerFree(reg);
                 try self.makeRuntime(reg, val_res);
 
-                try self.emitInstruction_3(.Subscript, res_reg, l_val.Rt, reg);
+                try self.emitInstruction_3(.Subscript, res_reg, l_val.getRt(), reg);
                 return Value{ .Rt = res_reg };
             },
         }
     }
 
     fn genInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
-        try self.assertNotLval(res, node.tok);
+        try res.notLval(self, node.tok);
         switch (node.op) {
             .BoolOr,
             .BoolAnd,
@@ -973,8 +1003,7 @@ pub const Compiler = struct {
         }
         const reg = self.registerAlloc();
         defer self.registerFree(reg);
-        const r_val = try self.genNode(node.rhs, Result{ .Rt = reg });
-        try self.assertNotEmpty(r_val, node.rhs.firstToken());
+        const r_val = try self.genNodeNonEmpty(node.rhs, Result{ .Rt = reg });
 
         if (node.op == .Assign) {
             const l_val = try self.genNode(node.lhs, Result{ .Lval = .{ .Assign = reg } });
@@ -1000,30 +1029,24 @@ pub const Compiler = struct {
             else => unreachable,
         };
 
-        try self.emitInstruction_2(op_id, l_val.Rt, r_val.Rt);
+        try self.emitInstruction_2(op_id, l_val.getRt(), r_val.getRt());
         return Value.Empty;
     }
 
     fn genNumericInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
-        var l_val = try self.genNode(node.lhs, .Value);
-        try self.assertNotEmpty(l_val, node.lhs.firstToken());
+        var l_val = try self.genNodeNonEmpty(node.lhs, .Value);
+        var r_val = try self.genNodeNonEmpty(node.rhs, .Value);
 
-        var r_val = try self.genNode(node.rhs, .Value);
-        try self.assertNotEmpty(r_val, node.rhs.firstToken());
+        if (r_val.isRt() or l_val.isRt()) {
+            const sub_res = res.toRt(self);
 
-        if (r_val == .Rt or l_val == .Rt) {
-            if (r_val != .Rt) {
-                try self.assertNumeric(r_val, node.tok);
-                const reg = self.registerAlloc();
-                try self.makeRuntime(reg, r_val);
-                r_val = Value{ .Rt = reg };
+            const l_reg = try l_val.toRt(self);
+            const r_reg = try r_val.toRt(self);
+            defer {
+                r_val.free(self);
+                l_val.free(self);
             }
-            if (l_val != .Rt) {
-                try self.assertNumeric(l_val, node.tok);
-                const reg = self.registerAlloc();
-                try self.makeRuntime(reg, l_val);
-                l_val = Value{ .Rt = reg };
-            }
+
             const op_id = switch (node.op) {
                 .Add => .Add,
                 .Sub => .Sub,
@@ -1034,18 +1057,12 @@ pub const Compiler = struct {
                 .Pow => lang.Op.Pow,
                 else => unreachable,
             };
-            // TODO r_val and l_val should be freed here
-            if (res == .Rt) {
-                try self.emitInstruction_3(op_id, res.Rt, l_val.Rt, r_val.Rt);
-                return Value{ .Rt = res.Rt };
-            } else {
-                const reg = self.registerAlloc();
-                try self.emitInstruction_3(op_id, reg, l_val.Rt, r_val.Rt);
-                return Value{ .Rt = reg };
-            }
+
+            try self.emitInstruction_3(op_id, sub_res.Rt, l_reg, r_reg);
+            return sub_res.toVal();
         }
-        try self.assertNumeric(r_val, node.tok);
-        try self.assertNumeric(l_val, node.tok);
+        try r_val.checkNum(self, node.tok);
+        try l_val.checkNum(self, node.tok);
 
         // TODO makeRuntime if overflow
         // TODO decay to numeric
@@ -1078,32 +1095,24 @@ pub const Compiler = struct {
             },
             else => unreachable,
         };
-        if (res == .Rt) {
-            try self.makeRuntime(res.Rt, ret_val);
-            return Value{ .Rt = res.Rt };
-        }
-        // if res == .Value nothing needs to be done
-        return ret_val;
+
+        return ret_val.maybeRt(self, res);
     }
 
     fn genComparisionInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
-        var l_val = try self.genNode(node.lhs, .Value);
-        try self.assertNotEmpty(l_val, node.lhs.firstToken());
+        var l_val = try self.genNodeNonEmpty(node.lhs, .Value);
+        var r_val = try self.genNodeNonEmpty(node.rhs, .Value);
 
-        var r_val = try self.genNode(node.rhs, .Value);
-        try self.assertNotEmpty(r_val, node.rhs.firstToken());
+        if (r_val.isRt() or l_val.isRt()) {
+            const sub_res = res.toRt(self);
 
-        if (r_val == .Rt or l_val == .Rt) {
-            if (r_val != .Rt) {
-                const reg = self.registerAlloc();
-                try self.makeRuntime(reg, r_val);
-                r_val = Value{ .Rt = reg };
+            const l_reg = try l_val.toRt(self);
+            const r_reg = try r_val.toRt(self);
+            defer {
+                r_val.free(self);
+                l_val.free(self);
             }
-            if (l_val != .Rt) {
-                const reg = self.registerAlloc();
-                try self.makeRuntime(reg, l_val);
-                l_val = Value{ .Rt = reg };
-            }
+
             const op_id = switch (node.op) {
                 .LessThan => .LessThan,
                 .LessThanEqual => .LessThanEqual,
@@ -1114,32 +1123,25 @@ pub const Compiler = struct {
                 .In => lang.Op.In,
                 else => unreachable,
             };
-            // TODO r_val and l_val should be freed here
-            if (res == .Rt) {
-                try self.emitInstruction_3(op_id, res.Rt, l_val.Rt, r_val.Rt);
-                return Value{ .Rt = res.Rt };
-            } else {
-                const reg = self.registerAlloc();
-                try self.emitInstruction_3(op_id, reg, l_val.Rt, r_val.Rt);
-                return Value{ .Rt = reg };
-            }
+            try self.emitInstruction_3(op_id, sub_res.Rt, l_reg, r_reg);
+            return sub_res.toVal();
         }
+
+        // order comparisions are only allowed on numbers
         switch (node.op) {
             .In, .Equal, .NotEqual => {},
             else => {
-                try self.assertNumeric(l_val, node.lhs.firstToken());
-                try self.assertNumeric(r_val, node.rhs.firstToken());
+                try l_val.checkNum(self, node.lhs.firstToken());
+                try r_val.checkNum(self, node.rhs.firstToken());
             },
         }
 
-        const ret_val = switch (node.op) {
-            .LessThan => Value{ .Bool = l_val.Int < r_val.Int },
-            .LessThanEqual => Value{ .Bool = l_val.Int <= r_val.Int },
-            .GreaterThan => Value{ .Bool = l_val.Int > r_val.Int },
-            .GreaterThanEqual => Value{ .Bool = l_val.Int >= r_val.Int },
+        const ret_val: Value = switch (node.op) {
+            .LessThan => .{ .Bool = l_val.Int < r_val.Int },
+            .LessThanEqual => .{ .Bool = l_val.Int <= r_val.Int },
+            .GreaterThan => .{ .Bool = l_val.Int > r_val.Int },
+            .GreaterThanEqual => .{ .Bool = l_val.Int >= r_val.Int },
             .Equal, .NotEqual => blk: {
-                try self.assertNotEmpty(l_val, node.lhs.firstToken());
-                try self.assertNotEmpty(r_val, node.rhs.firstToken());
                 const eql = switch (l_val) {
                     .None => |a_val| switch (r_val) {
                         .None => true,
@@ -1163,33 +1165,29 @@ pub const Compiler = struct {
                         .Str => |b_val| mem.eql(u8, a_val, b_val),
                         else => false,
                     },
-                    .Empty, .Rt => unreachable,
+                    .Empty, .Rt, .Ref => unreachable,
                 };
                 // broken LLVM module found: Terminator found in the middle of a basic block!
                 // break :blk Value{ .Bool = if (node.op == .Equal) eql else !eql };
                 const copy = if (node.op == .Equal) eql else !eql;
                 break :blk Value{ .Bool = copy };
             },
-            .In => blk: {
-                try self.assertString(l_val, node.lhs.firstToken());
-                try self.assertString(r_val, node.rhs.firstToken());
-
-                break :blk Value{ .Bool = mem.indexOf(u8, l_val.Str, r_val.Str) != null };
+            .In => .{
+                .Bool = mem.indexOf(
+                    u8,
+                    try l_val.getStr(self, node.lhs.firstToken()),
+                    try r_val.getStr(self, node.rhs.firstToken()),
+                ) != null,
             },
             else => unreachable,
         };
-        if (res == .Rt) {
-            try self.makeRuntime(res.Rt, ret_val);
-            return Value{ .Rt = res.Rt };
-        }
-        // if res == .Value nothing needs to be done
-        return ret_val;
+        return ret_val.maybeRt(self, res);
     }
 
     fn genDecl(self: *Compiler, node: *Node.Decl, res: Result) Error!Value {
         assert(res != .Lval);
         const r_loc = self.registerAlloc();
-        assert((try self.genNode(node.value, Result{ .Rt = r_loc })) == .Rt);
+        assert((try self.genNode(node.value, Result{ .Rt = r_loc })).isRt());
 
         const lval_kind = if (self.tree.tokens.at(node.let_const).id == .Keyword_let)
             Result{ .Lval = .{ .Let = r_loc } }
@@ -1232,22 +1230,22 @@ pub const Compiler = struct {
                         if (!sym.mutable) {
                             return self.reportErr("assignment to constant", node.tok);
                         }
-                        return Value{ .Rt = sym.reg };
+                        return Value{ .Ref = sym.reg };
                     }
                 },
             }
         } else if (self.cur_scope.getSymbol(name)) |sym| {
             if (res == .Rt) {
                 try self.emitInstruction_2(.Move, res.Rt, sym.reg);
-                return Value{ .Rt = res.Rt };
+                return res.toVal();
             }
-            return Value{ .Rt = sym.reg };
+            return Value{ .Ref = sym.reg };
         }
         return self.reportErr("use of undeclared identifier", node.tok);
     }
 
     fn genLiteral(self: *Compiler, node: *Node.Literal, res: Result) Error!Value {
-        try self.assertNotLval(res, node.tok);
+        try res.notLval(self, node.tok);
         const ret_val: Value = switch (node.kind) {
             .Int => .{ .Int = try self.parseInt(node.tok) },
             .True => .{ .Bool = true },
@@ -1256,57 +1254,48 @@ pub const Compiler = struct {
             .Str => .{ .Str = try self.parseStr(node.tok) },
             .Num => .{ .Num = self.parseNum(node.tok) },
         };
-        if (res == .Rt) {
-            try self.makeRuntime(res.Rt, ret_val);
-            return Value{ .Rt = res.Rt };
-        }
-        // if res == .Value nothing needs to be done
-        return ret_val;
+        return ret_val.maybeRt(self, res);
     }
 
     fn genImport(self: *Compiler, node: *Node.Import, res: Result) Error!Value {
-        try self.assertNotLval(res, node.tok);
+        try res.notLval(self, node.tok);
 
-        const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
+        const sub_res = res.toRt(self);
         const str = try self.parseStr(node.str_tok);
         const str_loc = try self.putString(str);
 
-        try self.emitInstruction_1_1(.Import, res_loc.Rt, str_loc);
-        return Value{ .Rt = res_loc.Rt };
+        try self.emitInstruction_1_1(.Import, sub_res.Rt, str_loc);
+        return sub_res.toVal();
     }
 
     fn genNative(self: *Compiler, node: *Node.Native, res: Result) Error!Value {
-        try self.assertNotLval(res, node.tok);
+        try res.notLval(self, node.tok);
 
-        const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
-
+        const sub_res = res.toRt(self);
         const name = try self.parseStr(node.name_tok);
         const name_loc = try self.putString(name);
         if (node.lib_tok) |some| {
             const lib = try self.parseStr(some);
             const lib_loc = try self.putString(lib);
 
-            try self.emitInstruction_1_2(.NativeExtern, res_loc.Rt, res_loc, name_loc);
+            try self.emitInstruction_1_2(.NativeExtern, sub_res.Rt, lib_loc, name_loc);
         } else {
-            try self.emitInstruction_1_1(.Native, res_loc.Rt, name_loc);
+            try self.emitInstruction_1_1(.Native, sub_res.Rt, name_loc);
         }
 
-        return Value{ .Rt = res_loc.Rt };
+        return sub_res.toVal();
     }
 
     fn genError(self: *Compiler, node: *Node.Error, res: Result) Error!Value {
-        try self.assertNotLval(res, node.tok);
+        try res.notLval(self, node.tok);
+        const val = try self.genNodeNonEmpty(node.value, .Value);
 
-        const val = try self.genNode(node.value, .Value);
-        try self.assertNotEmpty(val, node.value.firstToken());
+        const sub_res = res.toRt(self);
+        const reg = try val.toRt(self);
+        defer val.free(self);
 
-        const res_loc = if (res == .Rt) res else Result{ .Rt = self.registerAlloc() };
-        const reg = self.registerAlloc();
-        defer self.registerFree(reg);
-        try self.makeRuntime(reg, val);
-
-        try self.emitInstruction_2(.BuildError, res_loc.Rt, reg);
-        return Value{ .Rt = res_loc.Rt };
+        try self.emitInstruction_2(.BuildError, sub_res.Rt, reg);
+        return sub_res.toVal();
     }
 
     fn addLineInfo(self: *Compiler, node: *Node) !void {

@@ -125,8 +125,8 @@ pub const Vm = struct {
                 },
                 .Add => {
                     const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getNumeric(module);
-                    const C_val = try vm.getNumeric(module);
+                    const B_val = try vm.getNum(module);
+                    const C_val = try vm.getNum(module);
 
                     A_val.* = .{
                         .kind = .{
@@ -136,8 +136,8 @@ pub const Vm = struct {
                 },
                 .Sub => {
                     const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getNumeric(module);
-                    const C_val = try vm.getNumeric(module);
+                    const B_val = try vm.getNum(module);
+                    const C_val = try vm.getNum(module);
 
                     A_val.* = .{
                         .kind = .{
@@ -147,8 +147,8 @@ pub const Vm = struct {
                 },
                 .Mul => {
                     const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getNumeric(module);
-                    const C_val = try vm.getNumeric(module);
+                    const B_val = try vm.getNum(module);
+                    const C_val = try vm.getNum(module);
 
                     A_val.* = .{
                         .kind = .{
@@ -158,8 +158,8 @@ pub const Vm = struct {
                 },
                 .Pow => {
                     const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getNumeric(module);
-                    const C_val = try vm.getNumeric(module);
+                    const B_val = try vm.getNum(module);
+                    const C_val = try vm.getNum(module);
 
                     A_val.* = .{
                         .kind = .{
@@ -169,8 +169,8 @@ pub const Vm = struct {
                 },
                 .DivFloor => {
                     const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getNumeric(module);
-                    const C_val = try vm.getNumeric(module);
+                    const B_val = try vm.getNum(module);
+                    const C_val = try vm.getNum(module);
 
                     A_val.* = .{
                         .kind = .{
@@ -209,32 +209,32 @@ pub const Vm = struct {
                     A_ref.* = B_ref.*;
                 },
                 .DirectAdd => {
-                    const A_val = try vm.getNumeric(module);
-                    const B_val = try vm.getNumeric(module);
+                    const A_val = try vm.getNum(module);
+                    const B_val = try vm.getNum(module);
 
                     A_val.kind.Int += B_val.kind.Int;
                 },
                 .DirectSub => {
-                    const A_val = try vm.getNumeric(module);
-                    const B_val = try vm.getNumeric(module);
+                    const A_val = try vm.getNum(module);
+                    const B_val = try vm.getNum(module);
 
                     A_val.kind.Int -= B_val.kind.Int;
                 },
                 .DirectMul => {
-                    const A_val = try vm.getNumeric(module);
-                    const B_val = try vm.getNumeric(module);
+                    const A_val = try vm.getNum(module);
+                    const B_val = try vm.getNum(module);
 
                     A_val.kind.Int *= B_val.kind.Int;
                 },
                 .DirectPow => {
-                    const A_val = try vm.getNumeric(module);
-                    const B_val = try vm.getNumeric(module);
+                    const A_val = try vm.getNum(module);
+                    const B_val = try vm.getNum(module);
 
                     A_val.kind.Int = std.math.powi(i64, A_val.kind.Int, B_val.kind.Int) catch @panic("TODO: overflow");
                 },
                 .DirectDivFloor => {
-                    const A_val = try vm.getNumeric(module);
-                    const B_val = try vm.getNumeric(module);
+                    const A_val = try vm.getNum(module);
+                    const B_val = try vm.getNum(module);
 
                     A_val.kind.Int = @divFloor(A_val.kind.Int, B_val.kind.Int);
                 },
@@ -336,29 +336,29 @@ pub const Vm = struct {
                 },
                 .LessThan => {
                     const A_ref = vm.getRef(module);
-                    const B_val = try vm.getNumeric(module);
-                    const C_val = try vm.getNumeric(module);
+                    const B_val = try vm.getNum(module);
+                    const C_val = try vm.getNum(module);
 
                     A_ref.value = if (B_val.kind.Int < C_val.kind.Int) &Value.True else &Value.False;
                 },
                 .LessThanEqual => {
                     const A_ref = vm.getRef(module);
-                    const B_val = try vm.getNumeric(module);
-                    const C_val = try vm.getNumeric(module);
+                    const B_val = try vm.getNum(module);
+                    const C_val = try vm.getNum(module);
 
                     A_ref.value = if (B_val.kind.Int <= C_val.kind.Int) &Value.True else &Value.False;
                 },
                 .GreaterThan => {
                     const A_ref = vm.getRef(module);
-                    const B_val = try vm.getNumeric(module);
-                    const C_val = try vm.getNumeric(module);
+                    const B_val = try vm.getNum(module);
+                    const C_val = try vm.getNum(module);
 
                     A_ref.value = if (B_val.kind.Int > C_val.kind.Int) &Value.True else &Value.False;
                 },
                 .GreaterThanEqual => {
                     const A_ref = vm.getRef(module);
-                    const B_val = try vm.getNumeric(module);
-                    const C_val = try vm.getNumeric(module);
+                    const B_val = try vm.getNum(module);
+                    const C_val = try vm.getNum(module);
 
                     A_ref.value = if (B_val.kind.Int >= C_val.kind.Int) &Value.True else &Value.False;
                 },
@@ -400,7 +400,7 @@ pub const Vm = struct {
                 },
                 .Negate => {
                     const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getNumeric(module);
+                    const B_val = try vm.getNum(module);
 
                     A_val.* = .{
                         .kind = .{
@@ -758,7 +758,7 @@ pub const Vm = struct {
         return val;
     }
 
-    fn getNumeric(vm: *Vm, module: *lang.Module) !*Value {
+    fn getNum(vm: *Vm, module: *lang.Module) !*Value {
         const val = vm.getVal(module);
 
         if (val.kind != .Int and val.kind != .Num) {
