@@ -208,6 +208,12 @@ pub const Vm = struct {
 
                     A_ref.* = B_ref.*;
                 },
+                .Copy => {
+                    const A_val = try vm.getNewVal(module);
+                    const B_val = vm.getVal(module);
+
+                    A_val.* = B_val.*;
+                },
                 .DirectAdd => {
                     const A_val = try vm.getNum(module);
                     const B_val = try vm.getNum(module);

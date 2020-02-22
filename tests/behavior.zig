@@ -1,3 +1,22 @@
+test "copy on assign" {
+    try expectOutput(
+        \\const x = 2
+        \\let y = x
+        \\y += 2
+        \\x
+    ,
+        \\2
+    );
+    try expectOutput(
+        \\let y = 2
+        \\const inc = fn (a) a+=2
+        \\inc(y)
+        \\y
+    ,
+        \\4
+    );
+}
+
 test "try" {
     try expectOutput(
         \\const err = fn() error("foo")

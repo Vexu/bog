@@ -10,8 +10,8 @@ pub const Op = enum(u8) {
     /// A <- B
     Move,
 
-    // /// STACK(A, B) = C
-    // PushStack,
+    /// A = COPY(B)
+    Copy,
 
     /// DISCARD(A)
     Discard,
