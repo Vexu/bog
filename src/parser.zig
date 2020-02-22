@@ -601,6 +601,7 @@ pub const Parser = struct {
     ///     | "[" (expr ",")* expr? "]"
     ///     | "error" "(" expr ")"
     ///     | "import" "(" STRING ")"
+    ///     | "native" "(" (STRING ",")? STRING ")"
     ///     | if
     ///     | while
     ///     | for
@@ -658,8 +659,27 @@ pub const Parser = struct {
             node.* = .{
                 .tok = tok,
                 .str_tok = try parser.expectToken(.String, true),
+                .r_paren = try parser.expectToken(.RParen, true),
             };
-            _ = try parser.expectToken(.RParen, true);
+            return &node.base;
+        }
+        if (parser.eatToken(.Keyword_native, skip_nl)) |tok| {
+            _ = try parser.expectToken(.LParen, true);
+
+            var lib_tok: ?TokenIndex = null;
+            var name_tok = try parser.expectToken(.String, true);
+            if (parser.eatToken(.Comma, true)) |_| {
+                lib_tok = name_tok;
+                name_tok = try parser.expectToken(.String, true);
+            }
+
+            const node = try parser.arena.create(Node.Native);
+            node.* = .{
+                .tok = tok,
+                .lib_tok = lib_tok,
+                .name_tok = name_tok,
+                .r_paren = try parser.expectToken(.RParen, true),
+            };
             return &node.base;
         }
         if (parser.eatToken(.LParen, skip_nl)) |tok| {
@@ -966,7 +986,7 @@ pub const Parser = struct {
         id: Token.Id,
         tok: *Token,
     };
-    
+
     fn sawEnd(parser: *Parser) bool {
         const res = parser.it.prev().?.id == .End;
         _ = parser.it.next();

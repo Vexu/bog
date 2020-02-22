@@ -153,7 +153,19 @@ const Renderer = struct {
                 try self.renderToken(import.tok, stream, indent, .None);
                 try self.renderToken(self.nextToken(import.tok), stream, indent, .None);
                 try self.renderToken(import.str_tok, stream, indent, .None);
-                return self.renderToken(self.nextToken(import.str_tok), stream, indent, space);
+                return self.renderToken(import.r_paren, stream, indent, space);
+            },
+            .Native => {
+                const native = @fieldParentPtr(Node.Native, "base", node);
+
+                try self.renderToken(native.tok, stream, indent, .None);
+                try self.renderToken(self.nextToken(native.tok), stream, indent, .None);
+                if (native.lib_tok) |some| {
+                    try self.renderToken(some, stream, indent, .None);
+                    try self.renderToken(self.nextToken(some), stream, indent, .Space);
+                }
+                try self.renderToken(native.name_tok, stream, indent, .None);
+                return self.renderToken(native.r_paren, stream, indent, space);
             },
             .Error => {
                 const err = @fieldParentPtr(Node.Error, "base", node);

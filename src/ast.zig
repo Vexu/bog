@@ -40,6 +40,7 @@ pub const Node = struct {
         Suffix,
         Literal,
         Import,
+        Native,
         Error,
         List,
         Tuple,
@@ -72,6 +73,7 @@ pub const Node = struct {
                 return if (lit.kind != .None) lit.tok else lit.tok - 1;
             },
             .Import => @fieldParentPtr(Node.Import, "base", node).tok,
+            .Native => @fieldParentPtr(Node.Native, "base", node).tok,
             .Error => @fieldParentPtr(Node.Error, "base", node).tok,
             .List, .Tuple, .Map => @fieldParentPtr(Node.ListTupleMap, "base", node).l_tok,
             .Block => @fieldParentPtr(Node.Block, "base", node).stmts.at(0).*.firstToken(),
@@ -104,7 +106,8 @@ pub const Node = struct {
             .TypeInfix => @fieldParentPtr(Node.TypeInfix, "base", node).type_tok,
             .Suffix => @fieldParentPtr(Node.Suffix, "base", node).r_tok,
             .Literal => @fieldParentPtr(Node.Literal, "base", node).tok,
-            .Import => @fieldParentPtr(Node.Import, "base", node).str_tok + 1,
+            .Import => @fieldParentPtr(Node.Import, "base", node).r_paren,
+            .Native => @fieldParentPtr(Node.Native, "base", node).r_paren,
             .Error => @fieldParentPtr(Node.Error, "base", node).r_paren,
             .List, .Tuple, .Map => @fieldParentPtr(Node.ListTupleMap, "base", node).r_tok,
             .Block => {
@@ -260,6 +263,15 @@ pub const Node = struct {
         base: Node = Node{ .id = .Import },
         tok: TokenIndex,
         str_tok: TokenIndex,
+        r_paren: TokenIndex,
+    };
+
+    pub const Native = struct {
+        base: Node = Node{ .id = .Native },
+        tok: TokenIndex,
+        lib_tok: ?TokenIndex,
+        name_tok: TokenIndex,
+        r_paren: TokenIndex,
     };
 
     pub const Error = struct {

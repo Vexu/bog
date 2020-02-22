@@ -193,6 +193,7 @@ pub const Token = struct {
         Keyword_fn,
         Keyword_as,
         Keyword_const,
+        Keyword_native,
     };
 
     pub const Keyword = struct {
@@ -224,6 +225,7 @@ pub const Token = struct {
         .{ .bytes = "fn", .id = .Keyword_fn },
         .{ .bytes = "as", .id = .Keyword_as },
         .{ .bytes = "const", .id = .Keyword_const },
+        .{ .bytes = "native", .id = .Keyword_native },
         .{ .bytes = "_", .id = .Underscore },
     };
 
@@ -1245,7 +1247,7 @@ test "operators" {
 test "keywords" {
     expectTokens(
         \\not　and or let continue break return if else false true
-        \\for while match catch try error import is in fn as const
+        \\for while match catch try error import is in fn as const native
     , &[_]Token.Id{
         .Keyword_not,
         .Keyword_and,
@@ -1271,6 +1273,7 @@ test "keywords" {
         .Keyword_fn,
         .Keyword_as,
         .Keyword_const,
+        .Keyword_native,
     });
 }
 

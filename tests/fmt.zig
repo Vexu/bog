@@ -1,3 +1,11 @@
+test "native function" {
+    try testCanonical(
+        \\const foo = native("foo")
+        \\const bar = native("libbar", "bar")
+        \\
+    );
+}
+
 test "nested blocks" {
     try testCanonical(
         \\if (false)

@@ -285,6 +285,7 @@ pub const Compiler = struct {
             .Catch => return self.genCatch(@fieldParentPtr(Node.Catch, "base", node), res),
 
             .Import => return self.reportErr("TODO: Import", node.firstToken()),
+            .Native => return self.reportErr("TODO: Native", node.firstToken()),
             .Map => return self.reportErr("TODO: Map", node.firstToken()),
             .For => return self.reportErr("TODO: For", node.firstToken()),
             .Match => return self.reportErr("TODO: Match", node.firstToken()),
