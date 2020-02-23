@@ -663,6 +663,7 @@ pub const Vm = struct {
                     } else {
                         frame.ret_loc.* = A_val;
                     }
+                    vm.gc.stackShrink(vm.ip);
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
@@ -675,6 +676,7 @@ pub const Vm = struct {
 
                     const frame = vm.call_stack.pop() orelse return error.MalformedByteCode;
                     frame.ret_loc.* = &Value.None;
+                    vm.gc.stackShrink(vm.ip);
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;

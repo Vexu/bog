@@ -130,7 +130,6 @@ const Repl = struct {
         if (res) |some| {
             try some.dump(out_stream, 2);
             try out_stream.writeByte('\n');
-            // vm.result.deref();
         }
 
         // reset arena

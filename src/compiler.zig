@@ -508,7 +508,7 @@ pub const Compiler = struct {
 
             try self.emitInstruction_1(.Return, reg);
         }
-        
+
         // reset regs after generating body
         self.used_regs = old_used_regs;
         const sub_res = res.toRt(self);

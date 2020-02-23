@@ -175,6 +175,24 @@ pub const Value = struct {
             _ => unreachable,
         }
     }
+
+    pub fn mark(value: *Value) void {
+        if (value.marked) return;
+        value.marked = true;
+        switch (value.kind) {
+            .None, .Int, .Num, .Fn, .Bool, .Str => {},
+
+            .Tuple => |val| for (val) |v| v.mark(),
+            .Map => @panic("TODO mark for maps"),
+            .List => |val| for (val.toSliceConst()) |v| v.mark(),
+            .Error => |val| val.mark(),
+            .Range => |val| {
+                val.begin.mark();
+                val.end.mark();
+            },
+            _ => unreachable,
+        }
+    }
 };
 
 var buffer: [1024]u8 = undefined;

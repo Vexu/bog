@@ -28,7 +28,34 @@ pub const Gc = struct {
         return try gc.values.addOne();
     }
 
-    pub fn free(gc: *Gc, Ref) void {}
+    pub fn free(gc: *Gc) void {
+        gc.mark();
+        if (gc.sweep() != 0) {
+            // TODO compact/move
+        }
+    }
+
+    pub fn mark(gc: *Gc) void {
+        var it = gc.stack.iterator(0);
+        while (it.next()) |val| {
+            if (val.*) |some| {
+                some.mark();
+            }
+        }
+    }
+
+    pub fn sweep(gc: *Gc) u32 {
+        var freed: u32 = 0;
+        var it = gc.values.iterator(0);
+        while (it.next()) |val| {
+            if (val.*.marked) {
+                val.*.marked = false;
+            } else {
+                freed += 1;
+            }
+        }
+        return freed;
+    }
 
     pub fn stackGet(gc: *Gc, index: usize) !*Value {
         if (index > gc.stack.len)
@@ -54,5 +81,10 @@ pub const Gc = struct {
             try gc.stack.push(null);
         }
         return gc.stack.at(index);
+    }
+
+    pub fn stackShrink(gc: *Gc, size: usize) void {
+        if (size > gc.stack.len) return;
+        gc.stack.len = size;
     }
 };
