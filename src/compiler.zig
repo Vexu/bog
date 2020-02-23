@@ -118,7 +118,6 @@ pub const Compiler = struct {
                     return sym;
                 }
             }
-            // TODO self.parent
             if (self.parent) |some| {
                 if (self.id == .Fn) @panic("TODO: closures");
                 return some.getSymbol(name);
@@ -571,10 +570,7 @@ pub const Compiler = struct {
             }
 
             const res_val = Value{ .None = {} };
-            if (res == .Rt) {
-                try self.makeRuntime(res.Rt, res_val);
-                return Value{ .Rt = res.Rt };
-            } else return res_val;
+            return res_val.maybeRt(self, res);
         }
         const sub_res = switch (res) {
             .Rt, .Discard => res,
@@ -686,10 +682,7 @@ pub const Compiler = struct {
             if (bool_val == false) {
                 // never executed
                 const res_val = Value{ .None = {} };
-                if (res == .Rt) {
-                    try self.makeRuntime(res.Rt, res_val);
-                    return Value{ .Rt = res.Rt };
-                } else return res_val;
+                return res_val.maybeRt(self, res);
             }
         }
 
@@ -886,7 +879,7 @@ pub const Compiler = struct {
                 .Fn => return self.reportErr("cannot cast to function", node.type_tok),
                 .Error => return self.reportErr("cannot cast to error", node.type_tok),
                 .Range => return self.reportErr("cannot cast to range", node.type_tok),
-                .Tuple, .Map, .List => return self.reportErr("TODO Rt casts", node.tok),
+                .Tuple, .Map, .List => return self.reportErr("invalid cast", node.type_tok),
                 _ => unreachable,
             },
             .Is => Value{
@@ -935,7 +928,7 @@ pub const Compiler = struct {
                     .Lval => |l| switch (l) {
                         .Let, .Const => return self.reportErr("cannot declare to subscript", node.l_tok),
                         .AugAssign => self.registerAlloc(),
-                        else => return self.reportErr("TODO: assign to subscript", node.l_tok),
+                        .Assign => return self.reportErr("TODO: assign to subscript", node.l_tok),
                     },
                     .Discard, .Value => self.registerAlloc(),
                 };

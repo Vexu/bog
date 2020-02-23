@@ -25,6 +25,7 @@ pub const Vm = struct {
     line_loc: u32 = 0,
 
     const CallStack = std.SegmentedList(FunctionFrame, 16);
+    const max_depth = 512;
 
     const FunctionFrame = struct {
         ip: usize,
@@ -418,9 +419,12 @@ pub const Vm = struct {
                         // module result
                         return B_val;
                     }
-                    (try vm.gc.stackRef(vm.sp)).* = B_val;
 
                     const frame = vm.call_stack.pop() orelse unreachable;
+                    frame.ret_loc.* = try vm.gc.alloc();
+                    frame.ret_loc.*.?.* = B_val.*;
+
+                    vm.gc.stackShrink(vm.ip);
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
@@ -639,6 +643,10 @@ pub const Vm = struct {
                         return vm.reportErr("unexpected arg count");
                     }
 
+                    if (vm.call_stack.len > max_depth) {
+                        return vm.reportErr("maximum depth exceeded");
+                    }
+
                     try vm.call_stack.push(.{
                         .sp = vm.sp,
                         .ip = vm.ip,
@@ -758,12 +766,22 @@ pub const Vm = struct {
             .kind = .Error,
             .index = vm.line_loc,
         });
+        var i: u8 = 0;
         while (vm.call_stack.pop()) |some| {
             try vm.errors.push(.{
                 .msg = "called here",
                 .kind = .Trace,
                 .index = some.line_loc,
             });
+            i += 1;
+            if (i > 32) {
+                try vm.errors.push(.{
+                    .msg = "too many calls, stopping now",
+                    .kind = .Note,
+                    .index = some.line_loc,
+                });
+                break;
+            }
         }
         return error.RuntimeError;
     }
