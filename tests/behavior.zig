@@ -88,22 +88,22 @@ test "assert" {
     );
 }
 
-// test "functions" {
-//     try expectOutput(
-//         \\const add = fn ((a,b)) a + b
-//         \\const tuplify = fn (a,b) (a,b)
-//         \\add(tuplify(1,2))
-//     ,
-//         \\3
-//     );
-//     try expectOutput(
-//         \\const add = fn (a,b) a + b
-//         \\const sub = fn (a,b) a - b
-//         \\sub(add(3,4), add(1,2))
-//     ,
-//         \\4
-//     );
-// }
+test "functions" {
+    try expectOutput(
+        \\const add = fn ((a,b)) a + b
+        \\const tuplify = fn (a,b) (a,b)
+        \\add(tuplify(1,2))
+    ,
+        \\3
+    );
+    try expectOutput(
+        \\const add = fn (a,b) a + b
+        \\const sub = fn (a,b) a - b
+        \\sub(add(3,4), add(1,2))
+    ,
+        \\4
+    );
+}
 
 test "type casting" {
     try expectOutput(

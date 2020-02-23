@@ -30,6 +30,7 @@ pub const Vm = struct {
         ip: usize,
         sp: usize,
         line_loc: u32,
+        ret_loc: *?*Value,
     };
 
     pub const Error = error{
@@ -624,15 +625,16 @@ pub const Vm = struct {
                     A_ref.* = if (B_val.kind == type_id) &Value.True else &Value.False;
                 },
                 .Call => {
-                    const A_val = try vm.getVal(module);
-                    const B = vm.getArg(module, RegRef);
+                    const A_val = try vm.getRef(module);
+                    const B_val = try vm.getVal(module);
+                    const C = vm.getArg(module, RegRef);
                     const arg_count = vm.getArg(module, u16);
 
-                    if (A_val.kind != .Fn) {
+                    if (B_val.kind != .Fn) {
                         return vm.reportErr("attempt to call non function type");
                     }
 
-                    if (A_val.kind.Fn.arg_count != arg_count) {
+                    if (B_val.kind.Fn.arg_count != arg_count) {
                         // TODO improve this error message to tell the expected and given counts
                         return vm.reportErr("unexpected arg count");
                     }
@@ -641,9 +643,10 @@ pub const Vm = struct {
                         .sp = vm.sp,
                         .ip = vm.ip,
                         .line_loc = vm.line_loc,
+                        .ret_loc = A_val,
                     });
-                    vm.sp += B;
-                    vm.ip = A_val.kind.Fn.offset;
+                    vm.sp = C;
+                    vm.ip = B_val.kind.Fn.offset;
                 },
                 .Return => {
                     const A_val = try vm.getVal(module);
@@ -652,9 +655,14 @@ pub const Vm = struct {
                         // module result
                         return A_val;
                     }
-                    (try vm.gc.stackRef(vm.sp)).* = A_val;
 
                     const frame = vm.call_stack.pop() orelse unreachable;
+                    if (A_val.kind != .Bool and A_val.kind != .None) {
+                        frame.ret_loc.* = try vm.gc.alloc();
+                        frame.ret_loc.*.?.* = A_val.*;
+                    } else {
+                        frame.ret_loc.* = A_val;
+                    }
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
@@ -664,9 +672,9 @@ pub const Vm = struct {
                         // module result
                         return &Value.None;
                     }
-                    (try vm.gc.stackRef(vm.sp)).* = &Value.None;
 
                     const frame = vm.call_stack.pop() orelse return error.MalformedByteCode;
+                    frame.ret_loc.* = &Value.None;
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;

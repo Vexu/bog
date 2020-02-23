@@ -76,6 +76,12 @@ pub const Compiler = struct {
         try self.code.appendSlice(@sliceToBytes(([_]RegRef{ A, B, C })[0..]));
     }
 
+    fn emitInstruction_3_1(self: *Compiler, op: lang.Op, A: RegRef, B: RegRef, C: RegRef, arg: var) !void {
+        try self.code.append(@enumToInt(op));
+        try self.code.appendSlice(@sliceToBytes(([_]RegRef{ A, B, C })[0..]));
+        try self.code.appendSlice(@sliceToBytes(([_]@TypeOf(arg){arg})[0..]));
+    }
+
     const Scope = struct {
         id: Id,
         parent: ?*Scope,
@@ -908,11 +914,9 @@ pub const Compiler = struct {
         }
         switch (node.op) {
             .Call => |*args| {
-                const len = if (args.len == 0) 1 else args.len;
-
                 const sub_res = res.toRt(self);
                 const start = self.used_regs;
-                self.used_regs += @intCast(u16, len);
+                self.used_regs += @intCast(u16, args.len);
 
                 var it = args.iterator(0);
                 var i = start;
@@ -921,13 +925,8 @@ pub const Compiler = struct {
                     i += 1;
                 }
 
-                try self.emitInstruction_2_1(.Call, l_val.getRt(), start, @truncate(u16, args.len));
-                if (res == .Rt) {
-                    // TODO probably should handle this better
-                    try self.emitInstruction_2(.Move, res.Rt, start);
-                    return Value{ .Rt = res.Rt };
-                }
-                return Value{ .Rt = start };
+                try self.emitInstruction_3_1(.Call, sub_res.Rt, l_val.getRt(), start, @truncate(u16, args.len));
+                return sub_res.toVal();
             },
             .Member => return self.reportErr("TODO: member access", node.l_tok),
             .Subscript => |val| {
@@ -1217,7 +1216,7 @@ pub const Compiler = struct {
                     }
                     var reg = try val.toRt(self);
 
-                    if (val.* == .Ref) {
+                    if (val.* == .Ref and res.Lval == .Let) {
                         // copy on assign
                         const copy_reg = self.registerAlloc();
                         try self.emitInstruction_2(.Copy, copy_reg, reg);
