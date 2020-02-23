@@ -1,3 +1,20 @@
+test "mixed num and int" {
+    try expectOutput(
+        \\let y = 2
+        \\y /= 5
+        \\y
+    ,
+        \\0.4
+    );
+    try expectOutput(
+        \\let y = 2
+        \\y **= 0.5
+        \\y
+    ,
+        \\1.4142135623730951
+    );
+}
+
 test "copy on assign" {
     try expectOutput(
         \\const x = 2

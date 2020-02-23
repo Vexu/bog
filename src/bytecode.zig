@@ -90,42 +90,6 @@ pub const Op = enum(u8) {
     /// A = B in C
     In,
 
-    /// A //= B
-    DirectDivFloor,
-
-    /// A /= B
-    DirectDiv,
-
-    /// A *= B
-    DirectMul,
-
-    /// A **= B
-    DirectPow,
-
-    /// A %= B
-    DirectMod,
-
-    /// A += B
-    DirectAdd,
-
-    /// A -= B
-    DirectSub,
-
-    /// A <<= B
-    DirectLShift,
-
-    /// A >>= B
-    DirectRShift,
-
-    /// A &= B
-    DirectBitAnd,
-
-    /// A |= B
-    DirectBitOr,
-
-    /// A ^= C
-    DirectBitXor,
-
     /// A = B and C
     And,
 

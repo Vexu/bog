@@ -128,58 +128,90 @@ pub const Vm = struct {
                     const B_val = try vm.getNum(module);
                     const C_val = try vm.getNum(module);
 
-                    A_val.* = .{
-                        .kind = .{
-                            .Int = B_val.kind.Int + C_val.kind.Int,
-                        },
+                    // TODO https://github.com/ziglang/zig/issues/3234 on all of these
+                    const copy = Value{
+                        .kind = if (needNum(B_val, C_val))
+                            .{ .Num = asNum(B_val) + asNum(C_val) }
+                        else
+                            .{ .Int = B_val.kind.Int + C_val.kind.Int },
                     };
+                    A_val.* = copy;
                 },
                 .Sub => {
                     const A_val = try vm.getNewVal(module);
                     const B_val = try vm.getNum(module);
                     const C_val = try vm.getNum(module);
 
-                    A_val.* = .{
-                        .kind = .{
-                            .Int = B_val.kind.Int - C_val.kind.Int,
-                        },
+                    const copy = Value{
+                        .kind = if (needNum(B_val, C_val))
+                            .{ .Num = asNum(B_val) - asNum(C_val) }
+                        else
+                            .{ .Int = B_val.kind.Int - C_val.kind.Int },
                     };
+                    A_val.* = copy;
                 },
                 .Mul => {
                     const A_val = try vm.getNewVal(module);
                     const B_val = try vm.getNum(module);
                     const C_val = try vm.getNum(module);
 
-                    A_val.* = .{
-                        .kind = .{
-                            .Int = B_val.kind.Int * C_val.kind.Int,
-                        },
+                    const copy = Value{
+                        .kind = if (needNum(B_val, C_val))
+                            .{ .Num = asNum(B_val) * asNum(C_val) }
+                        else
+                            .{ .Int = B_val.kind.Int * C_val.kind.Int },
                     };
+                    A_val.* = copy;
                 },
                 .Pow => {
                     const A_val = try vm.getNewVal(module);
                     const B_val = try vm.getNum(module);
                     const C_val = try vm.getNum(module);
 
-                    A_val.* = .{
-                        .kind = .{
-                            .Int = std.math.powi(i64, B_val.kind.Int, C_val.kind.Int) catch @panic("TODO: overflow"),
-                        },
+                    const copy = Value{
+                        .kind = if (needNum(B_val, C_val))
+                            .{ .Num = std.math.pow(f64, asNum(B_val), asNum(C_val)) }
+                        else
+                            .{ .Int = std.math.powi(i64, B_val.kind.Int, C_val.kind.Int) catch @panic("TODO: overflow") },
                     };
+                    A_val.* = copy;
                 },
                 .DivFloor => {
                     const A_val = try vm.getNewVal(module);
                     const B_val = try vm.getNum(module);
                     const C_val = try vm.getNum(module);
 
-                    A_val.* = .{
-                        .kind = .{
-                            .Int = @divFloor(B_val.kind.Int, C_val.kind.Int),
-                        },
+                    const copy = Value{
+                        .kind = if (needNum(B_val, C_val))
+                            .{ .Int = @floatToInt(i64, @divFloor(asNum(B_val), asNum(C_val))) }
+                        else
+                            .{ .Int = @divFloor(B_val.kind.Int, C_val.kind.Int) },
                     };
+                    A_val.* = copy;
                 },
-                .Div => return vm.reportErr("TODO Op.Div"),
-                .Mod => return vm.reportErr("TODO Op.Mod"),
+                .Div => {
+                    const A_val = try vm.getNewVal(module);
+                    const B_val = try vm.getNum(module);
+                    const C_val = try vm.getNum(module);
+
+                    const copy = Value{
+                        .kind = .{ .Num = asNum(B_val) / asNum(C_val) },
+                    };
+                    A_val.* = copy;
+                },
+                .Mod => {
+                    const A_val = try vm.getNewVal(module);
+                    const B_val = try vm.getNum(module);
+                    const C_val = try vm.getNum(module);
+
+                    const copy = Value{
+                        .kind = if (needNum(B_val, C_val))
+                            .{ .Num = @rem(asNum(B_val), asNum(C_val)) }
+                        else
+                            .{ .Int = std.math.rem(i64, B_val.kind.Int, C_val.kind.Int) catch @panic("TODO: overflow") },
+                    };
+                    A_val.* = copy;
+                },
                 .And => {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getBool(module);
@@ -206,69 +238,6 @@ pub const Vm = struct {
 
                     A_val.* = B_val.*;
                 },
-                .DirectAdd => {
-                    const A_val = try vm.getNum(module);
-                    const B_val = try vm.getNum(module);
-
-                    A_val.kind.Int += B_val.kind.Int;
-                },
-                .DirectSub => {
-                    const A_val = try vm.getNum(module);
-                    const B_val = try vm.getNum(module);
-
-                    A_val.kind.Int -= B_val.kind.Int;
-                },
-                .DirectMul => {
-                    const A_val = try vm.getNum(module);
-                    const B_val = try vm.getNum(module);
-
-                    A_val.kind.Int *= B_val.kind.Int;
-                },
-                .DirectPow => {
-                    const A_val = try vm.getNum(module);
-                    const B_val = try vm.getNum(module);
-
-                    A_val.kind.Int = std.math.powi(i64, A_val.kind.Int, B_val.kind.Int) catch @panic("TODO: overflow");
-                },
-                .DirectDivFloor => {
-                    const A_val = try vm.getNum(module);
-                    const B_val = try vm.getNum(module);
-
-                    A_val.kind.Int = @divFloor(A_val.kind.Int, B_val.kind.Int);
-                },
-                .DirectBitAnd => {
-                    const A_val = try vm.getIntRef(module);
-                    const B_val = try vm.getInt(module);
-
-                    A_val.kind.Int &= B_val;
-                },
-                .DirectBitOr => {
-                    const A_val = try vm.getIntRef(module);
-                    const B_val = try vm.getInt(module);
-
-                    A_val.kind.Int |= B_val;
-                },
-                .DirectBitXor => {
-                    const A_val = try vm.getIntRef(module);
-                    const B_val = try vm.getInt(module);
-
-                    A_val.kind.Int ^= B_val;
-                },
-                .DirectLShift => {
-                    const A_val = try vm.getIntRef(module);
-                    const B_val = try vm.getInt(module);
-
-                    // TODO check that B_val is small enough
-                    A_val.kind.Int <<= @intCast(u6, B_val);
-                },
-                .DirectRShift => {
-                    const A_val = try vm.getIntRef(module);
-                    const B_val = try vm.getInt(module);
-
-                    A_val.kind.Int >>= @intCast(u6, B_val);
-                },
-                .DirectDiv => return vm.reportErr("TODO Op.DirectDiv"),
-                .DirectMod => return vm.reportErr("TODO Op.DirectMod"),
                 .BoolNot => {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getBool(module);
@@ -337,28 +306,48 @@ pub const Vm = struct {
                     const B_val = try vm.getNum(module);
                     const C_val = try vm.getNum(module);
 
-                    A_ref.* = if (B_val.kind.Int < C_val.kind.Int) &Value.True else &Value.False;
+                    const bool_val = if (needNum(B_val, C_val))
+                        asNum(B_val) < asNum(C_val)
+                    else
+                        B_val.kind.Int < C_val.kind.Int;
+
+                    A_ref.* = if (bool_val) &Value.True else &Value.False;
                 },
                 .LessThanEqual => {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getNum(module);
                     const C_val = try vm.getNum(module);
 
-                    A_ref.* = if (B_val.kind.Int <= C_val.kind.Int) &Value.True else &Value.False;
+                    const bool_val = if (needNum(B_val, C_val))
+                        asNum(B_val) <= asNum(C_val)
+                    else
+                        B_val.kind.Int <= C_val.kind.Int;
+
+                    A_ref.* = if (bool_val) &Value.True else &Value.False;
                 },
                 .GreaterThan => {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getNum(module);
                     const C_val = try vm.getNum(module);
 
-                    A_ref.* = if (B_val.kind.Int > C_val.kind.Int) &Value.True else &Value.False;
+                    const bool_val = if (needNum(B_val, C_val))
+                        asNum(B_val) > asNum(C_val)
+                    else
+                        B_val.kind.Int > C_val.kind.Int;
+
+                    A_ref.* = if (bool_val) &Value.True else &Value.False;
                 },
                 .GreaterThanEqual => {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getNum(module);
                     const C_val = try vm.getNum(module);
 
-                    A_ref.* = if (B_val.kind.Int >= C_val.kind.Int) &Value.True else &Value.False;
+                    const bool_val = if (needNum(B_val, C_val))
+                        asNum(B_val) >= asNum(C_val)
+                    else
+                        B_val.kind.Int >= C_val.kind.Int;
+
+                    A_ref.* = if (bool_val) &Value.True else &Value.False;
                 },
                 .In => {
                     const A_ref = vm.getRef(module);
@@ -400,11 +389,13 @@ pub const Vm = struct {
                     const A_val = try vm.getNewVal(module);
                     const B_val = try vm.getNum(module);
 
-                    A_val.* = .{
-                        .kind = .{
-                            .Int = -B_val.kind.Int,
-                        },
+                    const copy = Value{
+                        .kind = if (B_val.kind == .Num)
+                            .{ .Num = -B_val.kind.Num }
+                        else
+                            .{ .Int = -B_val.kind.Int },
                     };
+                    A_val.* = copy;
                 },
                 .Try => {
                     const A_ref = try vm.getRef(module);
@@ -754,10 +745,19 @@ pub const Vm = struct {
         if (val.kind != .Int and val.kind != .Num) {
             return vm.reportErr("expected a number");
         }
-        if (val.kind == .Num) {
-            return vm.reportErr("TODO operations on real numbers");
-        }
         return val;
+    }
+
+    fn needNum(a: *Value, b: *Value) bool {
+        return a.kind == .Num or b.kind == .Num;
+    }
+
+    fn asNum(val: *Value) f64 {
+        return switch (val.kind) {
+            .Int => |v| @intToFloat(f64, v),
+            .Num => |v| v,
+            else => unreachable,
+        };
     }
 
     fn reportErr(vm: *Vm, msg: []const u8) Error {

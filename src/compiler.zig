@@ -202,6 +202,14 @@ pub const Compiler = struct {
             return val.Int;
         }
 
+        fn getNum(val: Value) f64 {
+            return switch (val) {
+                .Int => |v| @intToFloat(f64, v),
+                .Num => |v| v,
+                else => unreachable,
+            };
+        }
+
         fn getStr(val: Value, self: *Compiler, tok: TokenIndex) ![]const u8 {
             if (val != .Str) {
                 return self.reportErr("expected a string", tok);
@@ -212,9 +220,6 @@ pub const Compiler = struct {
         fn checkNum(val: Value, self: *Compiler, tok: TokenIndex) !void {
             if (val != .Int and val != .Num) {
                 return self.reportErr("expected a number", tok);
-            }
-            if (val == .Num) {
-                return self.reportErr("TODO operations on real numbers", tok);
             }
         }
     };
@@ -1013,26 +1018,30 @@ pub const Compiler = struct {
         if (!r_val.isRt()) try r_val.checkNum(self, node.rhs.firstToken());
 
         const op_id = switch (node.op) {
-            .AddAssign => lang.Op.DirectAdd,
-            .SubAssign => .DirectSub,
-            .MulAssign => .DirectMul,
-            .PowAssign => .DirectPow,
-            .DivAssign => .DirectDiv,
-            .DivFloorAssign => .DirectDivFloor,
-            .ModAssign => .DirectMod,
-            .LShiftAssign => .DirectLShift,
-            .RShfitAssign => .DirectRShift,
-            .BitAndAssign => .DirectBitAnd,
-            .BitOrAssign => .DirectBitOr,
-            .BitXOrAssign => .DirectBitXor,
+            .AddAssign => lang.Op.Add,
+            .SubAssign => .Sub,
+            .MulAssign => .Mul,
+            .PowAssign => .Pow,
+            .DivAssign => .Div,
+            .DivFloorAssign => .DivFloor,
+            .ModAssign => .Mod,
+            .LShiftAssign => .LShift,
+            .RShfitAssign => .RShift,
+            .BitAndAssign => .BitAnd,
+            .BitOrAssign => .BitOr,
+            .BitXOrAssign => .BitXor,
             else => unreachable,
         };
 
         const reg = try r_val.toRt(self);
         defer r_val.free(self, reg);
 
-        try self.emitInstruction_2(op_id, l_val.getRt(), reg);
+        try self.emitInstruction_3(op_id, l_val.getRt(), l_val.getRt(), reg);
         return Value.Empty;
+    }
+
+    fn needNum(a: Value, b: Value) bool {
+        return a == .Num or b == .Num;
     }
 
     fn genNumericInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
@@ -1067,29 +1076,42 @@ pub const Compiler = struct {
         try l_val.checkNum(self, node.tok);
 
         // TODO makeRuntime if overflow
-        // TODO decay to numeric
         const ret_val = switch (node.op) {
             .Add => blk: {
+                if (needNum(l_val, r_val)) {
+                    break :blk Value{ .Num = l_val.getNum() + r_val.getNum() };
+                }
                 break :blk Value{ .Int = l_val.Int + r_val.Int };
             },
             .Sub => blk: {
+                if (needNum(l_val, r_val)) {
+                    break :blk Value{ .Num = l_val.getNum() - r_val.getNum() };
+                }
                 break :blk Value{ .Int = l_val.Int - r_val.Int };
             },
             .Mul => blk: {
+                if (needNum(l_val, r_val)) {
+                    break :blk Value{ .Num = l_val.getNum() * r_val.getNum() };
+                }
                 break :blk Value{ .Int = l_val.Int * r_val.Int };
             },
-            .Div => blk: {
-                return self.reportErr("TODO division", node.tok);
-                // break :blk Value{ .Num = std.math.div(l_val.Int, r_val.Int) };
-            },
+            .Div => Value{ .Num = l_val.getNum() / r_val.getNum() },
             .DivFloor => blk: {
+                if (needNum(l_val, r_val)) {
+                    break :blk Value{ .Int = @floatToInt(i64, @divFloor(l_val.getNum(), r_val.getNum())) };
+                }
                 break :blk Value{ .Int = @divFloor(l_val.Int, r_val.Int) };
             },
             .Mod => blk: {
-                return self.reportErr("TODO modulo", node.tok);
-                // break :blk Value{ .Int =std.math.rem(i64, l_val.Int, r_val.Int) catch @panic("TODO") };
+                if (needNum(l_val, r_val)) {
+                    break :blk Value{ .Num = @rem(l_val.getNum(), r_val.getNum()) };
+                }
+                break :blk Value{ .Int = std.math.rem(i64, l_val.Int, r_val.Int) catch @panic("TODO") };
             },
             .Pow => blk: {
+                if (needNum(l_val, r_val)) {
+                    break :blk Value{ .Num = std.math.pow(f64, l_val.getNum(), r_val.getNum()) };
+                }
                 break :blk Value{
                     .Int = std.math.powi(i64, l_val.Int, r_val.Int) catch
                         return self.reportErr("TODO integer overflow", node.tok),
@@ -1139,10 +1161,30 @@ pub const Compiler = struct {
         }
 
         const ret_val: Value = switch (node.op) {
-            .LessThan => .{ .Bool = l_val.Int < r_val.Int },
-            .LessThanEqual => .{ .Bool = l_val.Int <= r_val.Int },
-            .GreaterThan => .{ .Bool = l_val.Int > r_val.Int },
-            .GreaterThanEqual => .{ .Bool = l_val.Int >= r_val.Int },
+            .LessThan => .{
+                .Bool = if (needNum(l_val, r_val))
+                    l_val.getNum() < r_val.getNum()
+                else
+                    l_val.Int < r_val.Int,
+            },
+            .LessThanEqual => .{
+                .Bool = if (needNum(l_val, r_val))
+                    l_val.getNum() <= r_val.getNum()
+                else
+                    l_val.Int <= r_val.Int,
+            },
+            .GreaterThan => .{
+                .Bool = if (needNum(l_val, r_val))
+                    l_val.getNum() > r_val.getNum()
+                else
+                    l_val.Int > r_val.Int,
+            },
+            .GreaterThanEqual => .{
+                .Bool = if (needNum(l_val, r_val))
+                    l_val.getNum() >= r_val.getNum()
+                else
+                    l_val.Int >= r_val.Int,
+            },
             .Equal, .NotEqual => blk: {
                 const eql = switch (l_val) {
                     .None => |a_val| switch (r_val) {
