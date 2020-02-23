@@ -59,9 +59,6 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     defer repl.vm.deinit();
     defer repl.buffer.deinit();
 
-    // TODO move this
-    try repl.vm.gc.stackAlloc(250);
-
     while (true) {
         repl.handleLine(in_stream, out_stream) catch |err| switch (err) {
             error.EndOfStream => return,

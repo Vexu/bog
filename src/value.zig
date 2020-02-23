@@ -16,20 +16,24 @@ pub const Value = struct {
         _,
     };
 
-    pub const Map = std.StringHashMap(*Ref);
-    pub const List = std.ArrayList(Ref);
+    pub const Map = std.StringHashMap(*Value);
+    pub const List = std.ArrayList(*Value);
 
-    // ref: u32 = 0,
+    marked: bool = false,
+
+    /// TODO https://github.com/ziglang/zig/issues/4295
+    __padding: u32 = 0,
+
     kind: union(TypeId) {
-        Tuple: []Ref,
+        Tuple: []*Value,
         Map: Map,
         List: List,
-        Error: *Ref,
+        Error: *Value,
         Int: i64,
         Num: f64,
         Range: struct {
-            begin: *Ref,
-            end: *Ref,
+            begin: *Value,
+            end: *Value,
         },
         Str: []const u8,
         Fn: struct {
@@ -92,13 +96,8 @@ pub const Value = struct {
             else => unreachable,
         };
     }
-};
 
-pub const Ref = struct {
-    value: ?*Value,
-
-    pub fn dump(ref: Ref, stream: var, level: u32) (@TypeOf(stream.*).Error || error{Unimplemented})!void {
-        const value = ref.value.?;
+    pub fn dump(value: Value, stream: var, level: u32) (@TypeOf(stream.*).Error || error{Unimplemented})!void {
         switch (value.kind) {
             .Int => |val| try stream.print("{}", .{val}),
             .Num => |val| try stream.print("{d}", .{val}),
@@ -180,17 +179,14 @@ pub const Ref = struct {
 
 var buffer: [1024]u8 = undefined;
 
-fn testDump(val: *Value, expected: []const u8) !void {
+fn testDump(val: Value, expected: []const u8) !void {
     var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const alloc = &buf_alloc.allocator;
 
     var out_buf = try std.Buffer.initSize(alloc, 0);
     var out_stream = std.io.BufferOutStream.init(&out_buf);
 
-    const ref = Ref{
-        .value = val,
-    };
-    try ref.dump(&out_stream.stream, 4);
+    try val.dump(&out_stream.stream, 4);
     const result = out_buf.toSliceConst();
 
     if (!std.mem.eql(u8, result, expected)) {
@@ -203,11 +199,11 @@ test "dump int/num" {
     var int = Value{
         .kind = .{ .Int = 2 },
     };
-    try testDump(&int, "2");
+    try testDump(int, "2");
     var num = Value{
         .kind = .{ .Num = 2.5 },
     };
-    try testDump(&num, "2.5");
+    try testDump(num, "2.5");
 }
 
 test "dump error" {
@@ -216,10 +212,8 @@ test "dump error" {
     };
     var err = Value{
         .kind = .{
-            .Error = &Ref{
-                .value = &int,
-            },
+            .Error = &int,
         },
     };
-    try testDump(&err, "error(2)");
+    try testDump(err, "error(2)");
 }

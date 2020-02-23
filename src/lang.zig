@@ -18,7 +18,6 @@ pub const Compiler = compiler.Compiler;
 
 const value = @import("value.zig");
 pub const Value = value.Value;
-pub const Ref = value.Ref;
 
 const vm = @import("vm.zig");
 pub const Vm = vm.Vm;

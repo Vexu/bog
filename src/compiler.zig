@@ -331,7 +331,7 @@ pub const Compiler = struct {
         const start_len = self.module_code.len;
         try self.addLineInfo(node);
         const val = try self.genNode(node, .Discard);
-        if (val.isRt() and val != .Empty) {
+        if (val != .Empty) {
             const reg = try val.toRt(self);
             defer if (val != .Ref) self.registerFree(reg);
 

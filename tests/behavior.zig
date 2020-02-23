@@ -47,11 +47,11 @@ test "strigs" {
 test "comparision" {
     try expectOutput(
         \\let a = 0
-        \\while (a != 127)
+        \\while (a != 1000)
         \\    a += 1
         \\a
     ,
-        \\127
+        \\1000
     );
 }
 
@@ -88,22 +88,22 @@ test "assert" {
     );
 }
 
-test "functions" {
-    try expectOutput(
-        \\const add = fn ((a,b)) a + b
-        \\const tuplify = fn (a,b) (a,b)
-        \\add(tuplify(1,2))
-    ,
-        \\3
-    );
-    try expectOutput(
-        \\const add = fn (a,b) a + b
-        \\const sub = fn (a,b) a - b
-        \\sub(add(3,4), add(1,2))
-    ,
-        \\4
-    );
-}
+// test "functions" {
+//     try expectOutput(
+//         \\const add = fn ((a,b)) a + b
+//         \\const tuplify = fn (a,b) (a,b)
+//         \\add(tuplify(1,2))
+//     ,
+//         \\3
+//     );
+//     try expectOutput(
+//         \\const add = fn (a,b) a + b
+//         \\const sub = fn (a,b) a - b
+//         \\sub(add(3,4), add(1,2))
+//     ,
+//         \\4
+//     );
+// }
 
 test "type casting" {
     try expectOutput(
@@ -256,9 +256,6 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
     const alloc = &buf_alloc.allocator;
 
     var vm = Vm.init(alloc, false);
-
-    // TODO move this
-    try vm.gc.stackAlloc(250);
 
     var tree = try lang.parse(alloc, source);
     var module = try tree.compile(alloc);
