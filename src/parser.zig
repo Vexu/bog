@@ -67,9 +67,7 @@ pub const Parser = struct {
         if (parser.eatToken(.Eof, true)) |_| return null;
         const ret = try parser.stmt();
         try tree.nodes.push(ret);
-        _ = parser.eatToken(.Nl, false) orelse {
-            _ = try parser.expectToken(.Eof, true);
-        };
+        _ = try parser.expectToken(.Eof, true);
         return ret;
     }
 

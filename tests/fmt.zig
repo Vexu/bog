@@ -108,9 +108,10 @@ test "functions" {
 
 test "unicode identifiers" {
     try testTransform(
-        \\öäöäö;
+        \\öäöäö;öö
     ,
         \\öäöäö
+        \\öö
         \\
     );
 }

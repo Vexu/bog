@@ -8,7 +8,7 @@ const Tree = lang.Tree;
 
 fn isWhiteSpace(c: u32) bool {
     return switch (c) {
-        ' ', '\t', '\r', ';', // lul
+        ' ', '\t', '\r',
         // NO-BREAK SPACE
         0x00A0,
         // OGHAM SPACE MARK
@@ -405,7 +405,7 @@ pub const Tokenizer = struct {
         while (self.it.nextCodepoint()) |c| {
             if (c == '\r')
                 continue;
-            if (c == '\n') {
+            if (c == '\n' or c == ';') {
                 // empty line; rest count
                 count = 0;
                 if (self.repl) {
@@ -564,7 +564,7 @@ pub const Tokenizer = struct {
                     '#' => {
                         state = .LineComment;
                     },
-                    '\n' => {
+                    '\n', ';' => {
                         res = .Nl;
                         self.expect_indent = true;
                         break;
