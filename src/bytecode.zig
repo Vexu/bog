@@ -91,10 +91,10 @@ pub const Op = enum(u8) {
     In,
 
     /// A = B and C
-    And,
+    BoolAnd,
 
     /// A = B or C
-    Or,
+    BoolOr,
 
     /// A = not B
     BoolNot,

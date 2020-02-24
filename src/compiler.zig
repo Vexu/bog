@@ -955,7 +955,7 @@ pub const Compiler = struct {
         switch (node.op) {
             .BoolOr,
             .BoolAnd,
-            => {},
+            => return self.genBoolInfix(node, res),
 
             .LessThan,
             .LessThanEqual,
@@ -1072,8 +1072,8 @@ pub const Compiler = struct {
             try self.emitInstruction_3(op_id, sub_res.Rt, l_reg, r_reg);
             return sub_res.toVal();
         }
-        try r_val.checkNum(self, node.tok);
-        try l_val.checkNum(self, node.tok);
+        try l_val.checkNum(self, node.lhs.firstToken());
+        try r_val.checkNum(self, node.rhs.firstToken());
 
         // TODO makeRuntime if overflow
         const ret_val = switch (node.op) {
@@ -1225,6 +1225,41 @@ pub const Compiler = struct {
             },
             else => unreachable,
         };
+        return ret_val.maybeRt(self, res);
+    }
+
+    fn genBoolInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
+        var l_val = try self.genNodeNonEmpty(node.lhs, .Value);
+        var r_val = try self.genNodeNonEmpty(node.rhs, .Value);
+
+        if (l_val.isRt() or r_val.isRt()) {
+            const sub_res = res.toRt(self);
+
+            // TODO short-circuit evaluation
+            // const jump_op = if (node.op == .BoolAnd) .JumpFalse else lang.Op.JumpTrue;
+            // try self.emitInstruction_1_1(jump_op, l_val.getRt(), @as(u32, 0));
+            // const addr = self.code.len;
+            const l_reg = try l_val.toRt(self);
+            const r_reg = try r_val.toRt(self);
+            defer {
+                r_val.free(self, r_reg);
+                l_val.free(self, l_reg);
+            }
+
+            const op = if (node.op == .BoolAnd) .BoolAnd else lang.Op.BoolOr;
+            try self.emitInstruction_3(op, sub_res.Rt, l_reg, r_reg);
+            return sub_res.toVal();
+        }
+        const l_bool = try l_val.getBool(self, node.lhs.firstToken());
+        const r_bool = try r_val.getBool(self, node.rhs.firstToken());
+
+        const ret_val = Value{
+            .Bool = if (node.op == .BoolAnd)
+                l_bool and r_bool
+            else
+                l_bool or r_bool,
+        };
+
         return ret_val.maybeRt(self, res);
     }
 

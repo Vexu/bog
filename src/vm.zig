@@ -212,14 +212,14 @@ pub const Vm = struct {
                     };
                     A_val.* = copy;
                 },
-                .And => {
+                .BoolAnd => {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getBool(module);
                     const C_val = try vm.getBool(module);
 
-                    A_ref.* = if (B_val or C_val) &Value.True else &Value.False;
+                    A_ref.* = if (B_val and C_val) &Value.True else &Value.False;
                 },
-                .Or => {
+                .BoolOr => {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getBool(module);
                     const C_val = try vm.getBool(module);
