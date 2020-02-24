@@ -36,50 +36,11 @@ pub const Compiler = struct {
         }
     }
 
-    // TODO improve?
-    fn emitInstruction_1(self: *Compiler, op: lang.Op, A: RegRef) !void {
+    fn emitInstruction(self: *Compiler, op: lang.Op, args: var) !void {
         try self.code.append(@enumToInt(op));
-        try self.code.appendSlice(@sliceToBytes(([_]RegRef{A})[0..]));
-    }
-
-    fn emitInstruction_1_1(self: *Compiler, op: lang.Op, A: RegRef, arg: var) !void {
-        try self.code.append(@enumToInt(op));
-        try self.code.appendSlice(@sliceToBytes(([_]RegRef{A})[0..]));
-        try self.code.appendSlice(@sliceToBytes(([_]@TypeOf(arg){arg})[0..]));
-    }
-
-    fn emitInstruction_1_2(self: *Compiler, op: lang.Op, A: RegRef, arg: var, arg2: var) !void {
-        try self.code.append(@enumToInt(op));
-        try self.code.appendSlice(@sliceToBytes(([_]RegRef{A})[0..]));
-        try self.code.appendSlice(@sliceToBytes(([_]@TypeOf(arg){arg})[0..]));
-        try self.code.appendSlice(@sliceToBytes(([_]@TypeOf(arg2){arg2})[0..]));
-    }
-
-    fn emitInstruction_0_1(self: *Compiler, op: lang.Op, arg: var) !void {
-        try self.code.append(@enumToInt(op));
-        try self.code.appendSlice(@sliceToBytes(([_]@TypeOf(arg){arg})[0..]));
-    }
-
-    fn emitInstruction_2(self: *Compiler, op: lang.Op, A: RegRef, B: RegRef) !void {
-        try self.code.append(@enumToInt(op));
-        try self.code.appendSlice(@sliceToBytes(([_]RegRef{ A, B })[0..]));
-    }
-
-    fn emitInstruction_2_1(self: *Compiler, op: lang.Op, A: RegRef, B: RegRef, arg: var) !void {
-        try self.code.append(@enumToInt(op));
-        try self.code.appendSlice(@sliceToBytes(([_]RegRef{ A, B })[0..]));
-        try self.code.appendSlice(@sliceToBytes(([_]@TypeOf(arg){arg})[0..]));
-    }
-
-    fn emitInstruction_3(self: *Compiler, op: lang.Op, A: RegRef, B: RegRef, C: RegRef) !void {
-        try self.code.append(@enumToInt(op));
-        try self.code.appendSlice(@sliceToBytes(([_]RegRef{ A, B, C })[0..]));
-    }
-
-    fn emitInstruction_3_1(self: *Compiler, op: lang.Op, A: RegRef, B: RegRef, C: RegRef, arg: var) !void {
-        try self.code.append(@enumToInt(op));
-        try self.code.appendSlice(@sliceToBytes(([_]RegRef{ A, B, C })[0..]));
-        try self.code.appendSlice(@sliceToBytes(([_]@TypeOf(arg){arg})[0..]));
+        inline for (std.meta.fields(@TypeOf(args))) |f| {
+            try self.code.appendSlice(mem.asBytes(&@field(args, f.name)));
+        }
     }
 
     const Scope = struct {
@@ -228,23 +189,23 @@ pub const Compiler = struct {
         return switch (val) {
             .Empty => unreachable,
             .Ref, .Rt => |v| assert(v == res),
-            .None => try self.emitInstruction_1_1(.ConstPrimitive, res, @as(u8, 0)),
+            .None => try self.emitInstruction(.ConstPrimitive, .{ res, @as(u8, 0) }),
             .Int => |v| if (v > std.math.minInt(i8) and v < std.math.maxInt(i8)) {
-                try self.emitInstruction_1_1(.ConstInt8, res, @truncate(i8, v));
+                try self.emitInstruction(.ConstInt8, .{ res, @truncate(i8, v) });
             } else if (v > std.math.minInt(i32) and v < std.math.maxInt(i32)) {
-                try self.emitInstruction_1_1(.ConstInt32, res, @truncate(i32, v));
+                try self.emitInstruction(.ConstInt32, .{ res, @truncate(i32, v) });
             } else {
-                try self.emitInstruction_1_1(.ConstInt64, res, v);
+                try self.emitInstruction(.ConstInt64, .{res, v});
             },
-            .Num => |v| try self.emitInstruction_1_1(.ConstNum, res, v),
-            .Bool => |v| try self.emitInstruction_1_1(.ConstPrimitive, res, @as(u8, @boolToInt(v)) + 1),
-            .Str => |v| try self.emitInstruction_1_1(.ConstString, res, try self.putString(v)),
+            .Num => |v| try self.emitInstruction(.ConstNum, .{ res, v }),
+            .Bool => |v| try self.emitInstruction(.ConstPrimitive, .{ res, @as(u8, @boolToInt(v)) + 1 }),
+            .Str => |v| try self.emitInstruction(.ConstString, .{ res, try self.putString(v) }),
         };
     }
 
     fn putString(self: *Compiler, str: []const u8) !u32 {
         const len = @intCast(u32, self.strings.len);
-        try self.strings.appendSlice(@sliceToBytes(([_]u32{@intCast(u32, str.len)})[0..]));
+        try self.strings.appendSlice(mem.asBytes(&@intCast(u32, str.len)));
         try self.strings.appendSlice(str);
         return len;
     }
@@ -318,12 +279,12 @@ pub const Compiler = struct {
                 const reg = try val.toRt(&compiler);
                 defer if (val != .Ref) compiler.registerFree(reg);
 
-                try compiler.emitInstruction_1(.Return, reg);
+                try compiler.emitInstruction(.Return, .{reg});
             } else if (val.isRt()) {
                 const reg = val.getRt();
                 defer val.free(&compiler, reg);
                 // discard unused runtime value
-                try compiler.emitInstruction_1(.Discard, reg);
+                try compiler.emitInstruction(.Discard, .{reg});
             }
         }
 
@@ -345,7 +306,7 @@ pub const Compiler = struct {
             const reg = try val.toRt(self);
             defer if (val != .Ref) self.registerFree(reg);
 
-            try self.emitInstruction_1(.Discard, reg);
+            try self.emitInstruction(.Discard, .{reg});
         }
         const final_len = self.module_code.len;
         try self.module_code.appendSlice(self.code.toSliceConst());
@@ -419,7 +380,7 @@ pub const Compiler = struct {
                             continue;
                         }
                         try self.makeRuntime(index_reg, index_val);
-                        try self.emitInstruction_3(.Subscript, sub_reg, reg, index_reg);
+                        try self.emitInstruction(.Subscript, .{ sub_reg, reg, index_reg });
                         const rt_val = Value{ .Rt = sub_reg };
                         const l_val = try self.genNode(n.*, switch (res.Lval) {
                             .Const => Result{ .Lval = .{ .Const = &rt_val } },
@@ -442,7 +403,7 @@ pub const Compiler = struct {
         }
         const sub_res = res.toRt(self);
         const start = self.used_regs;
-        self.used_regs += @intCast(u16, node.values.len);
+        self.used_regs += @intCast(RegRef, node.values.len);
 
         var it = node.values.iterator(0);
         var i = start;
@@ -456,7 +417,7 @@ pub const Compiler = struct {
             .List => lang.Op.BuildList,
             else => unreachable,
         };
-        try self.emitInstruction_2_1(command, sub_res.Rt, start, @intCast(u16, node.values.len));
+        try self.emitInstruction(command, .{ sub_res.Rt, start, @intCast(u16, node.values.len) });
         return sub_res.toVal();
     }
 
@@ -486,7 +447,7 @@ pub const Compiler = struct {
         self.code = &fn_scope.code;
 
         // destructure parameters
-        self.used_regs = @truncate(u16, node.params.len);
+        self.used_regs = @truncate(RegRef, node.params.len);
         var it = node.params.iterator(0);
         var i: RegRef = 0;
         while (it.next()) |n| {
@@ -510,7 +471,7 @@ pub const Compiler = struct {
             const reg = try body_val.toRt(self);
             defer body_val.free(self, reg);
 
-            try self.emitInstruction_1(.Return, reg);
+            try self.emitInstruction(.Return, .{reg});
         }
 
         // reset regs after generating body
@@ -518,12 +479,11 @@ pub const Compiler = struct {
         const sub_res = res.toRt(self);
 
         self.code = old_code;
-        try self.emitInstruction_1_2(
-            .BuildFn,
+        try self.emitInstruction(.BuildFn, .{
             sub_res.Rt,
             @truncate(u8, node.params.len),
             @truncate(u32, self.module_code.len),
-        );
+        });
         try self.module_code.appendSlice(fn_scope.code.toSlice());
         return sub_res.toVal();
     }
@@ -553,7 +513,7 @@ pub const Compiler = struct {
                 defer val.free(self, reg);
 
                 // discard unused runtime value
-                try self.emitInstruction_1(.Discard, reg);
+                try self.emitInstruction(.Discard, .{reg});
             }
         }
         return Value{ .Empty = {} };
@@ -585,15 +545,15 @@ pub const Compiler = struct {
         };
 
         // jump past if_body if cond == false
-        try self.emitInstruction_1_1(.JumpFalse, cond_val.getRt(), @as(u32, 0));
+        try self.emitInstruction(.JumpFalse, .{ cond_val.getRt(), @as(u32, 0) });
         const addr = self.code.len;
         const if_val = try self.genNode(node.if_body, sub_res);
         if (sub_res != .Rt and if_val.isRt()) {
-            try self.emitInstruction_1(.Discard, if_val.getRt());
+            try self.emitInstruction(.Discard, .{if_val.getRt()});
         }
 
         // jump past else_body since if_body was executed
-        try self.emitInstruction_0_1(.Jump, @as(u32, 0));
+        try self.emitInstruction(.Jump, .{@as(u32, 0)});
         const addr2 = self.code.len;
 
         @ptrCast(*align(1) u32, self.code.toSlice()[addr - @sizeOf(u32) ..].ptr).* =
@@ -601,10 +561,10 @@ pub const Compiler = struct {
         if (node.else_body) |some| {
             const else_val = try self.genNode(some, sub_res);
             if (sub_res != .Rt and else_val.isRt()) {
-                try self.emitInstruction_1(.Discard, else_val.getRt());
+                try self.emitInstruction(.Discard, .{else_val.getRt()});
             }
         } else if (sub_res == .Rt) {
-            try self.emitInstruction_1_1(.ConstPrimitive, sub_res.Rt, @as(u8, 0));
+            try self.emitInstruction(.ConstPrimitive, .{ sub_res.Rt, @as(u8, 0) });
         }
 
         @ptrCast(*align(1) u32, self.code.toSlice()[addr2 - @sizeOf(u32) ..].ptr).* =
@@ -625,7 +585,7 @@ pub const Compiler = struct {
                 const reg = self.registerAlloc();
                 defer self.registerFree(reg);
                 _ = try self.genNode(some, Result{ .Rt = reg });
-                try self.emitInstruction_1(.Return, reg);
+                try self.emitInstruction(.Return, .{reg});
             } else {
                 try self.code.append(@enumToInt(lang.Op.ReturnNone));
             }
@@ -646,12 +606,11 @@ pub const Compiler = struct {
             break :blk @fieldParentPtr(Scope.Loop, "base", scope);
         };
         if (node.op == .Continue) {
-            try self.emitInstruction_0_1(
-                .Jump,
+            try self.emitInstruction(.Jump, .{
                 @truncate(i32, -@intCast(isize, self.code.len - loop_scope.cond_begin)),
-            );
+            });
         } else {
-            try self.emitInstruction_0_1(.Jump, @as(u32, 0));
+            try self.emitInstruction(.Jump, .{@as(u32, 0)});
             try loop_scope.breaks.push(@intCast(u32, self.code.len));
         }
 
@@ -680,7 +639,7 @@ pub const Compiler = struct {
 
         const cond_val = try self.genNode(node.cond, .Value);
         if (cond_val.isRt()) {
-            try self.emitInstruction_1_1(.JumpFalse, cond_val.getRt(), @as(u32, 0));
+            try self.emitInstruction(.JumpFalse, .{ cond_val.getRt(), @as(u32, 0) });
             cond_jump = self.code.len;
         } else {
             const bool_val = try cond_val.getBool(self, node.cond.firstToken());
@@ -698,14 +657,13 @@ pub const Compiler = struct {
 
         const body_val = try self.genNode(node.body, sub_res);
         if (sub_res != .Rt and body_val.isRt()) {
-            try self.emitInstruction_1(.Discard, body_val.getRt());
+            try self.emitInstruction(.Discard, .{body_val.getRt()});
         }
 
         // jump back to condition
-        try self.emitInstruction_0_1(
-            .Jump,
+        try self.emitInstruction(.Jump, .{
             @truncate(i32, -@intCast(isize, self.code.len + @sizeOf(lang.Op) + @sizeOf(u32) - loop_scope.cond_begin)),
-        );
+        });
 
         // exit loop if cond == false
         if (cond_jump) |some| {
@@ -740,7 +698,7 @@ pub const Compiler = struct {
             .Rt = try l_val.toRt(self),
         };
 
-        try self.emitInstruction_1_1(.JumpNotError, sub_res.Rt, @as(u32, 0));
+        try self.emitInstruction(.JumpNotError, .{ sub_res.Rt, @as(u32, 0) });
         const addr = self.code.len;
 
         if (node.capture) |some| {
@@ -771,7 +729,7 @@ pub const Compiler = struct {
             defer r_val.free(self, reg);
 
             const sub_res = res.toRt(self);
-            try self.emitInstruction_2(op_id, sub_res.Rt, reg);
+            try self.emitInstruction(op_id, .{ sub_res.Rt, reg });
             return sub_res.toVal();
         }
         const ret_val: Value = switch (node.op) {
@@ -833,7 +791,7 @@ pub const Compiler = struct {
             defer l_val.free(self, reg);
 
             const op: lang.Op = if (node.op == .As) .As else .Is;
-            try self.emitInstruction_2_1(op, sub_res.Rt, reg, type_id);
+            try self.emitInstruction(op, .{ sub_res.Rt, reg, type_id });
             return sub_res.toVal();
         }
 
@@ -914,7 +872,7 @@ pub const Compiler = struct {
             .Call => |*args| {
                 const sub_res = res.toRt(self);
                 const start = self.used_regs;
-                self.used_regs += @intCast(u16, args.len);
+                self.used_regs += @intCast(RegRef, args.len);
 
                 var it = args.iterator(0);
                 var i = start;
@@ -923,7 +881,7 @@ pub const Compiler = struct {
                     i += 1;
                 }
 
-                try self.emitInstruction_3_1(.Call, sub_res.Rt, l_val.getRt(), start, @truncate(u16, args.len));
+                try self.emitInstruction(.Call, .{ sub_res.Rt, l_val.getRt(), start, @truncate(u16, args.len) });
                 return sub_res.toVal();
             },
             .Member => return self.reportErr("TODO: member access", node.l_tok),
@@ -944,7 +902,7 @@ pub const Compiler = struct {
                 defer self.registerFree(reg);
                 try self.makeRuntime(reg, val_res);
 
-                try self.emitInstruction_3(.Subscript, res_reg, l_val.getRt(), reg);
+                try self.emitInstruction(.Subscript, .{ res_reg, l_val.getRt(), reg });
                 return Value{ .Rt = res_reg };
             },
         }
@@ -1052,7 +1010,7 @@ pub const Compiler = struct {
         const reg = try r_val.toRt(self);
         defer r_val.free(self, reg);
 
-        try self.emitInstruction_3(op_id, l_val.getRt(), l_val.getRt(), reg);
+        try self.emitInstruction(op_id, .{ l_val.getRt(), l_val.getRt(), reg });
         return Value.Empty;
     }
 
@@ -1085,7 +1043,7 @@ pub const Compiler = struct {
                 else => unreachable,
             };
 
-            try self.emitInstruction_3(op_id, sub_res.Rt, l_reg, r_reg);
+            try self.emitInstruction(op_id, .{ sub_res.Rt, l_reg, r_reg });
             return sub_res.toVal();
         }
         try l_val.checkNum(self, node.lhs.firstToken());
@@ -1163,7 +1121,7 @@ pub const Compiler = struct {
                 .In => lang.Op.In,
                 else => unreachable,
             };
-            try self.emitInstruction_3(op_id, sub_res.Rt, l_reg, r_reg);
+            try self.emitInstruction(op_id, .{ sub_res.Rt, l_reg, r_reg });
             return sub_res.toVal();
         }
 
@@ -1253,7 +1211,7 @@ pub const Compiler = struct {
 
             // TODO short-circuit evaluation
             // const jump_op = if (node.op == .BoolAnd) .JumpFalse else lang.Op.JumpTrue;
-            // try self.emitInstruction_1_1(jump_op, l_val.getRt(), @as(u32, 0));
+            // try self.emitInstruction(jump_op, .{l_val.getRt(), @as(u32, 0)});
             // const addr = self.code.len;
             const l_reg = try l_val.toRt(self);
             const r_reg = try r_val.toRt(self);
@@ -1263,7 +1221,7 @@ pub const Compiler = struct {
             }
 
             const op_id = if (node.op == .BoolAnd) .BoolAnd else lang.Op.BoolOr;
-            try self.emitInstruction_3(op_id, sub_res.Rt, l_reg, r_reg);
+            try self.emitInstruction(op_id, .{ sub_res.Rt, l_reg, r_reg });
             return sub_res.toVal();
         }
         const l_bool = try l_val.getBool(self, node.lhs.firstToken());
@@ -1301,7 +1259,7 @@ pub const Compiler = struct {
                 .RShift => lang.Op.RShift,
                 else => unreachable,
             };
-            try self.emitInstruction_3(op_id, sub_res.Rt, l_reg, r_reg);
+            try self.emitInstruction(op_id, .{ sub_res.Rt, l_reg, r_reg });
             return sub_res.toVal();
         }
         const l_int = try l_val.getInt(self, node.lhs.firstToken());
@@ -1355,7 +1313,7 @@ pub const Compiler = struct {
                     if (val.* == .Ref and res.Lval == .Let) {
                         // copy on assign
                         const copy_reg = self.registerAlloc();
-                        try self.emitInstruction_2(.Copy, copy_reg, reg);
+                        try self.emitInstruction(.Copy, .{ copy_reg, reg });
                         reg = copy_reg;
                     }
                     try self.cur_scope.declSymbol(.{
@@ -1371,9 +1329,9 @@ pub const Compiler = struct {
                             return self.reportErr("assignment to constant", node.tok);
                         }
                         if (val.* == .Ref) {
-                            try self.emitInstruction_2(.Copy, sym.reg, val.getRt());
+                            try self.emitInstruction(.Copy, .{ sym.reg, val.getRt() });
                         } else if (val.isRt()) {
-                            try self.emitInstruction_2(.Move, sym.reg, val.getRt());
+                            try self.emitInstruction(.Move, .{ sym.reg, val.getRt() });
                         } else {
                             try self.makeRuntime(sym.reg, val.*);
                         }
@@ -1391,7 +1349,7 @@ pub const Compiler = struct {
             }
         } else if (self.cur_scope.getSymbol(name)) |sym| {
             if (res == .Rt) {
-                try self.emitInstruction_2(.Move, res.Rt, sym.reg);
+                try self.emitInstruction(.Move, .{ res.Rt, sym.reg });
                 return res.toVal();
             }
             return Value{ .Ref = sym.reg };
@@ -1419,7 +1377,7 @@ pub const Compiler = struct {
         const str = try self.parseStr(node.str_tok);
         const str_loc = try self.putString(str);
 
-        try self.emitInstruction_1_1(.Import, sub_res.Rt, str_loc);
+        try self.emitInstruction(.Import, .{ sub_res.Rt, str_loc });
         return sub_res.toVal();
     }
 
@@ -1433,9 +1391,9 @@ pub const Compiler = struct {
             const lib = try self.parseStr(some);
             const lib_loc = try self.putString(lib);
 
-            try self.emitInstruction_1_2(.NativeExtern, sub_res.Rt, lib_loc, name_loc);
+            try self.emitInstruction(.NativeExtern, .{ sub_res.Rt, lib_loc, name_loc });
         } else {
-            try self.emitInstruction_1_1(.Native, sub_res.Rt, name_loc);
+            try self.emitInstruction(.Native, .{ sub_res.Rt, name_loc });
         }
 
         return sub_res.toVal();
@@ -1449,7 +1407,7 @@ pub const Compiler = struct {
         const reg = try val.toRt(self);
         defer val.free(self, reg);
 
-        try self.emitInstruction_2(.BuildError, sub_res.Rt, reg);
+        try self.emitInstruction(.BuildError, .{ sub_res.Rt, reg });
         return sub_res.toVal();
     }
 
@@ -1457,7 +1415,7 @@ pub const Compiler = struct {
         const token = node.firstToken();
         const tok = self.tree.tokens.at(token);
 
-        try self.emitInstruction_0_1(.LineInfo, tok.start);
+        try self.emitInstruction(.LineInfo, .{tok.start});
     }
 
     fn tokenSlice(self: *Compiler, token: TokenIndex) []const u8 {
