@@ -966,14 +966,14 @@ pub const Compiler = struct {
             .In,
             => return self.genComparisionInfix(node, res),
 
-            .Range => {},
+            .Range => return self.reportErr("TODO ranges", node.tok),
 
             .BitAnd,
             .BitOr,
             .BitXor,
             .LShift,
             .RShift,
-            => {},
+            => return self.genIntInfix(node, res),
 
             .Add,
             .Sub,
@@ -999,7 +999,6 @@ pub const Compiler = struct {
             .BitXOrAssign,
             => return self.genAssignInfix(node, res),
         }
-        return self.reportErr("TODO more infix ops", node.tok);
     }
 
     fn genAssignInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
@@ -1015,7 +1014,24 @@ pub const Compiler = struct {
         }
 
         const l_val = try self.genNode(node.lhs, Result{ .Lval = .AugAssign });
-        if (!r_val.isRt()) try r_val.checkNum(self, node.rhs.firstToken());
+        if (!r_val.isRt()) switch (node.op) {
+            .AddAssign,
+            .SubAssign,
+            .MulAssign,
+            .PowAssign,
+            .DivAssign,
+            .DivFloorAssign,
+            .ModAssign,
+            => try r_val.checkNum(self, node.rhs.firstToken()),
+
+            .LShiftAssign,
+            .RShfitAssign,
+            .BitAndAssign,
+            .BitOrAssign,
+            .BitXOrAssign,
+            => _ = try r_val.getInt(self, node.rhs.firstToken()),
+            else => unreachable,
+        };
 
         const op_id = switch (node.op) {
             .AddAssign => lang.Op.Add,
@@ -1246,8 +1262,8 @@ pub const Compiler = struct {
                 l_val.free(self, l_reg);
             }
 
-            const op = if (node.op == .BoolAnd) .BoolAnd else lang.Op.BoolOr;
-            try self.emitInstruction_3(op, sub_res.Rt, l_reg, r_reg);
+            const op_id = if (node.op == .BoolAnd) .BoolAnd else lang.Op.BoolOr;
+            try self.emitInstruction_3(op_id, sub_res.Rt, l_reg, r_reg);
             return sub_res.toVal();
         }
         const l_bool = try l_val.getBool(self, node.lhs.firstToken());
@@ -1258,6 +1274,56 @@ pub const Compiler = struct {
                 l_bool and r_bool
             else
                 l_bool or r_bool,
+        };
+
+        return ret_val.maybeRt(self, res);
+    }
+
+    fn genIntInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
+        var l_val = try self.genNodeNonEmpty(node.lhs, .Value);
+        var r_val = try self.genNodeNonEmpty(node.rhs, .Value);
+
+        if (l_val.isRt() or r_val.isRt()) {
+            const sub_res = res.toRt(self);
+
+            const l_reg = try l_val.toRt(self);
+            const r_reg = try r_val.toRt(self);
+            defer {
+                r_val.free(self, r_reg);
+                l_val.free(self, l_reg);
+            }
+
+            const op_id = switch (node.op) {
+                .BitAnd => .BitAnd,
+                .BitOr => .BitOr,
+                .BitXor => .BitXor,
+                .LShift => .LShift,
+                .RShift => lang.Op.RShift,
+                else => unreachable,
+            };
+            try self.emitInstruction_3(op_id, sub_res.Rt, l_reg, r_reg);
+            return sub_res.toVal();
+        }
+        const l_int = try l_val.getInt(self, node.lhs.firstToken());
+        const r_int = try r_val.getInt(self, node.rhs.firstToken());
+
+        const ret_val: Value = switch (node.op) {
+            .BitAnd => .{ .Int = l_int & r_int },
+            .BitOr => .{ .Int = l_int | r_int },
+            .BitXor => .{ .Int = l_int ^ r_int },
+            .LShift => blk: {
+                if (r_int < 0)
+                    return self.reportErr("shift by negative value", node.rhs.firstToken());
+                const val = if (r_int > std.math.maxInt(u6)) 0 else l_int << @intCast(u6, r_int);
+                break :blk Value{ .Int = val };
+            },
+            .RShift => blk: {
+                if (r_int < 0)
+                    return self.reportErr("shift by negative value", node.rhs.firstToken());
+                const val = if (r_int > std.math.maxInt(u6)) 0 else l_int >> @intCast(u6, r_int);
+                break :blk Value{ .Int = val };
+            },
+            else => unreachable,
         };
 
         return ret_val.maybeRt(self, res);
