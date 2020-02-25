@@ -367,7 +367,7 @@ pub const Vm = struct {
                     const C_val = try vm.getInt(module);
 
                     if (C_val < 0)
-                        return vm.reportErr("shift by negative value");
+                        return vm.reportErr("shift by negative amount");
                     const val = if (C_val > std.math.maxInt(u6)) 0 else B_val << @intCast(u6, C_val);
                     A_val.* = .{
                         .kind = .{
@@ -381,7 +381,7 @@ pub const Vm = struct {
                     const C_val = try vm.getInt(module);
 
                     if (C_val < 0)
-                        return vm.reportErr("shift by negative value");
+                        return vm.reportErr("shift by negative amount");
                     const val = if (C_val > std.math.maxInt(u6)) 0 else B_val >> @intCast(u6, C_val);
                     A_val.* = .{
                         .kind = .{

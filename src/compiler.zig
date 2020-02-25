@@ -277,7 +277,7 @@ pub const Compiler = struct {
             const val = try compiler.genNode(n.*, res);
             if (last) {
                 const reg = try val.toRt(&compiler);
-                defer if (val != .Ref) compiler.registerFree(reg);
+                defer val.free(&compiler, reg);
 
                 try compiler.emitInstruction(.Return, .{reg});
             } else if (val.isRt()) {
@@ -304,7 +304,7 @@ pub const Compiler = struct {
         const val = try self.genNode(node, .Discard);
         if (val != .Empty) {
             const reg = try val.toRt(self);
-            defer if (val != .Ref) self.registerFree(reg);
+            defer val.free(self, reg);
 
             try self.emitInstruction(.Discard, .{reg});
         }
@@ -1274,13 +1274,13 @@ pub const Compiler = struct {
             .BitXor => .{ .Int = l_int ^ r_int },
             .LShift => blk: {
                 if (r_int < 0)
-                    return self.reportErr("shift by negative value", node.rhs.firstToken());
+                    return self.reportErr("shift by negative amount", node.rhs.firstToken());
                 const val = if (r_int > std.math.maxInt(u6)) 0 else l_int << @intCast(u6, r_int);
                 break :blk Value{ .Int = val };
             },
             .RShift => blk: {
                 if (r_int < 0)
-                    return self.reportErr("shift by negative value", node.rhs.firstToken());
+                    return self.reportErr("shift by negative amount", node.rhs.firstToken());
                 const val = if (r_int > std.math.maxInt(u6)) 0 else l_int >> @intCast(u6, r_int);
                 break :blk Value{ .Int = val };
             },
@@ -1352,7 +1352,8 @@ pub const Compiler = struct {
             }
         } else if (self.cur_scope.getSymbol(name)) |sym| {
             if (res == .Rt) {
-                try self.emitInstruction(.Move, .{ res.Rt, sym.reg });
+                const op_id = if (sym.mutable) .Move else lang.Op.Copy;
+                try self.emitInstruction(op_id, .{ res.Rt, sym.reg });
                 return res.toVal();
             }
             return Value{ .Ref = sym.reg };

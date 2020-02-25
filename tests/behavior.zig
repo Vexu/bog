@@ -1,3 +1,14 @@
+test "const value not modified by function" {
+    try expectOutput(
+        \\const x = 2
+        \\const inc = fn(n) n += 1
+        \\inc(x)
+        \\x
+    ,
+        \\2
+    );
+}
+
 test "in" {
     try expectOutput(
         \\let y = [1,2,3]
