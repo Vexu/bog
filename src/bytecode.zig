@@ -3,7 +3,7 @@ const mem = std.mem;
 const Allocator = mem.Allocator;
 const ast = @import("ast.zig");
 const Node = ast.Node;
-const TypeId = @import("value.zig").TypeId;
+const TypeId = @import("value.zig").Value.TypeId;
 
 // TODO give these numbers once they are more stable
 pub const Op = enum(u8) {
@@ -184,5 +184,184 @@ pub const Module = struct {
 
     pub fn write(module: Module, stream: var) @TypeOf(stream).Error!void {
         @panic("TODO");
+    }
+
+    pub fn dump(module: Module, stream: var) @TypeOf(stream).Child.Error!void {
+        var ip: usize = 0;
+        while (ip < module.code.len) {
+            if (ip == module.start_index) {
+                try stream.print("\nentry@0x{X}\n", .{module.start_index});
+            }
+            const op = module.getArg(Op, &ip);
+            try stream.write(@tagName(op));
+            switch (op) {
+                // A i8
+                .ConstPrimitive, .ConstInt8 => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const arg_2 = module.getArg(i8, &ip);
+                    try stream.print(" #{} {}\n", .{ arg_1, arg_2 });
+                },
+
+                // A u32
+                .JumpTrue, .JumpFalse, .JumpNotError => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const arg_2 = module.getArg(u32, &ip);
+                    try stream.print(" #{} {}\n", .{ arg_1, arg_2 });
+                },
+
+                // A i32
+                .ConstInt32 => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const arg_2 = module.getArg(i32, &ip);
+                    try stream.print(" #{} {}\n", .{ arg_1, arg_2 });
+                },
+
+                // A i64
+                .ConstInt64 => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const arg_2 = module.getArg(i64, &ip);
+                    try stream.print(" #{} {}\n", .{ arg_1, arg_2 });
+                },
+
+                // A STRING(arg1)
+                .Import, .Native, .ConstString => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const offset = module.getArg(u32, &ip);
+
+                    const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
+                    const slice = module.strings[offset + @sizeOf(u32) ..][0..len];
+                    try stream.print(" #{} \"{}\"\n", .{ arg_1, slice });
+                },
+
+                // A = NATIVE(arg1, arg2)
+                .NativeExtern => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const offset_1 = module.getArg(u32, &ip);
+                    const offset_2 = module.getArg(u32, &ip);
+
+                    const len_1 = @ptrCast(*align(1) const u32, module.strings[offset_1..].ptr).*;
+                    const slice_1 = module.strings[offset_1 + @sizeOf(u32) ..][0..len_1];
+
+                    const len_2 = @ptrCast(*align(1) const u32, module.strings[offset_2..].ptr).*;
+                    const slice_2 = module.strings[offset_2 + @sizeOf(u32) ..][0..len_2];
+
+                    try stream.print(" #{} \"{}\" \"{}\"\n", .{ arg_1, slice_1, slice_2 });
+                },
+
+                // A f64
+                .ConstNum => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const arg_2 = module.getArg(f64, &ip);
+                    try stream.print(" #{} {}\n", .{ arg_1, arg_2 });
+                },
+
+                // A B C
+                .DivFloor,
+                .Div,
+                .Mul,
+                .Pow,
+                .Mod,
+                .Add,
+                .Sub,
+                .LShift,
+                .RShift,
+                .BitAnd,
+                .BitOr,
+                .BitXor,
+                .Equal,
+                .NotEqual,
+                .LessThan,
+                .LessThanEqual,
+                .GreaterThan,
+                .GreaterThanEqual,
+                .In,
+                .BoolAnd,
+                .BoolOr,
+                .Get,
+                .Set,
+                => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const arg_2 = module.getArg(RegRef, &ip);
+                    const arg_3 = module.getArg(RegRef, &ip);
+                    try stream.print(" #{} #{} #{}\n", .{ arg_1, arg_2, arg_3 });
+                },
+
+                // A B
+                .Move,
+                .Copy,
+                .BoolNot,
+                .BitNot,
+                .Negate,
+                .Try,
+                .BuildError,
+                => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const arg_2 = module.getArg(RegRef, &ip);
+                    try stream.print(" #{} #{}\n", .{ arg_1, arg_2 });
+                },
+
+                // A = (B, B + 1, ... B + N)
+                .BuildTuple,
+                .BuildList,
+                => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const arg_2 = module.getArg(RegRef, &ip);
+                    const arg_3 = module.getArg(u16, &ip);
+                    try stream.print(" #{} #{} arg_count:{}\n", .{ arg_1, arg_2, arg_3 });
+                },
+
+                // A = B(C, C + 1, ... C + N)
+                .Call => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const arg_2 = module.getArg(RegRef, &ip);
+                    const arg_3 = module.getArg(RegRef, &ip);
+                    const arg_4 = module.getArg(u16, &ip);
+                    try stream.print(" #{} #{} #{} arg_count:{}\n", .{ arg_1, arg_2, arg_3, arg_4 });
+                },
+
+                // A = Fn(arg_count, offset)
+                .BuildFn => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const arg_2 = module.getArg(u8, &ip);
+                    const arg_3 = module.getArg(u32, &ip);
+                    try stream.print(" #{} arg_count:{} offset:{}\n", .{ arg_1, arg_2, arg_3 });
+                },
+
+                // i32
+                .Jump => {
+                    const arg_1 = module.getArg(i32, &ip);
+                    try stream.print(" {}\n", .{arg_1});
+                },
+
+                // u32
+                .LineInfo => {
+                    const arg_1 = module.getArg(u32, &ip);
+                    try stream.print(" {}\n", .{arg_1});
+                },
+
+                // A B TYPEID
+                .Is, .As => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const arg_2 = module.getArg(RegRef, &ip);
+                    const arg_3 = module.getArg(TypeId, &ip);
+                    try stream.print(" #{} #{} id:{}\n", .{ arg_1, arg_2, @tagName(arg_3) });
+                },
+
+                // A
+                .Discard, .Return => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    try stream.print(" #{}\n", .{arg_1});
+                },
+
+                .ReturnNone => try stream.writeByte('\n'),
+                _ => unreachable,
+            }
+        }
+    }
+
+    fn getArg(module: Module, comptime T: type, ip: *usize) T {
+        const val = @ptrCast(*align(1) const T, module.code[ip.*..].ptr).*;
+        ip.* += @sizeOf(T);
+        return val;
     }
 };
