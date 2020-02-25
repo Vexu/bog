@@ -1,3 +1,14 @@
+test "in" {
+    try expectOutput(
+        \\let y = [1,2,3]
+        \\if (not true in y)
+        \\    y[-2] = false
+        \\y == [1, false, 3]
+    ,
+        \\true
+    );
+}
+
 test "get/set" {
     try expectOutput(
         \\let y = [1,2,3]

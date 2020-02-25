@@ -1,4 +1,5 @@
 const std = @import("std");
+const mem = std.mem;
 const lang = @import("lang.zig");
 const Vm = lang.Vm;
 
@@ -82,12 +83,20 @@ pub const Value = struct {
             },
             .Tuple => |val| {
                 const b_val = b.kind.Tuple;
-                return val.len == b_val.len;
+                if (val.len != b_val.len) return false;
+                for (val) |v, i| {
+                    if (!v.eql(b_val[i])) return false;
+                }
+                return true;
             },
             .Map => |val| @panic("TODO eql for maps"),
             .List => |val| {
                 const b_val = b.kind.List;
-                return val.len == b_val.len;
+                if (val.len != b_val.len) return false;
+                for (val.toSliceConst()) |v, i| {
+                    if (!v.eql(b_val.toSliceConst()[i])) return false;
+                }
+                return true;
             },
             .Error => |val| @panic("TODO eql for errors"),
             .Range => |val| @panic("TODO eql for ranges"),
@@ -261,6 +270,91 @@ pub const Value = struct {
                 return vm.reportErr("TODO set string");
             },
             else => return vm.reportErr("invalid subscript type"),
+        }
+    }
+
+    /// `type_id` must be valid and cannot be .Error, .Range or .Fn
+    pub fn as(val: *Value, type_id: TypeId, vm: *Vm) !*Value {
+        if (type_id == .None) {
+            return &Value.None;
+        }
+        if (type_id == val.kind) {
+            return val;
+        }
+
+        if (type_id == .Bool) {
+            const bool_res = switch (val.kind) {
+                .Int => |int| int != 0,
+                .Num => |num| num != 0,
+                .Bool => unreachable,
+                .Str => |str| if (mem.eql(u8, str, "true"))
+                    true
+                else if (mem.eql(u8, str, "false"))
+                    false
+                else
+                    return vm.reportErr("cannot cast string to bool"),
+                else => return vm.reportErr("invalid cast to bool"),
+            };
+
+            return if (bool_res) &Value.True else &Value.False;
+        }
+
+        const new_val = try vm.gc.alloc();
+        new_val.* = switch (type_id) {
+            .Bool, .None, .Error, .Range, .Fn => unreachable,
+            .Int => .{
+                .kind = .{
+                    .Int = switch (val.kind) {
+                        .Int => unreachable,
+                        .Num => |num| @floatToInt(i64, num),
+                        .Bool => |b| @boolToInt(b),
+                        // .Str => parseInt
+                        else => return vm.reportErr("invalid cast to int"),
+                    },
+                },
+            },
+            .Num => .{
+                .kind = .{
+                    .Num = switch (val.kind) {
+                        .Num => unreachable,
+                        .Int => |int| @intToFloat(f64, int),
+                        .Bool => |b| @intToFloat(f64, @boolToInt(b)),
+                        // .Str => parseNum
+                        else => return vm.reportErr("invalid cast to num"),
+                    },
+                },
+            },
+            .Str,
+            .Tuple,
+            .Map,
+            .List,
+            => return vm.reportErr("TODO more casts"),
+            _ => unreachable,
+        };
+        return new_val;
+    }
+
+    pub fn in(val: *Value, container: *Value) bool {
+        switch (container.kind) {
+            .Str => |str| {
+                if (val.kind != .Str) return false;
+                return mem.indexOf(u8, str, val.kind.Str) != null;
+            },
+            .Tuple => |tuple| {
+                for (tuple) |v| {
+                    if (v.eql(val)) return true;
+                }
+                return false;
+            },
+            .List => |list| {
+                for (list.toSliceConst()) |v| {
+                    if (v.eql(val)) return true;
+                }
+                return false;
+            },
+            .Map => @panic("TODO in map"),
+            .Range => @panic("TODO in range"),
+            else => unreachable,
         }
     }
 };

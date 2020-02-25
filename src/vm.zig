@@ -350,18 +350,16 @@ pub const Vm = struct {
                     A_ref.* = if (bool_val) &Value.True else &Value.False;
                 },
                 .In => {
-                    const A_ref = vm.getRef(module);
+                    const A_ref = try vm.getRef(module);
                     const B_val = try vm.getVal(module);
                     const C_val = try vm.getVal(module);
 
-                    const bool_val = switch (B_val.kind) {
-                        .Str => return vm.reportErr("TODO in str"),
-                        .Tuple => return vm.reportErr("TODO in tuple"),
-                        .List => return vm.reportErr("TODO in list"),
-                        .Map => return vm.reportErr("TODO in map"),
-                        .Range => return vm.reportErr("TODO in range"),
+                    switch (C_val.kind) {
+                        .Str, .Tuple, .List, .Map, .Range => {},
                         else => return vm.reportErr("invalid type for 'in'"),
-                    };
+                    }
+
+                    A_ref.* = if (B_val.in(C_val)) &Value.True else &Value.False;
                 },
                 .LShift => {
                     const A_val = try vm.getNewVal(module);
@@ -547,61 +545,14 @@ pub const Vm = struct {
                     const B_val = try vm.getVal(module);
                     const type_id = vm.getArg(module, Value.TypeId);
 
-                    if (type_id == .None) {
-                        A_ref.* = &Value.None;
-                        continue;
+                    // Value.as will hit unreachable on invalid type_id
+                    switch (type_id) {
+                        .None, .Int, .Num, .Bool, .Str, .Tuple, .Map, .List => {},
+                        .Error, .Range, .Fn => return error.MalformedByteCode,
+                        _ => return error.MalformedByteCode,
                     }
 
-                    if (type_id == .Bool) {
-                        const bool_res = switch (B_val.kind) {
-                            .Int => |val| val != 0,
-                            .Num => |val| val != 0,
-                            .Bool => |val| val,
-                            .Str => |val| if (mem.eql(u8, val, "true"))
-                                true
-                            else if (mem.eql(u8, val, "false"))
-                                false
-                            else
-                                return vm.reportErr("cannot cast string to bool"),
-                            else => return vm.reportErr("invalid cast to bool"),
-                        };
-
-                        A_ref.* = if (bool_res) &Value.True else &Value.False;
-                        continue;
-                    }
-
-                    A_ref.* = try vm.gc.alloc();
-                    A_ref.*.?.* = switch (type_id) {
-                        .Bool, .None => unreachable,
-                        .Int => .{
-                            .kind = .{
-                                .Int = switch (B_val.kind) {
-                                    .Int => |val| val,
-                                    .Num => |val| @floatToInt(i64, val),
-                                    .Bool => |val| @boolToInt(val),
-                                    // .Str => parseInt
-                                    else => return vm.reportErr("invalid cast to int"),
-                                },
-                            },
-                        },
-                        .Num => .{
-                            .kind = .{
-                                .Num = switch (B_val.kind) {
-                                    .Num => |val| val,
-                                    .Int => |val| @intToFloat(f64, val),
-                                    .Bool => |val| @intToFloat(f64, @boolToInt(val)),
-                                    // .Str => parseNum
-                                    else => return vm.reportErr("invalid cast to num"),
-                                },
-                            },
-                        },
-                        .Str,
-                        .Tuple,
-                        .Map,
-                        .List,
-                        => return vm.reportErr("TODO more casts"),
-                        else => return error.MalformedByteCode,
-                    };
+                    A_ref.* = try B_val.as(type_id, vm);
                 },
                 .Is => {
                     const A_ref = try vm.getRef(module);
