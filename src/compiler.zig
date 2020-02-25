@@ -195,7 +195,7 @@ pub const Compiler = struct {
             } else if (v > std.math.minInt(i32) and v < std.math.maxInt(i32)) {
                 try self.emitInstruction(.ConstInt32, .{ res, @truncate(i32, v) });
             } else {
-                try self.emitInstruction(.ConstInt64, .{res, v});
+                try self.emitInstruction(.ConstInt64, .{ res, v });
             },
             .Num => |v| try self.emitInstruction(.ConstNum, .{ res, v }),
             .Bool => |v| try self.emitInstruction(.ConstPrimitive, .{ res, @as(u8, @boolToInt(v)) + 1 }),
@@ -380,7 +380,7 @@ pub const Compiler = struct {
                             continue;
                         }
                         try self.makeRuntime(index_reg, index_val);
-                        try self.emitInstruction(.Subscript, .{ sub_reg, reg, index_reg });
+                        try self.emitInstruction(.Get, .{ sub_reg, reg, index_reg });
                         const rt_val = Value{ .Rt = sub_reg };
                         const l_val = try self.genNode(n.*, switch (res.Lval) {
                             .Const => Result{ .Lval = .{ .Const = &rt_val } },
@@ -886,23 +886,26 @@ pub const Compiler = struct {
             },
             .Member => return self.reportErr("TODO: member access", node.l_tok),
             .Subscript => |val| {
+                const index_val = try self.genNodeNonEmpty(val, .Value);
+                const index_reg = try index_val.toRt(self);
+                defer index_val.free(self, index_reg);
+
                 const res_reg = switch (res) {
                     .Rt => |r| r,
                     .Lval => |l| switch (l) {
                         .Let, .Const => return self.reportErr("cannot declare to subscript", node.l_tok),
                         .AugAssign => self.registerAlloc(),
-                        .Assign => return self.reportErr("TODO: assign to subscript", node.l_tok),
+                        .Assign => |r_val| {
+                            const r_reg = try r_val.toRt(self);
+                            defer r_val.free(self, r_reg);
+                            try self.emitInstruction(.Set, .{ l_val.getRt(), index_reg, r_reg });
+                            return Value.Empty;
+                        },
                     },
                     .Discard, .Value => self.registerAlloc(),
                 };
 
-                const val_res = try self.genNodeNonEmpty(val, .Value);
-
-                const reg = self.registerAlloc();
-                defer self.registerFree(reg);
-                try self.makeRuntime(reg, val_res);
-
-                try self.emitInstruction(.Subscript, .{ res_reg, l_val.getRt(), reg });
+                try self.emitInstruction(.Get, .{ res_reg, l_val.getRt(), index_reg });
                 return Value{ .Rt = res_reg };
             },
         }

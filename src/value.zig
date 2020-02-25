@@ -1,4 +1,6 @@
 const std = @import("std");
+const lang = @import("lang.zig");
+const Vm = lang.Vm;
 
 pub const Value = struct {
     pub const TypeId = enum(u8) {
@@ -191,6 +193,74 @@ pub const Value = struct {
                 val.end.mark();
             },
             _ => unreachable,
+        }
+    }
+
+    pub fn get(val: *Value, index: *Value, vm: *Vm) !*Value {
+        switch (val.kind) {
+            .Tuple => |tuple| if (index.kind == .Int) {
+                var i = index.kind.Int;
+                if (i < 0)
+                    i += @intCast(i64, tuple.len);
+                if (i < 0 or i > tuple.len)
+                    return vm.reportErr("index out of bounds");
+
+                return tuple[@intCast(u32, i)];
+            } else {
+                return vm.reportErr("TODO get with ranges");
+            },
+            .Map => |map| {
+                return vm.reportErr("TODO get map");
+            },
+            .List => |list| if (index.kind == .Int) {
+                var i = index.kind.Int;
+                if (i < 0)
+                    i += @intCast(i64, list.len);
+                if (i < 0 or i > list.len)
+                    return vm.reportErr("index out of bounds");
+
+                return list.toSliceConst()[@intCast(u32, i)];
+            } else {
+                return vm.reportErr("TODO get with ranges");
+            },
+            .Str => |str| {
+                return vm.reportErr("TODO get string");
+            },
+            else => return vm.reportErr("invalid subscript type"),
+        }
+    }
+
+    pub fn set(val: *Value, index: *Value, new_val: *Value, vm: *Vm) !void {
+        switch (val.kind) {
+            .Tuple => |tuple| if (index.kind == .Int) {
+                var i = index.kind.Int;
+                if (i < 0)
+                    i += @intCast(i64, tuple.len);
+                if (i < 0 or i > tuple.len)
+                    return vm.reportErr("index out of bounds");
+
+                tuple[@intCast(u32, i)] = new_val;
+            } else {
+                return vm.reportErr("TODO set with ranges");
+            },
+            .Map => |map| {
+                return vm.reportErr("TODO set map");
+            },
+            .List => |list| if (index.kind == .Int) {
+                var i = index.kind.Int;
+                if (i < 0)
+                    i += @intCast(i64, list.len);
+                if (i < 0 or i > list.len)
+                    return vm.reportErr("index out of bounds");
+
+                list.toSlice()[@intCast(u32, i)] = new_val;
+            } else {
+                return vm.reportErr("TODO set with ranges");
+            },
+            .Str => |str| {
+                return vm.reportErr("TODO set string");
+            },
+            else => return vm.reportErr("invalid subscript type"),
         }
     }
 };

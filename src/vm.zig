@@ -368,7 +368,6 @@ pub const Vm = struct {
                     const B_val = try vm.getInt(module);
                     const C_val = try vm.getInt(module);
 
-
                     if (C_val < 0)
                         return vm.reportErr("shift by negative value");
                     const val = if (C_val > std.math.maxInt(u6)) 0 else B_val << @intCast(u6, C_val);
@@ -529,34 +528,19 @@ pub const Vm = struct {
                         },
                     };
                 },
-                .Subscript => {
+                .Get => {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getVal(module);
                     const C_val = try vm.getVal(module);
 
-                    switch (B_val.kind) {
-                        .Tuple => |val| if (C_val.kind == .Int) {
-                            var index = C_val.kind.Int;
-                            if (index < 0)
-                                index += @intCast(i64, val.len);
-                            if (index < 0 or index > val.len)
-                                return vm.reportErr("index out of bounds");
+                    A_ref.* = try B_val.get(C_val, vm);
+                },
+                .Set => {
+                    const A_val = try vm.getVal(module);
+                    const B_val = try vm.getVal(module);
+                    const C_val = try vm.getVal(module);
 
-                            A_ref.* = val[@intCast(u32, index)];
-                        } else {
-                            return vm.reportErr("TODO subscript with ranges");
-                        },
-                        .Map => |val| {
-                            return vm.reportErr("TODO subscript map");
-                        },
-                        .List => |val| {
-                            return vm.reportErr("TODO subscript list");
-                        },
-                        .Str => |val| {
-                            return vm.reportErr("TODO subscript string");
-                        },
-                        else => return vm.reportErr("invalid subscript type"),
-                    }
+                    try A_val.set(B_val, C_val, vm);
                 },
                 .As => {
                     const A_ref = try vm.getRef(module);

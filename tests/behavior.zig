@@ -1,3 +1,13 @@
+test "get/set" {
+    try expectOutput(
+        \\let y = [1,2,3]
+        \\y[-2] = true
+        \\y[1]
+    ,
+        \\true
+    );
+}
+
 test "mixed num and int" {
     try expectOutput(
         \\let y = 2

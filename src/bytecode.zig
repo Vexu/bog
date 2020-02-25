@@ -109,7 +109,10 @@ pub const Op = enum(u8) {
     Try,
 
     /// A = B[C]
-    Subscript,
+    Get,
+
+    /// A[B] = C
+    Set,
 
     /// A = error(B)
     BuildError,
