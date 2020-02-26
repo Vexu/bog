@@ -65,7 +65,7 @@ primary_expr
     | "[" (expr ",")* expr? "]"
     | "error" "(" expr ")"
     | "import" "(" STRING ")"
-    | "native" "(" (STRING ",")? STRING ")"
+    | "native" "(" STRING ")"
     | if
     | while
     | for

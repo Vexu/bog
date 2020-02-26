@@ -47,10 +47,11 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
                 .base = .{
                     .id = .Fn,
                     .parent = null,
-                    .syms = Compiler.Symbol.List.init(allocator),
+                    .syms = Compiler.Symbol.List.init(arena),
                 },
                 .code = Compiler.Code.init(allocator),
             },
+            .string_interner = std.StringHashMap(u32).init(arena),
             .module_code = Compiler.Code.init(allocator),
             .strings = Compiler.Code.init(allocator),
             .code = undefined,
@@ -63,7 +64,9 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     repl.compiler.cur_scope = &repl.compiler.root_scope.base;
     defer repl.vm.deinit();
     defer repl.buffer.deinit();
-    defer repl.errors.deinit();
+    defer repl.compiler.strings.deinit();
+    defer repl.compiler.root_scope.code.deinit();
+    defer repl.compiler.string_interner.deinit();
 
     while (true) {
         repl.handleLine(in_stream, out_stream) catch |err| switch (err) {
@@ -102,10 +105,6 @@ const Repl = struct {
             try some.dump(out_stream, 2);
             try out_stream.writeByte('\n');
         }
-
-        // reset arena
-        repl.tree.arena_allocator.deinit();
-        repl.tree.arena_allocator = std.heap.ArenaAllocator.init(repl.buffer.allocator);
     }
 
     fn readLine(repl: *Repl, prompt: []const u8, in_stream: var, out_stream: var) !void {

@@ -23,6 +23,7 @@ pub const Compiler = struct {
     code: *Code,
     module_code: Code,
     strings: Code,
+    string_interner: std.StringHashMap(u32),
 
     pub const Code = std.ArrayList(u8);
 
@@ -109,7 +110,7 @@ pub const Compiler = struct {
         Int: i64,
         Num: f64,
         Bool: bool,
-        Str: []u8,
+        Str: []const u8,
 
         fn isRt(val: Value) bool {
             return switch (val) {
@@ -206,10 +207,13 @@ pub const Compiler = struct {
     }
 
     fn putString(self: *Compiler, str: []const u8) !u32 {
-        const len = @intCast(u32, self.strings.len);
+        if (self.string_interner.getValue(str)) |some| return some;
+        const offset = @intCast(u32, self.strings.len);
         try self.strings.appendSlice(mem.asBytes(&@intCast(u32, str.len)));
         try self.strings.appendSlice(str);
-        return len;
+
+        _ = try self.string_interner.put(str, offset);
+        return offset;
     }
 
     const Result = union(enum) {
@@ -264,6 +268,7 @@ pub const Compiler = struct {
             .strings = Code.init(allocator),
             .code = undefined,
             .cur_scope = undefined,
+            .string_interner = std.StringHashMap(u32).init(allocator),
         };
         compiler.code = &compiler.root_scope.code;
         compiler.cur_scope = &compiler.root_scope.base;
@@ -839,7 +844,7 @@ pub const Compiler = struct {
                     .Str = switch (l_val) {
                         .Int => |val| try std.fmt.allocPrint(self.arena, "{}", .{val}),
                         .Num => |val| try std.fmt.allocPrint(self.arena, "{d}", .{val}),
-                        .Bool => |val| try mem.dupe(self.arena, u8, if (val) "true" else "false"),
+                        .Bool => |val| if (val) "true" else "false",
                         .Str => |val| val,
                         else => return self.reportErr("invalid cast to string", node.lhs.firstToken()),
                     },
@@ -871,10 +876,13 @@ pub const Compiler = struct {
             try res.notLval(self, node.r_tok);
         }
         const l_val = try self.genNode(node.lhs, .Value);
-        if (!l_val.isRt()) {
-            return self.reportErr("Invalid left hand side to suffix op", node.lhs.firstToken());
+        if (l_val != .Str and !l_val.isRt()) {
+            return self.reportErr("invalid left hand side to suffix op", node.lhs.firstToken());
         }
-        switch (node.op) {
+        const l_reg = try l_val.toRt(self);
+        defer l_val.free(self, l_reg);
+
+        const index_val = switch (node.op) {
             .Call => |*args| {
                 const sub_res = res.toRt(self);
                 const start = self.used_regs;
@@ -887,34 +895,32 @@ pub const Compiler = struct {
                     i += 1;
                 }
 
-                try self.emitInstruction(.Call, .{ sub_res.Rt, l_val.getRt(), start, @truncate(u16, args.len) });
+                try self.emitInstruction(.Call, .{ sub_res.Rt, l_reg, start, @truncate(u16, args.len) });
                 return sub_res.toVal();
             },
-            .Member => return self.reportErr("TODO: member access", node.l_tok),
-            .Subscript => |val| {
-                const index_val = try self.genNodeNonEmpty(val, .Value);
-                const index_reg = try index_val.toRt(self);
-                defer index_val.free(self, index_reg);
+            .Member => Value{ .Str = self.tokenSlice(node.r_tok) },
+            .Subscript => |val| try self.genNodeNonEmpty(val, .Value),
+        };
+        const index_reg = try index_val.toRt(self);
+        defer index_val.free(self, index_reg);
 
-                const res_reg = switch (res) {
-                    .Rt => |r| r,
-                    .Lval => |l| switch (l) {
-                        .Let, .Const => return self.reportErr("cannot declare to subscript", node.l_tok),
-                        .AugAssign => self.registerAlloc(),
-                        .Assign => |r_val| {
-                            const r_reg = try r_val.toRt(self);
-                            defer r_val.free(self, r_reg);
-                            try self.emitInstruction(.Set, .{ l_val.getRt(), index_reg, r_reg });
-                            return Value.Empty;
-                        },
-                    },
-                    .Discard, .Value => self.registerAlloc(),
-                };
-
-                try self.emitInstruction(.Get, .{ res_reg, l_val.getRt(), index_reg });
-                return Value{ .Rt = res_reg };
+        const res_reg = switch (res) {
+            .Rt => |r| r,
+            .Lval => |l| switch (l) {
+                .Let, .Const => return self.reportErr("cannot declare to subscript", node.l_tok),
+                .AugAssign => self.registerAlloc(),
+                .Assign => |r_val| {
+                    const r_reg = try r_val.toRt(self);
+                    defer r_val.free(self, r_reg);
+                    try self.emitInstruction(.Set, .{ l_reg, index_reg, r_reg });
+                    return Value.Empty;
+                },
             },
-        }
+            .Discard, .Value => self.registerAlloc(),
+        };
+
+        try self.emitInstruction(.Get, .{ res_reg, l_reg, index_reg });
+        return Value{ .Rt = res_reg };
     }
 
     fn genInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
