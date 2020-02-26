@@ -144,9 +144,6 @@ pub const Op = enum(u8) {
     /// A = NATIVE(arg1)
     Native,
 
-    /// A = NATIVE(arg1, arg2)
-    NativeExtern,
-
     /// A = B is TYPEID
     Is,
 
@@ -231,21 +228,6 @@ pub const Module = struct {
                     const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
                     const slice = module.strings[offset + @sizeOf(u32) ..][0..len];
                     try stream.print(" #{} \"{}\"\n", .{ arg_1, slice });
-                },
-
-                // A = NATIVE(arg1, arg2)
-                .NativeExtern => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const offset_1 = module.getArg(u32, &ip);
-                    const offset_2 = module.getArg(u32, &ip);
-
-                    const len_1 = @ptrCast(*align(1) const u32, module.strings[offset_1..].ptr).*;
-                    const slice_1 = module.strings[offset_1 + @sizeOf(u32) ..][0..len_1];
-
-                    const len_2 = @ptrCast(*align(1) const u32, module.strings[offset_2..].ptr).*;
-                    const slice_2 = module.strings[offset_2 + @sizeOf(u32) ..][0..len_2];
-
-                    try stream.print(" #{} \"{}\" \"{}\"\n", .{ arg_1, slice_1, slice_2 });
                 },
 
                 // A f64

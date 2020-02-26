@@ -1,7 +1,6 @@
 test "native function" {
     try testCanonical(
-        \\const foo = native("foo")
-        \\const bar = native("libbar", "bar")
+        \\const foo = native("bar.foo")
         \\
     );
 }

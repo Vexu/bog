@@ -267,8 +267,7 @@ pub const Node = struct {
     pub const Native = struct {
         base: Node = Node{ .id = .Native },
         tok: TokenIndex,
-        lib_tok: ?TokenIndex,
-        name_tok: TokenIndex,
+        str_tok: TokenIndex,
         r_paren: TokenIndex,
     };
 

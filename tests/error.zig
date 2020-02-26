@@ -1,3 +1,11 @@
+test "invalid namespace for native" {
+    try expectError(
+        \\native("foo")
+    ,
+        \\invalid namespace
+    );
+}
+
 test "invalid type" {
     try expectError(
         \\1 + true

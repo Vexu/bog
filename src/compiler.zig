@@ -1395,17 +1395,12 @@ pub const Compiler = struct {
         try res.notLval(self, node.tok);
 
         const sub_res = res.toRt(self);
-        const name = try self.parseStr(node.name_tok);
-        const name_loc = try self.putString(name);
-        if (node.lib_tok) |some| {
-            const lib = try self.parseStr(some);
-            const lib_loc = try self.putString(lib);
-
-            try self.emitInstruction(.NativeExtern, .{ sub_res.Rt, lib_loc, name_loc });
-        } else {
-            try self.emitInstruction(.Native, .{ sub_res.Rt, name_loc });
+        const str = try self.parseStr(node.str_tok);
+        if (mem.indexOfScalar(u8, str, '.') == null) {
+            return self.reportErr("invalid namespace", node.str_tok);
         }
-
+        const str_loc = try self.putString(str);
+        try self.emitInstruction(.Native, .{ sub_res.Rt, str_loc });
         return sub_res.toVal();
     }
 

@@ -665,19 +665,10 @@ pub const Parser = struct {
         }
         if (parser.eatToken(.Keyword_native, skip_nl)) |tok| {
             _ = try parser.expectToken(.LParen, true);
-
-            var lib_tok: ?TokenIndex = null;
-            var name_tok = try parser.expectToken(.String, true);
-            if (parser.eatToken(.Comma, true)) |_| {
-                lib_tok = name_tok;
-                name_tok = try parser.expectToken(.String, true);
-            }
-
             const node = try parser.arena.create(Node.Native);
             node.* = .{
                 .tok = tok,
-                .lib_tok = lib_tok,
-                .name_tok = name_tok,
+                .str_tok = try parser.expectToken(.String, true),
                 .r_paren = try parser.expectToken(.RParen, true),
             };
             return &node.base;
