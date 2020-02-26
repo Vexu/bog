@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const tokenizer = @import("tokenizer.zig");
 pub const Token = tokenizer.Token;
@@ -15,6 +16,7 @@ pub const Node = ast.Node;
 
 const compiler = @import("compiler.zig");
 pub const Compiler = compiler.Compiler;
+pub const compile = Compiler.compile;
 
 const value = @import("value.zig");
 pub const Value = value.Value;
@@ -39,10 +41,8 @@ pub const extension = ".bog";
 /// file extension of bog bytecode files, 'byte bog'
 pub const bytecode_extension = ".bbog";
 
-pub const Error = struct {
-    index: u32,
-    kind: Kind,
-    msg: []const u8,
+pub const Errors = struct {
+    list: List,
 
     const Kind = enum {
         Error,
@@ -50,16 +50,36 @@ pub const Error = struct {
         Trace,
     };
 
-    pub const List = std.SegmentedList(Error, 0);
+    const List = std.SegmentedList(struct {
+        msg: []const u8,
+        index: u32,
+        kind: Kind,
+    }, 0);
 
-    pub fn render(errors: *List, source: []const u8, out_stream: var) !void {
+    pub fn init(alloc: *Allocator) Errors {
+        return .{ .list = List.init(alloc) };
+    }
+
+    pub fn deinit(self: *Errors) void {
+        self.list.deinit();
+    }
+
+    pub fn add(self: *Errors, msg: []const u8, index: u32, kind: Kind) !void {
+        try self.list.push(.{
+            .msg = msg,
+            .index = index,
+            .kind = kind,
+        });
+    }
+
+    pub fn render(self: *Errors, source: []const u8, out_stream: var) !void {
         const RED = "\x1b[31;1m";
         const GREEN = "\x1b[32;1m";
         const BOLD = "\x1b[0;1m";
         const RESET = "\x1b[0m";
         const CYAN = "\x1b[36;1m";
 
-        var it = errors.iterator(0);
+        var it = self.list.iterator(0);
         while (it.next()) |e| {
             switch (e.kind) {
                 .Error => try out_stream.write(RED ++ "error: " ++ BOLD),
@@ -75,7 +95,7 @@ pub const Error = struct {
             try out_stream.writeByteNTimes(' ', e.index - start);
             try out_stream.write(GREEN ++ "^\n" ++ RESET);
         }
-        errors.shrink(0);
+        self.list.shrink(0);
     }
 
     fn lineBegin(slice: []const u8, start_index: usize) usize {

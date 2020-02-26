@@ -7,6 +7,7 @@ const Value = bog.Value;
 const RegRef = bog.RegRef;
 const Module = bog.Module;
 const Gc = bog.Gc;
+const Errors = bog.Errors;
 
 pub const Vm = struct {
     /// Instruction pointer
@@ -20,7 +21,7 @@ pub const Vm = struct {
 
     repl: bool,
 
-    errors: bog.Error.List,
+    errors: Errors,
 
     // TODO come up with better debug info
     line_loc: u32 = 0,
@@ -47,7 +48,7 @@ pub const Vm = struct {
             .gc = Gc.init(allocator),
             .call_stack = CallStack.init(allocator),
             .repl = repl,
-            .errors = bog.Error.List.init(allocator),
+            .errors = Errors.init(allocator),
         };
     }
 
@@ -705,25 +706,13 @@ pub const Vm = struct {
     }
 
     fn reportErr(vm: *Vm, msg: []const u8) Error {
-        try vm.errors.push(.{
-            .msg = msg,
-            .kind = .Error,
-            .index = vm.line_loc,
-        });
+        try vm.errors.add(msg, vm.line_loc, .Error);
         var i: u8 = 0;
         while (vm.call_stack.pop()) |some| {
-            try vm.errors.push(.{
-                .msg = "called here",
-                .kind = .Trace,
-                .index = some.line_loc,
-            });
+            try vm.errors.add("called here", some.line_loc, .Trace);
             i += 1;
             if (i > 32) {
-                try vm.errors.push(.{
-                    .msg = "too many calls, stopping now",
-                    .kind = .Note,
-                    .index = some.line_loc,
-                });
+                try vm.errors.add("too many calls, stopping now", some.line_loc, .Note);
                 break;
             }
         }

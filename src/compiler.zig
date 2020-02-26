@@ -9,11 +9,13 @@ const Tree = bog.Tree;
 const TokenList = bog.Token.List;
 const TokenIndex = bog.Token.Index;
 const RegRef = bog.RegRef;
+const Errors = bog.Errors;
 
 pub const Error = error{CompileError} || Allocator.Error;
 
 pub const Compiler = struct {
     tree: *Tree,
+    errors: *Errors,
     arena: *Allocator,
     root_scope: Scope.Fn,
     cur_scope: *Scope,
@@ -243,9 +245,11 @@ pub const Compiler = struct {
         }
     };
 
-    pub fn compile(tree: *Tree, allocator: *Allocator) (Error || bog.Parser.Error)!bog.Module {
+    pub fn compile(allocator: *Allocator, source: []const u8, errors: *Errors) (Error || bog.Parser.Error || bog.Tokenizer.Error)!bog.Module {
+        var tree = try bog.parse(allocator, source, errors);
         const arena = &tree.arena_allocator.allocator;
         var compiler = Compiler{
+            .errors = errors,
             .tree = tree,
             .arena = arena,
             .root_scope = .{
@@ -1504,11 +1508,7 @@ pub const Compiler = struct {
     }
 
     fn reportErr(self: *Compiler, msg: []const u8, tok: TokenIndex) Error {
-        try self.tree.errors.push(.{
-            .msg = msg,
-            .kind = .Error,
-            .index = self.tree.tokens.at(tok).start,
-        });
+        try self.errors.add(msg, self.tree.tokens.at(tok).start, .Error);
         return error.CompileError;
     }
 };

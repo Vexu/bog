@@ -10,16 +10,18 @@ const Tokenizer = bog.Tokenizer;
 const Tree = bog.Tree;
 const Node = bog.Node;
 const NodeList = Node.List;
+const Errors = bog.Errors;
 
 pub const Parser = struct {
     it: TokenList.Iterator,
+    errors: *Errors,
     tree: *Tree,
     arena: *Allocator,
 
     pub const Error = error{ParseError} || Allocator.Error;
 
     /// root : (stmt NL)* EOF
-    pub fn parse(allocator: *Allocator, source: []const u8) (Error || Tokenizer.Error)!*Tree {
+    pub fn parse(allocator: *Allocator, source: []const u8, errors: *Errors) (Error || Tokenizer.Error)!*Tree {
         const tree = blk: {
             var arena = std.heap.ArenaAllocator.init(allocator);
             errdefer arena.deinit();
@@ -29,7 +31,6 @@ pub const Parser = struct {
                 .arena_allocator = arena,
                 .tokens = undefined,
                 .nodes = undefined,
-                .errors = undefined,
             };
             break :blk tree;
         };
@@ -37,14 +38,14 @@ pub const Parser = struct {
         const arena = &tree.arena_allocator.allocator;
         tree.tokens = TokenList.init(arena);
         tree.nodes = NodeList.init(arena);
-        tree.errors = bog.Error.List.init(arena);
 
-        try Tokenizer.tokenize(tree);
+        try Tokenizer.tokenize(tree, errors);
 
         var parser = Parser{
             .arena = arena,
             .it = tree.tokens.iterator(0),
             .tree = tree,
+            .errors = errors,
         };
         while (true) {
             if (parser.eatToken(.Eof, true)) |_| break;
@@ -58,11 +59,12 @@ pub const Parser = struct {
         return tree;
     }
 
-    pub fn parseRepl(tree: *Tree, start_index: usize) Error!?*Node {
+    pub fn parseRepl(tree: *Tree, start_index: usize, errors: *Errors) Error!?*Node {
         var parser = Parser{
             .arena = &tree.arena_allocator.allocator,
             .it = tree.tokens.iterator(start_index),
             .tree = tree,
+            .errors = errors,
         };
         if (parser.eatToken(.Eof, true)) |_| return null;
         const ret = try parser.stmt();
@@ -966,11 +968,7 @@ pub const Parser = struct {
     }
 
     fn reportErr(parser: *Parser, msg: []const u8, tok: *Token) Error {
-        try parser.tree.errors.push(.{
-            .msg = msg,
-            .kind = .Error,
-            .index = tok.start,
-        });
+        try parser.errors.add(msg, tok.start, .Error);
         return error.ParseError;
     }
 

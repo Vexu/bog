@@ -97,11 +97,18 @@ fn debug_dump(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     }
     const source = try std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024);
 
-    var tree = try bog.parse(alloc, source);
-    var module = try tree.compile(alloc);
+    var errors = bog.Errors.init(alloc);
+    var module = bog.compile(alloc, source, &errors) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.TokenizeError, error.ParseError, error.CompileError => {
+            const stream = &std.io.getStdErr().outStream().stream;
+            try errors.render(source, stream);
+            process.exit(1);
+        },
+    };
 
     const stream = &std.io.getStdOut().outStream().stream;
-    // try module.dump(stream);
+    try module.dump(stream);
     process.exit(0);
 }
 

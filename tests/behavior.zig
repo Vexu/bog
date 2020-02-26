@@ -305,13 +305,25 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
     const alloc = &buf_alloc.allocator;
 
     var vm = Vm.init(alloc, false);
-
-    var tree = try bog.parse(alloc, source);
-    var module = try tree.compile(alloc);
+    var module = bog.compile(alloc, source, &vm.errors) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.TokenizeError, error.ParseError, error.CompileError => {
+            const stream = &std.io.getStdErr().outStream().stream;
+            try vm.errors.render(source, stream);
+            return e;
+        },
+    };
 
     // TODO this should happen in vm.exec but currently that would break repl
     vm.ip = module.start_index;
-    const res = try vm.exec(&module);
+    const res = vm.exec(&module) catch |e| switch (e) {
+        else => return e,
+        error.RuntimeError => {
+            const stream = &std.io.getStdErr().outStream().stream;
+            try vm.errors.render(source, stream);
+            return e;
+        },
+    };
     if (res) |some| {
         var out_buf = try std.Buffer.initSize(alloc, 0);
         var out_stream = std.io.BufferOutStream.init(&out_buf);

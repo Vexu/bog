@@ -6,6 +6,7 @@ const Tree = bog.Tree;
 const Tokenizer = bog.Tokenizer;
 const Compiler = bog.Compiler;
 const Vm = bog.Vm;
+const Errors = bog.Errors;
 
 pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     var arena_allocator = std.heap.ArenaAllocator.init(allocator);
@@ -16,10 +17,10 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
         .arena_allocator = arena_allocator,
         .tokens = bog.Token.List.init(arena),
         .nodes = bog.Node.List.init(arena),
-        .errors = bog.Error.List.init(arena),
     };
 
     var repl = Repl{
+        .errors = Errors.init(arena),
         .module = .{
             .name = "<stdin>",
             .code = "",
@@ -30,6 +31,7 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
         .vm = Vm.init(allocator, true),
         .buffer = try ArrayList(u8).initCapacity(allocator, std.mem.page_size),
         .tokenizer = .{
+            .errors = undefined,
             .tree = &tree,
             .it = .{
                 .bytes = "",
@@ -38,6 +40,7 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
             .repl = true,
         },
         .compiler = .{
+            .errors = undefined,
             .tree = &tree,
             .arena = arena,
             .root_scope = .{
@@ -54,18 +57,21 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
             .cur_scope = undefined,
         },
     };
+    repl.compiler.errors = &repl.errors;
+    repl.tokenizer.errors = &repl.errors;
     repl.compiler.code = &repl.compiler.root_scope.code;
     repl.compiler.cur_scope = &repl.compiler.root_scope.base;
     defer repl.vm.deinit();
     defer repl.buffer.deinit();
+    defer repl.errors.deinit();
 
     while (true) {
         repl.handleLine(in_stream, out_stream) catch |err| switch (err) {
             error.EndOfStream => return,
-            error.TokenizeError, error.ParseError, error.CompileError => try bog.Error.render(&repl.tree.errors, repl.buffer.toSliceConst(), out_stream),
+            error.TokenizeError, error.ParseError, error.CompileError => try repl.errors.render(repl.buffer.toSliceConst(), out_stream),
             error.RuntimeError => {
                 repl.vm.ip = repl.module.code.len;
-                try bog.Error.render(&repl.tree.errors, repl.buffer.toSliceConst(), out_stream);
+                try repl.errors.render(repl.buffer.toSliceConst(), out_stream);
             },
             else => |e| return e,
         };
@@ -76,6 +82,7 @@ const Repl = struct {
     vm: Vm,
     tokenizer: Tokenizer,
     tree: *Tree,
+    errors: Errors,
     buffer: ArrayList(u8),
     module: bog.Module,
     compiler: Compiler,
@@ -87,7 +94,7 @@ const Repl = struct {
         while (!(try repl.tokenizer.tokenizeRepl(repl.buffer.toSliceConst()))) {
             try repl.readLine("... ", in_stream, out_stream);
         }
-        const node = (try bog.Parser.parseRepl(repl.tree, begin_index)) orelse return;
+        const node = (try bog.Parser.parseRepl(repl.tree, begin_index, &repl.errors)) orelse return;
         repl.vm.ip += try repl.compiler.compileRepl(node, &repl.module);
 
         const res = try repl.vm.exec(&repl.module);

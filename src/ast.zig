@@ -9,7 +9,6 @@ const TokenIndex = Token.Index;
 pub const Tree = struct {
     tokens: Token.List,
     nodes: Node.List,
-    errors: bog.Error.List,
     source: []const u8,
     arena_allocator: std.heap.ArenaAllocator,
 
@@ -20,7 +19,6 @@ pub const Tree = struct {
 
     pub const tokenize = bog.Tokenizer.tokenize;
     pub const render = @import("render.zig").render;
-    pub const compile = bog.Compiler.compile;
     pub const compileRepl = bog.Compiler.compileRepl;
 };
 

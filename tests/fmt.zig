@@ -197,7 +197,15 @@ fn fmt(source: []const u8) ![]u8 {
     var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const alloc = &buf_alloc.allocator;
 
-    var tree = try bog.parse(alloc, source);
+    var errors = bog.Errors.init(alloc);
+    var tree = bog.parse(alloc, source, &errors) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.TokenizeError, error.ParseError => {
+            const stream = &std.io.getStdErr().outStream().stream;
+            try errors.render(source, stream);
+            return e;
+        },
+    };
 
     var out_buf = try std.Buffer.initSize(alloc, 0);
     var out_stream = std.io.BufferOutStream.init(&out_buf);

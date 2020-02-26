@@ -5,6 +5,7 @@ const testing = std.testing;
 const unicode = std.unicode;
 const bog = @import("bog.zig");
 const Tree = bog.Tree;
+const Errors = bog.Errors;
 
 fn isWhiteSpace(c: u32) bool {
     return switch (c) {
@@ -321,6 +322,7 @@ pub const Token = struct {
 };
 
 pub const Tokenizer = struct {
+    errors: *Errors,
     tree: *Tree,
     it: unicode.Utf8Iterator,
 
@@ -347,8 +349,9 @@ pub const Tokenizer = struct {
 
     pub const Error = error{TokenizeError} || mem.Allocator.Error;
 
-    pub fn tokenize(tree: *Tree) Error!void {
+    pub fn tokenize(tree: *Tree, errors: *Errors) Error!void {
         var tokenizer = Tokenizer{
+            .errors = errors,
             .tree = tree,
             .it = .{
                 .i = 0,
@@ -390,11 +393,11 @@ pub const Tokenizer = struct {
     }
 
     fn reportErr(self: *Tokenizer, msg: []const u8, c: u21) Error {
-        try self.tree.errors.push(.{
-            .index = @truncate(u32, self.it.i - (unicode.utf8CodepointSequenceLength(c) catch unreachable)),
-            .kind = .Error,
-            .msg = msg,
-        });
+        try self.errors.add(
+            msg,
+            @truncate(u32, self.it.i - (unicode.utf8CodepointSequenceLength(c) catch unreachable)),
+            .Error,
+        );
         self.it.i = self.it.bytes.len;
         return error.TokenizeError;
     }
@@ -1156,18 +1159,10 @@ pub const Tokenizer = struct {
     }
 };
 
-var test_tree = Tree{
-    .errors = bog.Error.List.init(std.testing.failing_allocator),
-
-    .tokens = undefined,
-    .nodes = undefined,
-    .source = undefined,
-    .arena_allocator = undefined,
-};
-
 fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
     var tokenizer = Tokenizer{
-        .tree = &test_tree,
+        .tree = undefined,
+        .errors = &Errors.init(std.testing.failing_allocator),
         .repl = false,
         .it = .{
             .i = 0,
