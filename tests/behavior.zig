@@ -305,20 +305,9 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
     const alloc = &buf_alloc.allocator;
 
     var vm = Vm.init(alloc, false);
-    var module = bog.compile(alloc, source, &vm.errors) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.TokenizeError, error.ParseError, error.CompileError => {
-            const stream = &std.io.getStdErr().outStream().stream;
-            try vm.errors.render(source, stream);
-            return e;
-        },
-    };
-
-    // TODO this should happen in vm.exec but currently that would break repl
-    vm.ip = module.start_index;
-    const res = vm.exec(&module) catch |e| switch (e) {
+    const res = run(alloc, source, &vm) catch |e| switch (e) {
         else => return e,
-        error.RuntimeError => {
+        error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
             const stream = &std.io.getStdErr().outStream().stream;
             try vm.errors.render(source, stream);
             return e;
@@ -336,4 +325,12 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
     } else {
         return error.TestFailed;
     }
+}
+
+fn run(alloc: *mem.Allocator, source: []const u8, vm: *Vm) !?*bog.Value {
+    var module = try bog.compile(alloc, source, &vm.errors);
+
+    // TODO this should happen in vm.exec but currently that would break repl
+    vm.ip = module.start_index;
+    return try vm.exec(&module);
 }

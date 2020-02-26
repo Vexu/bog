@@ -11,6 +11,7 @@ pub fn build(b: *Builder) void {
         "src/main.zig",
         "tests/fmt.zig",
         "tests/behavior.zig",
+        "tests/error.zig",
     });
 
     var exe = b.addExecutable("bog", "src/main.zig");
