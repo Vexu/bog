@@ -1,11 +1,11 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
-const lang = @import("lang.zig");
-const Tree = lang.Tree;
-const Tokenizer = lang.Tokenizer;
-const Compiler = lang.Compiler;
-const Vm = lang.Vm;
+const bog = @import("bog.zig");
+const Tree = bog.Tree;
+const Tokenizer = bog.Tokenizer;
+const Compiler = bog.Compiler;
+const Vm = bog.Vm;
 
 pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     var arena_allocator = std.heap.ArenaAllocator.init(allocator);
@@ -14,9 +14,9 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     var tree = Tree{
         .source = undefined,
         .arena_allocator = arena_allocator,
-        .tokens = lang.Token.List.init(arena),
-        .nodes = lang.Node.List.init(arena),
-        .errors = lang.Error.List.init(arena),
+        .tokens = bog.Token.List.init(arena),
+        .nodes = bog.Node.List.init(arena),
+        .errors = bog.Error.List.init(arena),
     };
 
     var repl = Repl{
@@ -62,10 +62,10 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     while (true) {
         repl.handleLine(in_stream, out_stream) catch |err| switch (err) {
             error.EndOfStream => return,
-            error.TokenizeError, error.ParseError, error.CompileError => try lang.Error.render(&repl.tree.errors, repl.buffer.toSliceConst(), out_stream),
+            error.TokenizeError, error.ParseError, error.CompileError => try bog.Error.render(&repl.tree.errors, repl.buffer.toSliceConst(), out_stream),
             error.RuntimeError => {
                 repl.vm.ip = repl.module.code.len;
-                try lang.Error.render(&repl.tree.errors, repl.buffer.toSliceConst(), out_stream);
+                try bog.Error.render(&repl.tree.errors, repl.buffer.toSliceConst(), out_stream);
             },
             else => |e| return e,
         };
@@ -77,7 +77,7 @@ const Repl = struct {
     tokenizer: Tokenizer,
     tree: *Tree,
     buffer: ArrayList(u8),
-    module: lang.Module,
+    module: bog.Module,
     compiler: Compiler,
 
     fn handleLine(repl: *Repl, in_stream: var, out_stream: var) !void {
@@ -87,7 +87,7 @@ const Repl = struct {
         while (!(try repl.tokenizer.tokenizeRepl(repl.buffer.toSliceConst()))) {
             try repl.readLine("... ", in_stream, out_stream);
         }
-        const node = (try lang.Parser.parseRepl(repl.tree, begin_index)) orelse return;
+        const node = (try bog.Parser.parseRepl(repl.tree, begin_index)) orelse return;
         repl.vm.ip += try repl.compiler.compileRepl(node, &repl.module);
 
         const res = try repl.vm.exec(&repl.module);

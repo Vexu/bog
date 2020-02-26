@@ -1,9 +1,9 @@
 const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
-const lang = @import("lang.zig");
-const Value = lang.Value;
-const Vm = lang.Vm;
+const bog = @import("bog.zig");
+const Value = bog.Value;
+const Vm = bog.Vm;
 
 pub const NativeError = error{
     TypeError,

@@ -22,6 +22,9 @@ pub const Value = value.Value;
 const vm = @import("vm.zig");
 pub const Vm = vm.Vm;
 
+const gc = @import("gc.zig");
+pub const Gc = gc.Gc;
+
 const bytecode = @import("bytecode.zig");
 pub const Op = bytecode.Op;
 pub const Module = bytecode.Module;
@@ -29,6 +32,12 @@ pub const RegRef = bytecode.RegRef;
 
 const native = @import("native.zig");
 pub const NativeFn = native.NativeFn;
+
+/// file extension of bog text files
+pub const extension = ".bog";
+
+/// file extension of bog bytecode files, 'byte bog'
+pub const bytecode_extension = ".bbog";
 
 pub const Error = struct {
     index: u32,

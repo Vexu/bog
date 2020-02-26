@@ -295,8 +295,8 @@ const std = @import("std");
 const mem = std.mem;
 const warn = std.debug.warn;
 const testing = std.testing;
-const lang = @import("lang");
-const Vm = lang.Vm;
+const bog = @import("bog");
+const Vm = bog.Vm;
 
 var buffer: [10 * 1024]u8 = undefined;
 
@@ -306,7 +306,7 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
 
     var vm = Vm.init(alloc, false);
 
-    var tree = try lang.parse(alloc, source);
+    var tree = try bog.parse(alloc, source);
     var module = try tree.compile(alloc);
 
     // TODO this should happen in vm.exec but currently that would break repl

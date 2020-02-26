@@ -2,7 +2,7 @@ const Builder = @import("std").build.Builder;
 
 pub fn build(b: *Builder) void {
     const mode = b.standardReleaseOptions();
-    // const lib = b.addStaticLibrary("lang", "src/lib.zig");
+    // const lib = b.addStaticLibrary("bog", "src/lib.zig");
     // lib.setBuildMode(mode);
     // lib.linkSystemLibrary("c");
     // lib.install();
@@ -13,7 +13,7 @@ pub fn build(b: *Builder) void {
         "tests/behavior.zig",
     });
 
-    var exe = b.addExecutable("lang", "src/main.zig");
+    var exe = b.addExecutable("bog", "src/main.zig");
     exe.setBuildMode(mode);
     exe.install();
 
@@ -34,7 +34,7 @@ fn addTests(b: *Builder, mode: var, tests: var) void {
     inline for (tests) |t| {
         var test_step = b.addTest(t);
         test_step.setBuildMode(mode);
-        test_step.addPackagePath("lang", "src/lang.zig");
+        test_step.addPackagePath("bog", "src/bog.zig");
         tests_step.dependOn(&test_step.step);
     }
 }

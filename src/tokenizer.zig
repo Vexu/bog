@@ -3,8 +3,8 @@ const mem = std.mem;
 const math = std.math;
 const testing = std.testing;
 const unicode = std.unicode;
-const lang = @import("lang.zig");
-const Tree = lang.Tree;
+const bog = @import("bog.zig");
+const Tree = bog.Tree;
 
 fn isWhiteSpace(c: u32) bool {
     return switch (c) {
@@ -1157,7 +1157,7 @@ pub const Tokenizer = struct {
 };
 
 var test_tree = Tree{
-    .errors = lang.Error.List.init(std.testing.failing_allocator),
+    .errors = bog.Error.List.init(std.testing.failing_allocator),
 
     .tokens = undefined,
     .nodes = undefined,

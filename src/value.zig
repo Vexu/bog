@@ -1,7 +1,9 @@
 const std = @import("std");
 const mem = std.mem;
-const lang = @import("lang.zig");
-const Vm = lang.Vm;
+const bog = @import("bog.zig");
+const Vm = bog.Vm;
+const Module = bog.Module;
+const NativeFn = bog.NativeFn;
 
 pub const Value = struct {
     pub const TypeId = enum(u8) {
@@ -48,12 +50,12 @@ pub const Value = struct {
             arg_count: u8,
 
             /// module in which this function exists
-            module: *lang.Module,
+            module: *Module,
         },
         Native: struct {
             arg_count: u8,
 
-            func: lang.NativeFn,
+            func: NativeFn,
         },
 
         /// always memoized

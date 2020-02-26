@@ -2,14 +2,14 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const TypeId = @import("value.zig").TypeId;
 
-const lang = @import("lang.zig");
-const Token = lang.Token;
+const bog = @import("bog.zig");
+const Token = bog.Token;
 const TokenIndex = Token.Index;
 
 pub const Tree = struct {
     tokens: Token.List,
     nodes: Node.List,
-    errors: lang.Error.List,
+    errors: bog.Error.List,
     source: []const u8,
     arena_allocator: std.heap.ArenaAllocator,
 
@@ -18,10 +18,10 @@ pub const Tree = struct {
         arena.deinit();
     }
 
-    pub const tokenize = lang.Tokenizer.tokenize;
+    pub const tokenize = bog.Tokenizer.tokenize;
     pub const render = @import("render.zig").render;
-    pub const compile = lang.Compiler.compile;
-    pub const compileRepl = lang.Compiler.compileRepl;
+    pub const compile = bog.Compiler.compile;
+    pub const compileRepl = bog.Compiler.compileRepl;
 };
 
 pub const Node = struct {

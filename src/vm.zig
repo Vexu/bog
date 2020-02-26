@@ -1,11 +1,12 @@
 const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
-const lang = @import("lang.zig");
-const Op = lang.Op;
-const Value = lang.Value;
-const RegRef = lang.RegRef;
-const Gc = @import("gc.zig").Gc;
+const bog = @import("bog.zig");
+const Op = bog.Op;
+const Value = bog.Value;
+const RegRef = bog.RegRef;
+const Module = bog.Module;
+const Gc = bog.Gc;
 
 pub const Vm = struct {
     /// Instruction pointer
@@ -19,7 +20,7 @@ pub const Vm = struct {
 
     repl: bool,
 
-    errors: lang.Error.List,
+    errors: bog.Error.List,
 
     // TODO come up with better debug info
     line_loc: u32 = 0,
@@ -46,7 +47,7 @@ pub const Vm = struct {
             .gc = Gc.init(allocator),
             .call_stack = CallStack.init(allocator),
             .repl = repl,
-            .errors = lang.Error.List.init(allocator),
+            .errors = bog.Error.List.init(allocator),
         };
     }
 
@@ -57,7 +58,7 @@ pub const Vm = struct {
     }
 
     // TODO rename to step and execute 1 instruction
-    pub fn exec(vm: *Vm, module: *lang.Module) Error!?*Value {
+    pub fn exec(vm: *Vm, module: *Module) Error!?*Value {
         while (vm.ip < module.code.len) {
             const op = @intToEnum(Op, vm.getArg(module, u8));
             switch (op) {
@@ -492,7 +493,7 @@ pub const Vm = struct {
                     A_val.* = .{
                         .kind = .{
                             // TODO gc this
-                            .List = try lang.Value.List.initCapacity(vm.call_stack.allocator, arg_count),
+                            .List = try Value.List.initCapacity(vm.call_stack.allocator, arg_count),
                         },
                     };
 
@@ -635,27 +636,27 @@ pub const Vm = struct {
         return null;
     }
 
-    fn getArg(vm: *Vm, module: *lang.Module, comptime T: type) T {
+    fn getArg(vm: *Vm, module: *Module, comptime T: type) T {
         const val = @ptrCast(*align(1) const T, module.code[vm.ip..].ptr).*;
         vm.ip += @sizeOf(T);
         return val;
     }
 
-    fn getVal(vm: *Vm, module: *lang.Module) !*Value {
+    fn getVal(vm: *Vm, module: *Module) !*Value {
         return vm.gc.stackGet(vm.getArg(module, RegRef) + vm.sp) catch
             return error.MalformedByteCode;
     }
 
-    fn getRef(vm: *Vm, module: *lang.Module) !*?*Value {
+    fn getRef(vm: *Vm, module: *Module) !*?*Value {
         return try vm.gc.stackRef(vm.getArg(module, RegRef) + vm.sp);
     }
 
-    fn getNewVal(vm: *Vm, module: *lang.Module) !*Value {
+    fn getNewVal(vm: *Vm, module: *Module) !*Value {
         return vm.gc.stackAlloc(vm.getArg(module, RegRef) + vm.sp) catch
             return error.MalformedByteCode;
     }
 
-    fn getBool(vm: *Vm, module: *lang.Module) !bool {
+    fn getBool(vm: *Vm, module: *Module) !bool {
         const val = try vm.getVal(module);
 
         if (val.kind != .Bool) {
@@ -664,7 +665,7 @@ pub const Vm = struct {
         return val.kind.Bool;
     }
 
-    fn getInt(vm: *Vm, module: *lang.Module) !i64 {
+    fn getInt(vm: *Vm, module: *Module) !i64 {
         const val = try vm.getVal(module);
 
         if (val.kind != .Int) {
@@ -673,7 +674,7 @@ pub const Vm = struct {
         return val.kind.Int;
     }
 
-    fn getIntRef(vm: *Vm, module: *lang.Module) !*Value {
+    fn getIntRef(vm: *Vm, module: *Module) !*Value {
         const val = try vm.getVal(module);
 
         if (val.kind != .Int) {
@@ -682,7 +683,7 @@ pub const Vm = struct {
         return val;
     }
 
-    fn getNum(vm: *Vm, module: *lang.Module) !*Value {
+    fn getNum(vm: *Vm, module: *Module) !*Value {
         const val = try vm.getVal(module);
 
         if (val.kind != .Int and val.kind != .Num) {

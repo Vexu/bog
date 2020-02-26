@@ -2,7 +2,7 @@ const std = @import("std");
 const process = std.process;
 const mem = std.mem;
 const repl = @import("repl.zig");
-const lang = @import("lang.zig");
+const bog = @import("bog.zig");
 
 const is_debug = @import("builtin").mode == .Debug;
 
@@ -36,7 +36,7 @@ pub fn main() !void {
 }
 
 const usage =
-    \\usage: lang [command] [options] [-- [args]]
+    \\usage: bog [command] [options] [-- [args]]
     \\
     \\Commands:
     \\
@@ -57,7 +57,7 @@ fn run(alloc: *std.mem.Allocator, args: [][]const u8) void {
 }
 
 const usage_fmt =
-    \\usage: lang fmt [file]...
+    \\usage: bog fmt [file]...
     \\
     \\   Formats the input files.
     \\
@@ -71,8 +71,8 @@ fn fmt(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     // TODO handle dirs
     const source = try std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024);
 
-    // var tree = lang.parse(alloc, source) catch |e| switch (e) {
-    //     error.TokenizeError, error.ParseError => try lang.Error.render(tree.errors, repl.buffer.toSliceConst(), out_stream),
+    // var tree = bog.parse(alloc, source) catch |e| switch (e) {
+    //     error.TokenizeError, error.ParseError => try bog.Error.render(tree.errors, repl.buffer.toSliceConst(), out_stream),
     //     error.OutOfMemory => return error.OutOfMemory,
     // };
 
@@ -97,7 +97,7 @@ fn debug_dump(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     }
     const source = try std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024);
 
-    var tree = try lang.parse(alloc, source);
+    var tree = try bog.parse(alloc, source);
     var module = try tree.compile(alloc);
 
     const stream = &std.io.getStdOut().outStream().stream;

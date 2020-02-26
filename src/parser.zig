@@ -2,13 +2,13 @@ const std = @import("std");
 const mem = std.mem;
 const testing = std.testing;
 const Allocator = mem.Allocator;
-const lang = @import("lang.zig");
-const Token = lang.Token;
+const bog = @import("bog.zig");
+const Token = bog.Token;
 const TokenList = Token.List;
 const TokenIndex = Token.Index;
-const Tokenizer = lang.Tokenizer;
-const Tree = lang.Tree;
-const Node = lang.Node;
+const Tokenizer = bog.Tokenizer;
+const Tree = bog.Tree;
+const Node = bog.Node;
 const NodeList = Node.List;
 
 pub const Parser = struct {
@@ -37,7 +37,7 @@ pub const Parser = struct {
         const arena = &tree.arena_allocator.allocator;
         tree.tokens = TokenList.init(arena);
         tree.nodes = NodeList.init(arena);
-        tree.errors = lang.Error.List.init(arena);
+        tree.errors = bog.Error.List.init(arena);
 
         try Tokenizer.tokenize(tree);
 

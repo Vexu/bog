@@ -1,9 +1,9 @@
 const std = @import("std");
-const lang = @import("lang.zig");
-const Tree = lang.Tree;
-const Node = lang.Node;
-const TokenList = lang.Token.List;
-const TokenIndex = lang.Token.Index;
+const bog = @import("bog.zig");
+const Tree = bog.Tree;
+const Node = bog.Node;
+const TokenList = bog.Token.List;
+const TokenIndex = bog.Token.Index;
 
 pub fn render(tree: *Tree, stream: var) @TypeOf(stream).Child.Error!void {
     var renderer = Renderer{
