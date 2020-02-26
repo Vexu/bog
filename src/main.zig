@@ -4,6 +4,8 @@ const mem = std.mem;
 const repl = @import("repl.zig");
 const lang = @import("lang.zig");
 
+const is_debug = @import("builtin").mode == .Debug;
+
 pub fn main() !void {
     const alloc = std.heap.page_allocator;
 
@@ -12,9 +14,16 @@ pub fn main() !void {
     if (args.len > 1) {
         if (mem.eql(u8, args[1], "fmt")) {
             return fmt(alloc, args[2..]);
-        } else if (mem.eql(u8, args[1], "help") or mem.eql(u8, args[1], "--help")) {
+        }
+        if (mem.eql(u8, args[1], "help") or mem.eql(u8, args[1], "--help")) {
             return help();
-        } else if (!mem.startsWith(u8, "-", args[1])) {
+        }
+        if (is_debug) {
+            if (mem.eql(u8, args[1], "debug:dump")) {
+                return debug_dump(alloc, args[2..]);
+            }
+        }
+        if (!mem.startsWith(u8, "-", args[1])) {
             return run(alloc, args[1..]);
         }
     }
@@ -57,18 +66,43 @@ const usage_fmt =
 
 fn fmt(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     if (args.len == 0) {
-        const stdout = &std.io.getStdOut().outStream().stream;
-        try stdout.print(usage_fmt, .{});
-        process.exit(0);
+        print_and_exit(usage_fmt);
     }
-    @panic("TODO: fmt");
+    // TODO handle dirs
+    const source = try std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024);
 
-    // var tree = try lang.parse(alloc, source);
+    // var tree = lang.parse(alloc, source) catch |e| switch (e) {
+    //     error.TokenizeError, error.ParseError => try lang.Error.render(tree.errors, repl.buffer.toSliceConst(), out_stream),
+    //     error.OutOfMemory => return error.OutOfMemory,
+    // };
 
-    // var out_buf = try std.Buffer.initSize(alloc, 0);
-    // var out_stream = std.io.BufferOutStream.init(&out_buf);
-    // try tree.render(&out_stream.stream);
-    // return out_buf.toOwnedSlice();
+    // const file = try std.fs.cwd().openFile(args[0], .{ .write = true, .read = false });
+
+    // var out_stream = &file.outStream().stream;
+    // try tree.render(out_stream);
+
+    // file.close();
+    // process.exit(0);
+}
+
+fn print_and_exit(msg: []const u8) noreturn {
+    const stderr = &std.io.getStdErr().outStream().stream;
+    stderr.print("{}\n", .{msg}) catch {};
+    process.exit(1);
+}
+
+fn debug_dump(alloc: *std.mem.Allocator, args: [][]const u8) !void {
+    if (args.len != 1) {
+        print_and_exit("expected one argument");
+    }
+    const source = try std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024);
+
+    var tree = try lang.parse(alloc, source);
+    var module = try tree.compile(alloc);
+
+    const stream = &std.io.getStdOut().outStream().stream;
+    // try module.dump(stream);
+    process.exit(0);
 }
 
 comptime {

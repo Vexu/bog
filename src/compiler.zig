@@ -553,6 +553,7 @@ pub const Compiler = struct {
         }
 
         // jump past else_body since if_body was executed
+        // TODO this jump is unnecessary if res != .Rt and else_body == null
         try self.emitInstruction(.Jump, .{@as(u32, 0)});
         const addr2 = self.code.len;
 

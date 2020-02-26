@@ -39,4 +39,39 @@ pub const Error = struct {
     };
 
     pub const List = std.SegmentedList(Error, 0);
+
+    pub fn render(errors: *List, source: []const u8, out_stream: var) !void {
+        const RED = "\x1b[31;1m";
+        const GREEN = "\x1b[32;1m";
+        const BOLD = "\x1b[0;1m";
+        const RESET = "\x1b[0m";
+        const CYAN = "\x1b[36;1m";
+
+        var it = errors.iterator(0);
+        while (it.next()) |e| {
+            switch (e.kind) {
+                .Error => try out_stream.write(RED ++ "error: " ++ BOLD),
+                .Note => try out_stream.write(CYAN ++ "note: " ++ BOLD),
+                .Trace => {},
+            }
+            try out_stream.print("{}\n" ++ RESET, .{e.msg});
+
+            const start = lineBegin(source, e.index);
+            const end = std.mem.indexOfScalarPos(u8, source, e.index, '\n') orelse source.len;
+            try out_stream.write(source[start..end]);
+            try out_stream.write(std.cstr.line_sep);
+            try out_stream.writeByteNTimes(' ', e.index - start);
+            try out_stream.write(GREEN ++ "^\n" ++ RESET);
+        }
+        errors.shrink(0);
+    }
+
+    fn lineBegin(slice: []const u8, start_index: usize) usize {
+        var i = start_index;
+        while (i != 0) {
+            i -= 1;
+            if (slice[i] == '\n') return i + 1;
+        }
+        return 0;
+    }
 };

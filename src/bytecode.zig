@@ -190,10 +190,10 @@ pub const Module = struct {
         var ip: usize = 0;
         while (ip < module.code.len) {
             if (ip == module.start_index) {
-                try stream.print("\nentry@0x{X}\n", .{module.start_index});
+                try stream.write("\nentry:");
             }
             const op = module.getArg(Op, &ip);
-            try stream.write(@tagName(op));
+            try stream.print("\n  {} ", .{@tagName(op)});
             switch (op) {
                 // A i8
                 .ConstPrimitive, .ConstInt8 => {
