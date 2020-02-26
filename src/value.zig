@@ -55,7 +55,9 @@ pub const Value = struct {
         Native: struct {
             arg_count: u8,
 
-            func: NativeFn,
+            // TODO this causes a dependency loop??
+            // func: NativeFn,
+            func: fn()void,
         },
 
         /// always memoized
