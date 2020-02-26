@@ -522,6 +522,7 @@ pub const Vm = struct {
                             .Fn = .{
                                 .arg_count = arg_count,
                                 .offset = offset,
+                                .module = module,
                             },
                         },
                     };
@@ -548,7 +549,7 @@ pub const Vm = struct {
                     // Value.as will hit unreachable on invalid type_id
                     switch (type_id) {
                         .None, .Int, .Num, .Bool, .Str, .Tuple, .Map, .List => {},
-                        .Error, .Range, .Fn => return error.MalformedByteCode,
+                        .Error, .Range, .Fn, .Native => return error.MalformedByteCode,
                         _ => return error.MalformedByteCode,
                     }
 

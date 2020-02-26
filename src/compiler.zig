@@ -844,6 +844,7 @@ pub const Compiler = struct {
                 .Error => return self.reportErr("cannot cast to error", node.type_tok),
                 .Range => return self.reportErr("cannot cast to range", node.type_tok),
                 .Tuple, .Map, .List => return self.reportErr("invalid cast", node.type_tok),
+                .Native => unreachable,
                 _ => unreachable,
             },
             .Is => Value{

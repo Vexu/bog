@@ -27,6 +27,9 @@ pub const Op = bytecode.Op;
 pub const Module = bytecode.Module;
 pub const RegRef = bytecode.RegRef;
 
+const native = @import("native.zig");
+pub const NativeFn = native.NativeFn;
+
 pub const Error = struct {
     index: u32,
     kind: Kind,

@@ -3,6 +3,7 @@ const mem = std.mem;
 const Allocator = mem.Allocator;
 const lang = @import("lang.zig");
 const Value = lang.Value;
+const Vm = lang.Vm;
 
 pub const NativeError = error{
     TypeError,

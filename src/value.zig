@@ -16,6 +16,9 @@ pub const Value = struct {
         Error,
         Range,
         Fn,
+
+        /// Native being separate from .Fn is an implementation detail
+        Native,
         _,
     };
 
@@ -43,6 +46,14 @@ pub const Value = struct {
             /// offset to the functions first instruction
             offset: u32,
             arg_count: u8,
+
+            /// module in which this function exists
+            module: *lang.Module,
+        },
+        Native: struct {
+            arg_count: u8,
+
+            func: lang.NativeFn,
         },
 
         /// always memoized
@@ -75,6 +86,7 @@ pub const Value = struct {
             else => if (a.kind != @as(@TagType(@TypeOf(b.kind)), b.kind)) return false,
         }
         return switch (a.kind) {
+            .Int, .Num => unreachable,
             .None => true,
             .Bool => |val| val == b.kind.Bool,
             .Str => |val| {
@@ -102,9 +114,12 @@ pub const Value = struct {
             .Range => |val| @panic("TODO eql for ranges"),
             .Fn => |val| {
                 const b_val = b.kind.Fn;
-                return val.offset == b_val.offset and val.arg_count == b_val.arg_count;
+                return val.offset == b_val.offset and
+                    val.arg_count == b_val.arg_count and
+                    val.module == b_val.module;
             },
-            else => unreachable,
+            .Native => |val| return val.func == b.kind.Native.func,
+            _ => unreachable,
         };
     }
 
@@ -181,7 +196,10 @@ pub const Value = struct {
                 try stream.writeByte('"');
             },
             .Fn => |val| {
-                try stream.print("fn({})", .{val.arg_count});
+                try stream.print("fn({})@0x{X}", .{ val.arg_count, val.offset });
+            },
+            .Native => |val| {
+                try stream.print("native({})@0x{}", .{ val.arg_count, @ptrToInt(val.func) });
             },
             _ => unreachable,
         }
@@ -191,7 +209,7 @@ pub const Value = struct {
         if (value.marked) return;
         value.marked = true;
         switch (value.kind) {
-            .None, .Int, .Num, .Fn, .Bool, .Str => {},
+            .None, .Int, .Num, .Fn, .Bool, .Str, .Native => {},
 
             .Tuple => |val| for (val) |v| v.mark(),
             .Map => @panic("TODO mark for maps"),
@@ -273,7 +291,7 @@ pub const Value = struct {
         }
     }
 
-    /// `type_id` must be valid and cannot be .Error, .Range or .Fn
+    /// `type_id` must be valid and cannot be .Error, .Range, .Fn or .Native
     pub fn as(val: *Value, type_id: TypeId, vm: *Vm) !*Value {
         if (type_id == .None) {
             return &Value.None;
@@ -301,7 +319,7 @@ pub const Value = struct {
 
         const new_val = try vm.gc.alloc();
         new_val.* = switch (type_id) {
-            .Bool, .None, .Error, .Range, .Fn => unreachable,
+            .Bool, .None, .Error, .Range, .Fn, .Native => unreachable,
             .Int => .{
                 .kind = .{
                     .Int = switch (val.kind) {
