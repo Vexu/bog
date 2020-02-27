@@ -189,8 +189,11 @@ pub const Module = struct {
             if (ip == module.start_index) {
                 try stream.write("\nentry:");
             }
+            const this_offset = ip;
             const op = module.getArg(Op, &ip);
-            try stream.print("\n  {} ", .{@tagName(op)});
+            if (op != .LineInfo) {
+                try stream.print("\n {: <5} {} ", .{ this_offset, @tagName(op) });
+            }
             switch (op) {
                 // A i8
                 .ConstPrimitive, .ConstInt8 => {
@@ -318,7 +321,6 @@ pub const Module = struct {
                 // u32
                 .LineInfo => {
                     const arg_1 = module.getArg(u32, &ip);
-                    try stream.print(" {}\n", .{arg_1});
                 },
 
                 // A B TYPEID

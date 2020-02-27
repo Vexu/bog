@@ -3,7 +3,7 @@ test "const value not modified by function" {
         \\const x = 2
         \\const inc = fn(n) n += 1
         \\inc(x)
-        \\x
+        \\return x
     ,
         \\2
     );
@@ -14,7 +14,7 @@ test "in" {
         \\let y = [1,2,3]
         \\if (not true in y)
         \\    y[-2] = false
-        \\y == [1, false, 3]
+        \\return y == [1, false, 3]
     ,
         \\true
     );
@@ -24,7 +24,7 @@ test "get/set" {
     try expectOutput(
         \\let y = [1,2,3]
         \\y[-2] = true
-        \\y[1]
+        \\return y[1]
     ,
         \\true
     );
@@ -34,14 +34,14 @@ test "mixed num and int" {
     try expectOutput(
         \\let y = 2
         \\y /= 5
-        \\y
+        \\return y
     ,
         \\0.4
     );
     try expectOutput(
         \\let y = 2
         \\y **= 0.5
-        \\y
+        \\return y
     ,
         \\1.4142135623730951
     );
@@ -52,7 +52,7 @@ test "copy on assign" {
         \\const x = 2
         \\let y = x
         \\y += 2
-        \\x
+        \\return x
     ,
         \\2
     );
@@ -60,7 +60,7 @@ test "copy on assign" {
         \\let y = 2
         \\const inc = fn (a) a+=2
         \\inc(y)
-        \\y
+        \\return y
     ,
         \\4
     );
@@ -78,7 +78,7 @@ test "try" {
 test "catch" {
     try expectOutput(
         \\const err = fn() error("foo")
-        \\err() catch "success"
+        \\return err() catch "success"
     ,
         \\"success"
     );
@@ -87,7 +87,7 @@ test "catch" {
 test "strigs" {
     try expectOutput(
         \\const a = "hello"
-        \\if (a == "world") 2 as str else 1.5 as str
+        \\return if (a == "world") 2 as str else 1.5 as str
     ,
         \\"1.5"
     );
@@ -98,7 +98,7 @@ test "comparision" {
         \\let a = 0
         \\while (a != 1000)
         \\    a += 1
-        \\a
+        \\return a
     ,
         \\1000
     );
@@ -113,7 +113,7 @@ test "while loop" {
         \\    else
         \\        let x = 2
         \\    break
-        \\true
+        \\return true
     ,
         \\true
     );
@@ -122,7 +122,7 @@ test "while loop" {
 test "subscript" {
     try expectOutput(
         \\const y = (1,2)
-        \\y[-1]
+        \\return y[-1]
     ,
         \\2
     );
@@ -131,7 +131,7 @@ test "subscript" {
 test "assert" {
     try expectOutput(
         \\const assert = fn (ok) if (not ok) error(false)
-        \\assert(not false)
+        \\return assert(not false)
     ,
         \\()
     );
@@ -141,14 +141,14 @@ test "functions" {
     try expectOutput(
         \\const add = fn ((a,b)) a + b
         \\const tuplify = fn (a,b) (a,b)
-        \\add(tuplify(1,2))
+        \\return add(tuplify(1,2))
     ,
         \\3
     );
     try expectOutput(
         \\const add = fn (a,b) a + b
         \\const sub = fn (a,b) a - b
-        \\sub(add(3,4), add(1,2))
+        \\return sub(add(3,4), add(1,2))
     ,
         \\4
     );
@@ -156,18 +156,18 @@ test "functions" {
 
 test "type casting" {
     try expectOutput(
-        \\1 as none
+        \\return 1 as none
     ,
         \\()
     );
     try expectOutput(
-        \\1 as bool
+        \\return 1 as bool
     ,
         \\true
     );
     try expectOutput(
         \\let y = 2.5
-        \\y as int
+        \\return y as int
     ,
         \\2
     );
@@ -175,17 +175,17 @@ test "type casting" {
 
 test "type checking" {
     try expectOutput(
-        \\1 is int
+        \\return 1 is int
     ,
         \\true
     );
     try expectOutput(
-        \\1 is num
+        \\return 1 is num
     ,
         \\false
     );
     try expectOutput(
-        \\(1,) is tuple
+        \\return (1,) is tuple
     ,
         \\true
     );
@@ -195,7 +195,7 @@ test "tuple destructuring" {
     // TODO should destructuring different sized tuples be an error?
     try expectOutput(
         \\let (a, b, _, c) = (1, 2, 3, 4, 5)
-        \\(a + b) * c
+        \\return (a + b) * c
     ,
         \\12
     );
@@ -203,7 +203,7 @@ test "tuple destructuring" {
 
 test "tuple" {
     try expectOutput(
-        \\(1, 2, 3, 4, 22.4)
+        \\return (1, 2, 3, 4, 22.400)
     ,
         \\(1, 2, 3, 4, 22.4)
     );
@@ -212,7 +212,7 @@ test "tuple" {
 test "bool if" {
     try expectOutput(
         \\const x = not false
-        \\3 + if (not x) 2 else if (x) 4 else 9
+        \\return 3 + if (not x) 2 else if (x) 4 else 9
     ,
         \\7
     );
@@ -223,7 +223,7 @@ test "assignment" {
         \\let x = 2
         \\let y = -3
         \\x **= -y
-        \\x
+        \\return x
     ,
         \\8
     );
@@ -234,7 +234,7 @@ test "basic math" {
         \\let x = 2
         \\let y = x * 5
         \\let z = 90
-        \\y // x * z
+        \\return y // x * z
     ,
         \\450
     );
@@ -243,13 +243,13 @@ test "basic math" {
 test "basic variables" {
     try expectOutput(
         \\let x = 12
-        \\x
+        \\return x
     ,
         \\12
     );
     try expectOutput(
         \\let x = true
-        \\not x
+        \\return not x
     ,
         \\false
     );
@@ -257,17 +257,17 @@ test "basic variables" {
 
 test "number literals" {
     try expectOutput(
-        \\12
+        \\return 12
     ,
         \\12
     );
     try expectOutput(
-        \\0x12
+        \\return 0x12
     ,
         \\18
     );
     try expectOutput(
-        \\0o12
+        \\return 0o12
     ,
         \\10
     );
@@ -275,17 +275,17 @@ test "number literals" {
 
 test "constant values" {
     try expectOutput(
-        \\true
+        \\return true
     ,
         \\true
     );
     try expectOutput(
-        \\not true
+        \\return not true
     ,
         \\false
     );
     try expectOutput(
-        \\-12
+        \\return -12
     ,
         \\-12
     );

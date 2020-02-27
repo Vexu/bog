@@ -76,6 +76,12 @@ fn run(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     if (res) |some| {
         if (some.kind == .Int and some.kind.Int > 0 and some.kind.Int < std.math.maxInt(u8)) {
             process.exit(@intCast(u8, some.kind.Int));
+        } else if (some.kind == .Error) {
+            const stderr = &std.io.getStdErr().outStream().stream;
+            try stderr.write("script exited with error: ");
+            try some.kind.Error.dump(stderr, 4);
+            try stderr.write("\n");
+            process.exit(1);
         }
         print_and_exit("invalid return type '{}'", .{@tagName(some.kind)});
     }

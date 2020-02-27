@@ -277,19 +277,8 @@ pub const Compiler = struct {
         while (it.next()) |n| {
             try compiler.addLineInfo(n.*);
 
-            const last = it.peek() == null;
-            const res = if (last)
-                Result{ .Value = {} }
-            else
-                Result{ .Discard = {} };
-
-            const val = try compiler.genNode(n.*, res);
-            if (last) {
-                const reg = try val.toRt(&compiler);
-                defer val.free(&compiler, reg);
-
-                try compiler.emitInstruction(.Return, .{reg});
-            } else if (val.isRt()) {
+            const val = try compiler.genNode(n.*, .Discard);
+            if (val.isRt()) {
                 const reg = val.getRt();
                 defer val.free(&compiler, reg);
                 // discard unused runtime value
@@ -471,7 +460,7 @@ pub const Compiler = struct {
 
         // gen body and return result
         try self.addLineInfo(node.body);
-        const body_val = try self.genNode(node.body, .Value);
+        const body_val = try self.genNode(node.body, .Discard);
         // TODO if body_val == .Empty because last instruction was a return
         // then this return is not necessary
         if (body_val == .Empty or body_val == .None) {
@@ -975,7 +964,7 @@ pub const Compiler = struct {
     }
 
     fn genAssignInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
-        if (res == .Rt) {
+        if (res != .Discard) {
             return self.reportErr("assignment produces no value", node.tok);
         }
         const r_val = try self.genNodeNonEmpty(node.rhs, .Value);
