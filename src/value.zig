@@ -55,7 +55,7 @@ pub const Value = struct {
         Native: struct {
             arg_count: u8,
 
-            // TODO this causes a dependency loop??
+            // TODO this causes a dependency loop https://github.com/ziglang/zig/issues/4562
             // func: NativeFn,
             func: fn()void,
         },

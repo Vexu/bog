@@ -48,12 +48,45 @@ const usage =
 
 fn help() !void {
     const stdout = &std.io.getStdOut().outStream().stream;
-    try stdout.print(usage, .{});
+    try stdout.write(usage);
     process.exit(0);
 }
 
-fn run(alloc: *std.mem.Allocator, args: [][]const u8) void {
-    @panic("TODO: run");
+fn run(alloc: *std.mem.Allocator, args: [][]const u8) !void {
+    std.debug.assert(args.len > 0);
+    var bytecode = false;
+    if (mem.endsWith(u8, args[0], bog.bytecode_extension)) {
+        bytecode = true;
+    }
+
+    var vm = bog.Vm.init(alloc, false);
+    defer vm.deinit();
+
+    const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => |err| {
+            print_and_exit("unable to open '{}': {}", .{ args[0], err });
+        },
+    };
+    const res = run_source(alloc, &vm, source) catch |e| switch (e) {
+        error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => print_errors_and_exit(&vm.errors, source),
+        error.MalformedByteCode => print_and_exit("attempted to execute invalid bytecode", .{}),
+        error.OutOfMemory => return error.OutOfMemory,
+    };
+    if (res) |some| {
+        if (some.kind == .Int and some.kind.Int > 0 and some.kind.Int < std.math.maxInt(u8)) {
+            process.exit(@intCast(u8, some.kind.Int));
+        }
+        print_and_exit("invalid return type '{}'", .{@tagName(some.kind)});
+    }
+}
+
+fn run_source(alloc: *std.mem.Allocator, vm: *bog.Vm, source: []const u8) !?*bog.Value {
+    var module = try bog.compile(alloc, source, &vm.errors);
+
+    // TODO this should happen in vm.exec but currently that would break repl
+    vm.ip = module.start_index;
+    return try vm.exec(&module);
 }
 
 const usage_fmt =
@@ -61,41 +94,59 @@ const usage_fmt =
     \\
     \\   Formats the input files.
     \\
-    \\
 ;
 
 fn fmt(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     if (args.len == 0) {
-        print_and_exit(usage_fmt);
+        print_and_exit(usage_fmt, .{});
     }
     // TODO handle dirs
-    const source = try std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024);
+    const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.IsDir => print_and_exit("TODO fmt dirs", .{}),
+        else => |err| {
+            print_and_exit("unable to open '{}': {}", .{ args[0], err });
+        },
+    };
 
-    // var tree = bog.parse(alloc, source) catch |e| switch (e) {
-    //     error.TokenizeError, error.ParseError => try bog.Error.render(tree.errors, repl.buffer.toSliceConst(), out_stream),
-    //     error.OutOfMemory => return error.OutOfMemory,
-    // };
+    var errors = bog.Errors.init(alloc);
+    var tree = bog.parse(alloc, source, &errors) catch |e| switch (e) {
+        error.TokenizeError, error.ParseError => print_errors_and_exit(&errors, source),
+        error.OutOfMemory => return error.OutOfMemory,
+    };
 
-    // const file = try std.fs.cwd().openFile(args[0], .{ .write = true, .read = false });
+    const file = try std.fs.cwd().createFile(args[0], .{});
 
-    // var out_stream = &file.outStream().stream;
-    // try tree.render(out_stream);
+    var out_stream = &file.outStream().stream;
+    try tree.render(out_stream);
 
-    // file.close();
-    // process.exit(0);
+    file.close();
+    process.exit(0);
 }
 
-fn print_and_exit(msg: []const u8) noreturn {
+fn print_errors_and_exit(errors: *bog.Errors, source: []const u8) noreturn {
     const stderr = &std.io.getStdErr().outStream().stream;
-    stderr.print("{}\n", .{msg}) catch {};
+    errors.render(source, stderr) catch {};
+    process.exit(1);
+}
+
+fn print_and_exit(comptime msg: []const u8, args: var) noreturn {
+    const stderr = &std.io.getStdErr().outStream().stream;
+    stderr.print(msg ++ "\n", args) catch {};
     process.exit(1);
 }
 
 fn debug_dump(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     if (args.len != 1) {
-        print_and_exit("expected one argument");
+        print_and_exit("expected one argument", .{});
     }
-    const source = try std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024);
+    const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.IsDir => print_and_exit("TODO fmt dirs", .{}),
+        else => |err| {
+            print_and_exit("unable to open '{}': {}", .{ args[0], err });
+        },
+    };
 
     var errors = bog.Errors.init(alloc);
     var module = bog.compile(alloc, source, &errors) catch |e| switch (e) {
