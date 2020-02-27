@@ -799,6 +799,10 @@ pub const Parser = struct {
             try node.stmts.push(try parser.stmt());
             _ = parser.eatToken(.Nl, false) orelse blk: {
                 if (parser.sawEnd()) break :blk;
+                if (parser.eatToken(.Eof, false)) |_| {
+                    _ = parser.it.prev();
+                    break;
+                }
                 _ = try parser.expectToken(.End, false);
                 break;
             };

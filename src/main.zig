@@ -22,6 +22,9 @@ pub fn main() !void {
             if (mem.eql(u8, args[1], "debug:dump")) {
                 return debug_dump(alloc, args[2..]);
             }
+            if (mem.eql(u8, args[1], "debug:tokens")) {
+                return debug_tokens(alloc, args[2..]);
+            }
         }
         if (!mem.startsWith(u8, "-", args[1])) {
             return run(alloc, args[1..]);
@@ -68,6 +71,8 @@ fn run(alloc: *std.mem.Allocator, args: [][]const u8) !void {
             print_and_exit("unable to open '{}': {}", .{ args[0], err });
         },
     };
+    defer alloc.free(source);
+
     const res = run_source(alloc, &vm, source) catch |e| switch (e) {
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => print_errors_and_exit(&vm.errors, source),
         error.MalformedByteCode => if (is_debug) @panic("malformed") else print_and_exit("attempted to execute invalid bytecode", .{}),
@@ -89,6 +94,7 @@ fn run(alloc: *std.mem.Allocator, args: [][]const u8) !void {
 
 fn run_source(alloc: *std.mem.Allocator, vm: *bog.Vm, source: []const u8) !?*bog.Value {
     var module = try bog.compile(alloc, source, &vm.errors);
+    // TODO defer module.deinit()
 
     // TODO this should happen in vm.exec but currently that would break repl
     vm.ip = module.start_index;
@@ -114,20 +120,22 @@ fn fmt(alloc: *std.mem.Allocator, args: [][]const u8) !void {
             print_and_exit("unable to open '{}': {}", .{ args[0], err });
         },
     };
+    defer alloc.free(source);
 
     var errors = bog.Errors.init(alloc);
+    defer errors.deinit();
+
     var tree = bog.parse(alloc, source, &errors) catch |e| switch (e) {
         error.TokenizeError, error.ParseError => print_errors_and_exit(&errors, source),
         error.OutOfMemory => return error.OutOfMemory,
     };
+    defer tree.deinit();
 
     const file = try std.fs.cwd().createFile(args[0], .{});
+    defer file.close();
 
     var out_stream = &file.outStream().stream;
     try tree.render(out_stream);
-
-    file.close();
-    process.exit(0);
 }
 
 fn print_errors_and_exit(errors: *bog.Errors, source: []const u8) noreturn {
@@ -148,13 +156,15 @@ fn debug_dump(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     }
     const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
-        error.IsDir => print_and_exit("TODO fmt dirs", .{}),
         else => |err| {
             print_and_exit("unable to open '{}': {}", .{ args[0], err });
         },
     };
+    defer alloc.free(source);
 
     var errors = bog.Errors.init(alloc);
+    defer errors.deinit();
+
     var module = bog.compile(alloc, source, &errors) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.TokenizeError, error.ParseError, error.CompileError => {
@@ -166,7 +176,45 @@ fn debug_dump(alloc: *std.mem.Allocator, args: [][]const u8) !void {
 
     const stream = &std.io.getStdOut().outStream().stream;
     try module.dump(stream);
-    process.exit(0);
+}
+
+fn debug_tokens(alloc: *std.mem.Allocator, args: [][]const u8) !void {
+    if (args.len != 1) {
+        print_and_exit("expected one argument", .{});
+    }
+    const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => |err| {
+            print_and_exit("unable to open '{}': {}", .{ args[0], err });
+        },
+    };
+    defer alloc.free(source);
+
+    var tree = bog.Tree{
+        .tokens = bog.Token.List.init(alloc),
+        .source = source,
+        .nodes = undefined,
+        .arena_allocator = undefined,
+    };
+    defer tree.tokens.deinit();
+
+    var errors = bog.Errors.init(alloc);
+    defer errors.deinit();
+
+    bog.tokenize(&tree, &errors) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.TokenizeError => {
+            const stream = &std.io.getStdErr().outStream().stream;
+            try errors.render(source, stream);
+            process.exit(1);
+        },
+    };
+
+    const stream = &std.io.getStdOut().outStream().stream;
+    var it = tree.tokens.iterator(0);
+    while (it.next()) |tok| {
+        try stream.print("{}  {}...{}\n", .{ @tagName(tok.id), tok.start, tok.end });
+    }
 }
 
 comptime {
