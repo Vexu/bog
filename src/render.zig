@@ -14,8 +14,9 @@ pub fn render(tree: *Tree, stream: var) @TypeOf(stream).Child.Error!void {
         var it = tree.tokens.iterator(0);
         while (it.next()) |tok| {
             if (tok.id == .Nl) continue;
-            if (tok.id != .Comment) break;
-            try renderer.renderToken(@truncate(u32, it.index - 1), stream, 0, .Newline);
+            if (tok.id == .Comment)
+                try renderer.renderToken(@truncate(u32, it.index - 1), stream, 0, .Newline);
+            break;
         }
     }
     {

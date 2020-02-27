@@ -238,8 +238,12 @@ pub const Compiler = struct {
             return if (res == .Rt) res else Result{ .Rt = compiler.registerAlloc() };
         }
 
+        /// returns .Empty if res != .Rt
         fn toVal(res: Result) Value {
-            return .{ .Rt = res.Rt };
+            return if (res != .Rt)
+                .{ .Empty = {} }
+            else
+                .{ .Rt = res.Rt };
         }
 
         fn notLval(res: Result, self: *Compiler, tok: TokenIndex) !void {
@@ -460,11 +464,23 @@ pub const Compiler = struct {
 
         // gen body and return result
         try self.addLineInfo(node.body);
-        // TODO this should only be discard if the last instruction is return
-        const body_val = try self.genNode(node.body, .Discard);
-        // TODO if body_val == .Empty because last instruction was a return
-        // then this return is not necessary
-        if (body_val == .Empty or body_val == .None) {
+
+        const last_node = self.getLastNode(node.body);
+        const last_is_ret = last_node.id == .Jump and
+            @fieldParentPtr(Node.Jump, "base", last_node).op == .Return;
+
+        const should_discard = switch (last_node.id) {
+            // these will generate different code if value is discarded
+            .If, .While, .For, .Match, .Block => last_is_ret,
+            else => true,
+        };
+
+        // if last node is not a return then we expect some value we can return
+        const body_val = try self.genNode(node.body, if (should_discard) .Discard else .Value);
+
+        if (last_is_ret) {
+            std.debug.assert(body_val == .Empty);
+        } else if (body_val == .Empty or body_val == .None) {
             try self.code.append(@enumToInt(bog.Op.ReturnNone));
         } else {
             const reg = try body_val.toRt(self);
@@ -538,26 +554,31 @@ pub const Compiler = struct {
         }
         const sub_res = switch (res) {
             .Rt, .Discard => res,
-            else => Result{
+            .Value => Result{
+                // value is only known at runtime
                 .Rt = self.registerAlloc(),
             },
+            .Lval => unreachable,
         };
 
         // jump past if_body if cond == false
         try self.emitInstruction(.JumpFalse, .{ cond_val.getRt(), @as(u32, 0) });
-        const addr = self.code.len;
+        const if_skip = self.code.len;
+
         const if_val = try self.genNode(node.if_body, sub_res);
         if (sub_res != .Rt and if_val.isRt()) {
             try self.emitInstruction(.Discard, .{if_val.getRt()});
         }
 
         // jump past else_body since if_body was executed
-        // TODO this jump is unnecessary if res != .Rt and else_body == null
-        try self.emitInstruction(.Jump, .{@as(u32, 0)});
-        const addr2 = self.code.len;
+        const else_skip_needed = node.else_body != null or sub_res == .Rt;
+        if (else_skip_needed) {
+            try self.emitInstruction(.Jump, .{@as(u32, 0)});
+        }
+        const else_skip = self.code.len;
 
-        @ptrCast(*align(1) u32, self.code.toSlice()[addr - @sizeOf(u32) ..].ptr).* =
-            @truncate(u32, self.code.len - addr);
+        self.finishJump(if_skip);
+
         if (node.else_body) |some| {
             const else_val = try self.genNode(some, sub_res);
             if (sub_res != .Rt and else_val.isRt()) {
@@ -567,13 +588,11 @@ pub const Compiler = struct {
             try self.emitInstruction(.ConstPrimitive, .{ sub_res.Rt, @as(u8, 0) });
         }
 
-        @ptrCast(*align(1) u32, self.code.toSlice()[addr2 - @sizeOf(u32) ..].ptr).* =
-            @truncate(u32, self.code.len - addr2);
+        if (else_skip_needed) {
+            self.finishJump(else_skip);
+        }
 
-        return if (sub_res == .Rt)
-            Value{ .Rt = sub_res.Rt }
-        else
-            Value{ .Empty = {} };
+        return sub_res.toVal();
     }
 
     fn genJump(self: *Compiler, node: *Node.Jump, res: Result) Error!Value {
@@ -653,7 +672,8 @@ pub const Compiler = struct {
 
         const sub_res = switch (res) {
             .Discard => res,
-            else => return self.reportErr("TODO while expr", node.while_tok),
+            .Lval => unreachable,
+            .Value, .Rt => return self.reportErr("TODO while expr", node.while_tok),
         };
 
         const body_val = try self.genNode(node.body, sub_res);
@@ -668,18 +688,13 @@ pub const Compiler = struct {
 
         // exit loop if cond == false
         if (cond_jump) |some| {
-            @ptrCast(*align(1) u32, self.code.toSlice()[some - @sizeOf(u32) ..].ptr).* =
-                @truncate(u32, self.code.len - some);
+            self.finishJump(some);
         }
         while (loop_scope.breaks.pop()) |some| {
-            @ptrCast(*align(1) u32, self.code.toSlice()[some - @sizeOf(u32) ..].ptr).* =
-                @truncate(u32, self.code.len - some);
+            self.finishJump(some);
         }
 
-        return if (sub_res == .Rt)
-            Value{ .Rt = sub_res.Rt }
-        else
-            Value{ .Empty = {} };
+        return sub_res.toVal();
     }
 
     fn genCatch(self: *Compiler, node: *Node.Catch, res: Result) Error!Value {
@@ -687,20 +702,20 @@ pub const Compiler = struct {
 
         var sub_res = switch (res) {
             .Rt => res,
-            .Discard => .Value,
-            .Value => Result{ .Rt = self.registerAlloc() },
+            .Value, .Discard => .Value,
             .Lval => unreachable,
         };
         const l_val = try self.genNodeNonEmpty(node.lhs, sub_res);
         if (!l_val.isRt()) {
-            return l_val;
+            // not an error return as is
+            return l_val.maybeRt(self, res);
         }
         sub_res = .{
-            .Rt = try l_val.toRt(self),
+            .Rt = l_val.getRt(),
         };
 
         try self.emitInstruction(.JumpNotError, .{ sub_res.Rt, @as(u32, 0) });
-        const addr = self.code.len;
+        const catch_skip = self.code.len;
 
         if (node.capture) |some| {
             return self.reportErr("TODO: capture value", some.firstToken());
@@ -708,8 +723,7 @@ pub const Compiler = struct {
 
         const r_val = try self.genNode(node.rhs, sub_res);
 
-        @ptrCast(*align(1) u32, self.code.toSlice()[addr - @sizeOf(u32) ..].ptr).* =
-            @truncate(u32, self.code.len - addr);
+        self.finishJump(catch_skip);
         return sub_res.toVal();
     }
 
@@ -1418,6 +1432,25 @@ pub const Compiler = struct {
         const tok = self.tree.tokens.at(token);
 
         try self.emitInstruction(.LineInfo, .{tok.start});
+    }
+
+    fn finishJump(self: *Compiler, jump_addr: usize) void {
+        @ptrCast(*align(1) u32, self.code.toSlice()[jump_addr - @sizeOf(u32) ..].ptr).* =
+            @truncate(u32, self.code.len - jump_addr);
+    }
+
+    fn getLastNode(self: *Compiler, first_node: *Node) *Node {
+        var node = first_node;
+        while (true) {
+            switch (node.id) {
+                .Grouped => node = @fieldParentPtr(Node.Grouped, "base", node).expr,
+                .Block => {
+                    const blk = @fieldParentPtr(Node.Block, "base", node);
+                    node = blk.stmts.at(blk.stmts.len - 1).*;
+                },
+                else => return node,
+            }
+        }
     }
 
     fn tokenSlice(self: *Compiler, token: TokenIndex) []const u8 {
