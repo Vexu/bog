@@ -460,6 +460,7 @@ pub const Compiler = struct {
 
         // gen body and return result
         try self.addLineInfo(node.body);
+        // TODO this should only be discard if the last instruction is return
         const body_val = try self.genNode(node.body, .Discard);
         // TODO if body_val == .Empty because last instruction was a return
         // then this return is not necessary
@@ -581,9 +582,10 @@ pub const Compiler = struct {
         }
         if (node.op == .Return) {
             if (node.op.Return) |some| {
-                const reg = self.registerAlloc();
-                defer self.registerFree(reg);
-                _ = try self.genNode(some, Result{ .Rt = reg });
+                const val = try self.genNode(some, .Value);
+                const reg = try val.toRt(self);
+                defer val.free(self, reg);
+
                 try self.emitInstruction(.Return, .{reg});
             } else {
                 try self.code.append(@enumToInt(bog.Op.ReturnNone));

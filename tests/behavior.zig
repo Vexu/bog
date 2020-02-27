@@ -1,3 +1,16 @@
+test "fibonacchi" {
+    // TODO should be able to refer to fib directly
+    try expectOutput(
+        \\const fib = fn(f,n)
+        \\    if (n < 2) return n
+        \\    return f(f, n - 1) + f(f, n-2)
+        \\
+        \\return fib(fib, 10)
+    ,
+        \\55
+    );
+}
+
 test "const value not modified by function" {
     try expectOutput(
         \\const x = 2

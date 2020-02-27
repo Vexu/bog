@@ -421,7 +421,7 @@ pub const Vm = struct {
                     frame.ret_loc.* = try vm.gc.alloc();
                     frame.ret_loc.*.?.* = B_val.*;
 
-                    vm.gc.stackShrink(vm.ip);
+                    vm.gc.stackShrink(vm.sp);
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
@@ -564,7 +564,7 @@ pub const Vm = struct {
                     A_ref.* = if (B_val.kind == type_id) &Value.True else &Value.False;
                 },
                 .Call => {
-                    const A_val = try vm.getRef(module);
+                    const A_ref = try vm.getRef(module);
                     const B_val = try vm.getVal(module);
                     const C = vm.getArg(module, RegRef);
                     const arg_count = vm.getArg(module, u16);
@@ -586,9 +586,9 @@ pub const Vm = struct {
                         .sp = vm.sp,
                         .ip = vm.ip,
                         .line_loc = vm.line_loc,
-                        .ret_loc = A_val,
+                        .ret_loc = A_ref,
                     });
-                    vm.sp = C;
+                    vm.sp += C;
                     vm.ip = B_val.kind.Fn.offset;
                 },
                 .Return => {
@@ -606,7 +606,7 @@ pub const Vm = struct {
                     } else {
                         frame.ret_loc.* = A_val;
                     }
-                    vm.gc.stackShrink(vm.ip);
+                    vm.gc.stackShrink(vm.sp);
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
@@ -619,7 +619,7 @@ pub const Vm = struct {
 
                     const frame = vm.call_stack.pop() orelse return error.MalformedByteCode;
                     frame.ret_loc.* = &Value.None;
-                    vm.gc.stackShrink(vm.ip);
+                    vm.gc.stackShrink(vm.sp);
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;

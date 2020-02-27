@@ -70,11 +70,11 @@ fn run(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     };
     const res = run_source(alloc, &vm, source) catch |e| switch (e) {
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => print_errors_and_exit(&vm.errors, source),
-        error.MalformedByteCode => print_and_exit("attempted to execute invalid bytecode", .{}),
+        error.MalformedByteCode => if (is_debug) @panic("malformed") else print_and_exit("attempted to execute invalid bytecode", .{}),
         error.OutOfMemory => return error.OutOfMemory,
     };
     if (res) |some| {
-        if (some.kind == .Int and some.kind.Int > 0 and some.kind.Int < std.math.maxInt(u8)) {
+        if (some.kind == .Int and some.kind.Int >= 0 and some.kind.Int < std.math.maxInt(u8)) {
             process.exit(@intCast(u8, some.kind.Int));
         } else if (some.kind == .Error) {
             const stderr = &std.io.getStdErr().outStream().stream;
