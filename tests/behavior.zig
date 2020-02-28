@@ -1,3 +1,13 @@
+test "catch capture" {
+    try expectOutput(
+        \\const err = fn() error(2)
+        \\
+        \\return err() catch (let foo) foo
+    ,
+        \\2
+    );
+}
+
 test "while let" {
     try expectOutput(
         \\const getSome = fn(val)  if (val == 0) () else val - 1

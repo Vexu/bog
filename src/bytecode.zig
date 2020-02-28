@@ -139,7 +139,10 @@ pub const Op = enum(u8) {
     JumpNotError,
 
     /// if (A is none) ip = arg1
-    JumpNone, 
+    JumpNone,
+
+    /// error(A) = B
+    UnwrapError,
 
     /// A = IMPORT(arg1)
     Import,
@@ -282,6 +285,7 @@ pub const Module = struct {
                 .Negate,
                 .Try,
                 .BuildError,
+                .UnwrapError,
                 => {
                     const arg_1 = module.getArg(RegRef, &ip);
                     const arg_2 = module.getArg(RegRef, &ip);

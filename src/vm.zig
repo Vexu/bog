@@ -462,6 +462,13 @@ pub const Vm = struct {
                         vm.ip += addr;
                     }
                 },
+                .UnwrapError => {
+                    const A_ref = try vm.getRef(module);
+                    const B_val = try vm.getVal(module);
+
+                    if (B_val.kind != .Error) return error.MalformedByteCode;
+                    A_ref.* = B_val.kind.Error;
+                },
                 .Import => return vm.reportErr("TODO Op.Import"),
                 .Native => return vm.reportErr("TODO Op.Native"),
                 .Discard => {

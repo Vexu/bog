@@ -749,12 +749,29 @@ pub const Compiler = struct {
         try self.emitInstruction(.JumpNotError, .{ sub_res.Rt, @as(u32, 0) });
         const catch_skip = self.code.len;
 
+        var capture_scope = Scope{
+            .id = .Capture,
+            .parent = self.cur_scope,
+            .syms = Symbol.List.init(self.arena),
+        };
+
         if (node.capture) |some| {
-            return self.reportErr("TODO: capture value", some.firstToken());
+            const unwrap_reg = self.registerAlloc();
+            try self.emitInstruction(.UnwrapError, .{ unwrap_reg, sub_res.Rt });
+
+            self.cur_scope = &capture_scope;
+            const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)
+                Result{ .Lval = .{ .Let = &Value{ .Rt = unwrap_reg } } }
+            else
+                Result{ .Lval = .{ .Const = &Value{ .Rt = unwrap_reg } } };
+
+            assert((try self.genNode(node.capture.?, lval_res)) == .Empty);
         }
 
         const r_val = try self.genNode(node.rhs, sub_res);
 
+        // end capture scope
+        self.cur_scope = capture_scope.parent.?;
         self.finishJump(catch_skip);
         return sub_res.toVal();
     }
