@@ -98,10 +98,10 @@ pub const Compiler = struct {
                         return sym;
                     }
                 }
-                cur = some.parent;
-                if (cur.?.id == .Fn) {
+                if (some.id == .Fn) {
                     return self.reportErr("TODO closures", tok);
                 }
+                cur = some.parent;
             }
             return self.reportErr("use of undeclared identifier", tok);
         }
@@ -358,11 +358,11 @@ pub const Compiler = struct {
             .Catch => return self.genCatch(@fieldParentPtr(Node.Catch, "base", node), res),
             .Import => return self.genImport(@fieldParentPtr(Node.Import, "base", node), res),
             .Native => return self.genNative(@fieldParentPtr(Node.Native, "base", node), res),
+            .For => return self.genFor(@fieldParentPtr(Node.For, "base", node), res),
 
             .Map => return self.reportErr("TODO: Map", node.firstToken()),
-            .For => return self.reportErr("TODO: For", node.firstToken()),
-            .Match => return self.reportErr("TODO: Match", node.firstToken()),
             .MapItem => return self.reportErr("TODO: MapItem", node.firstToken()),
+            .Match => return self.reportErr("TODO: Match", node.firstToken()),
             .MatchCatchAll => return self.reportErr("TODO: MatchCatchAll", node.firstToken()),
             .MatchLet => return self.reportErr("TODO: MatchLet", node.firstToken()),
             .MatchCase => return self.reportErr("TODO: MatchCase", node.firstToken()),
@@ -746,6 +746,80 @@ pub const Compiler = struct {
         return sub_res.toVal();
     }
 
+    fn genFor(self: *Compiler, node: *Node.For, res: Result) Error!Value {
+        try res.notLval(self, node.for_tok);
+
+        var loop_scope = Scope.Loop{
+            .base = .{
+                .id = .Loop,
+                .parent = self.cur_scope,
+                .syms = Symbol.List.init(self.arena),
+            },
+            .breaks = Scope.Loop.BreakList.init(self.arena),
+            .cond_begin = undefined,
+        };
+        self.cur_scope = &loop_scope.base;
+        defer self.cur_scope = loop_scope.base.parent.?;
+
+        const cond_val = try self.genNode(node.cond, .Value);
+        if (!cond_val.isRt() and cond_val != .Str)
+            return self.reportErr("expected iterable value", node.cond.firstToken());
+
+        const cond_reg = try cond_val.toRt(self);
+        defer cond_val.free(self, cond_reg);
+
+        const iter_reg = self.registerAlloc();
+        defer self.registerFree(iter_reg);
+
+        // initialize the iterator
+        try self.emitInstruction(.IterInit, .{ iter_reg, cond_reg });
+
+        const iter_val_reg = self.registerAlloc();
+        defer self.registerFree(iter_val_reg);
+
+        // loop condition
+        loop_scope.cond_begin = @intCast(u32, self.code.len);
+        try self.emitInstruction(.IterNext, .{ iter_val_reg, iter_reg });
+
+        // exit loop
+        try self.emitInstruction(.JumpNone, .{ iter_val_reg, @as(u32, 0) });
+        const exit_jump = self.code.len;
+
+        if (node.capture != null) {
+            const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)
+                Result{ .Lval = .{ .Let = &Value{ .Rt = iter_val_reg } } }
+            else
+                Result{ .Lval = .{ .Const = &Value{ .Rt = iter_val_reg } } };
+
+            assert((try self.genNode(node.capture.?, lval_res)) == .Empty);
+        }
+
+        const sub_res = switch (res) {
+            .Discard => res,
+            .Lval => unreachable,
+            .Value, .Rt => return self.reportErr("TODO for expr", node.for_tok),
+        };
+
+        const body_val = try self.genNode(node.body, sub_res);
+        if (sub_res != .Rt and body_val.isRt()) {
+            try self.emitInstruction(.Discard, .{body_val.getRt()});
+        }
+
+        // jump to the start of the loop
+        try self.emitInstruction(.Jump, .{
+            @truncate(i32, -@intCast(isize, self.code.len + @sizeOf(bog.Op) + @sizeOf(u32) - loop_scope.cond_begin)),
+        });
+
+        // exit loop when IterNext results in None
+        self.finishJump(exit_jump);
+
+        while (loop_scope.breaks.pop()) |some| {
+            self.finishJump(some);
+        }
+
+        return sub_res.toVal();
+    }
+
     fn genCatch(self: *Compiler, node: *Node.Catch, res: Result) Error!Value {
         try res.notLval(self, node.tok);
 
@@ -924,7 +998,7 @@ pub const Compiler = struct {
                 .Error => return self.reportErr("cannot cast to error", node.type_tok),
                 .Range => return self.reportErr("cannot cast to range", node.type_tok),
                 .Tuple, .Map, .List => return self.reportErr("invalid cast", node.type_tok),
-                .Native => unreachable,
+                .Native, .Iterator => unreachable,
                 _ => unreachable,
             },
             .Is => Value{

@@ -141,6 +141,12 @@ pub const Op = enum(u8) {
     /// if (A is none) ip = arg1
     JumpNone,
 
+    /// A = B.iterator()
+    IterInit,
+
+    /// A = B.next()
+    IterNext,
+
     /// error(A) = B
     UnwrapError,
 
@@ -286,6 +292,8 @@ pub const Module = struct {
                 .Try,
                 .BuildError,
                 .UnwrapError,
+                .IterInit,
+                .IterNext,
                 => {
                     const arg_1 = module.getArg(RegRef, &ip);
                     const arg_2 = module.getArg(RegRef, &ip);

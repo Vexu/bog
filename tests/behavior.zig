@@ -1,3 +1,24 @@
+test "for loops" {
+    try expectOutput(
+        \\let sum = 0
+        \\for (let x in [1, 2, 3])
+        \\    sum += x
+        \\
+        \\return sum
+    ,
+        \\6
+    );
+    try expectOutput(
+        \\let sum = 0
+        \\for (let (x,y) in [(1,2), (2,3), (5,6)])
+        \\    sum += x * y
+        \\
+        \\return sum
+    ,
+        \\38
+    );
+}
+
 test "error destructure" {
     try expectOutput(
         \\const err = fn() error(2)

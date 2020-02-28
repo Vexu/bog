@@ -462,6 +462,21 @@ pub const Vm = struct {
                         vm.ip += addr;
                     }
                 },
+                .IterInit => {
+                    const A_ref = try vm.getRef(module);
+                    const B_val = try vm.getVal(module);
+
+                    A_ref.* = try B_val.iterator(vm);
+                },
+                .IterNext => {
+                    const A_ref = try vm.getRef(module);
+                    const B_val = try vm.getVal(module);
+
+                    if (B_val.kind != .Iterator)
+                        return error.MalformedByteCode;
+
+                    A_ref.* = B_val.kind.Iterator.next(vm);
+                },
                 .UnwrapError => {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getVal(module);
@@ -566,7 +581,7 @@ pub const Vm = struct {
                     // Value.as will hit unreachable on invalid type_id
                     switch (type_id) {
                         .None, .Int, .Num, .Bool, .Str, .Tuple, .Map, .List => {},
-                        .Error, .Range, .Fn, .Native => return error.MalformedByteCode,
+                        .Error, .Range, .Fn, .Native, .Iterator => return error.MalformedByteCode,
                         _ => return error.MalformedByteCode,
                     }
 

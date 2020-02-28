@@ -19,6 +19,9 @@ pub const Value = struct {
         Range,
         Fn,
 
+        /// pseudo type user should not have access to via valid bytecode
+        Iterator,
+
         /// Native being separate from .Fn is an implementation detail
         Native,
         _,
@@ -57,7 +60,35 @@ pub const Value = struct {
 
             // TODO this causes a dependency loop https://github.com/ziglang/zig/issues/4562
             // func: NativeFn,
-            func: fn()void,
+            func: fn () void,
+        },
+        Iterator: struct {
+            value: *Value,
+            index: usize,
+
+            // TODO protect against concurrent modification
+            pub fn next(iter: *@This(), vm: *Vm) *Value {
+                defer iter.index += 1;
+                switch (iter.value.kind) {
+                    .Tuple => |tuple| {
+                        if (iter.index == tuple.len)
+                            return &Value.None;
+
+                        return tuple[iter.index];
+                    },
+                    .List => |list| {
+                        if (iter.index == list.len)
+                            return &Value.None;
+
+                        return list.at(iter.index);
+                    },
+
+                    .Str => @panic("TODO: string iterator"),
+                    .Map => @panic("TODO: map iterator"),
+                    .Range => @panic("TODO: range iterator"),
+                    else => unreachable,
+                }
+            }
         },
 
         /// always memoized
@@ -90,7 +121,7 @@ pub const Value = struct {
             else => if (a.kind != @as(@TagType(@TypeOf(b.kind)), b.kind)) return false,
         }
         return switch (a.kind) {
-            .Int, .Num => unreachable,
+            .Iterator, .Int, .Num => unreachable,
             .None => true,
             .Bool => |val| val == b.kind.Bool,
             .Str => |val| {
@@ -129,6 +160,7 @@ pub const Value = struct {
 
     pub fn dump(value: Value, stream: var, level: u32) (@TypeOf(stream.*).Error || error{Unimplemented})!void {
         switch (value.kind) {
+            .Iterator => unreachable,
             .Int => |val| try stream.print("{}", .{val}),
             .Num => |val| try stream.print("{d}", .{val}),
             .Bool => |val| try stream.write(if (val) "true" else "false"),
@@ -215,6 +247,7 @@ pub const Value = struct {
         switch (value.kind) {
             .None, .Int, .Num, .Fn, .Bool, .Str, .Native => {},
 
+            .Iterator => |val| val.value.mark(),
             .Tuple => |val| for (val) |v| v.mark(),
             .Map => @panic("TODO mark for maps"),
             .List => |val| for (val.toSliceConst()) |v| v.mark(),
@@ -257,6 +290,7 @@ pub const Value = struct {
             .Str => |str| {
                 return vm.reportErr("TODO get string");
             },
+            .Iterator => unreachable,
             else => return vm.reportErr("invalid subscript type"),
         }
     }
@@ -291,6 +325,7 @@ pub const Value = struct {
             .Str => |str| {
                 return vm.reportErr("TODO set string");
             },
+            .Iterator => unreachable,
             else => return vm.reportErr("invalid subscript type"),
         }
     }
@@ -323,7 +358,7 @@ pub const Value = struct {
 
         const new_val = try vm.gc.alloc();
         new_val.* = switch (type_id) {
-            .Bool, .None, .Error, .Range, .Fn, .Native => unreachable,
+            .Bool, .None, .Error, .Range, .Fn, .Native, .Iterator => unreachable,
             .Int => .{
                 .kind = .{
                     .Int = switch (val.kind) {
@@ -376,8 +411,30 @@ pub const Value = struct {
             },
             .Map => @panic("TODO in map"),
             .Range => @panic("TODO in range"),
+            .Iterator => unreachable,
             else => unreachable,
         }
+    }
+
+    pub fn iterator(val: *Value, vm: *Vm) !*Value {
+        switch (val.kind) {
+            .Str => return vm.reportErr("TODO: string iterator"),
+            .Map => return vm.reportErr("TODO: map iterator"),
+            .Range => return vm.reportErr("TODO: range iterator"),
+            .Tuple, .List => {},
+            .Iterator => unreachable,
+            else => return vm.reportErr("invalid type for iteration"),
+        }
+        const iter = try vm.gc.alloc();
+        iter.* = .{
+            .kind = .{
+                .Iterator = .{
+                    .value = val,
+                    .index = 0,
+                },
+            },
+        };
+        return iter;
     }
 };
 
