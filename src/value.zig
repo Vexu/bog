@@ -281,32 +281,62 @@ pub const Value = struct {
         }
     }
 
-    pub fn get(val: *Value, index: *Value, vm: *Vm) !*Value {
+    pub fn get(val: *Value, vm: *Vm, index: *Value, res: *?*Value) !void {
         switch (val.kind) {
-            .Tuple => |tuple| if (index.kind == .Int) {
-                var i = index.kind.Int;
-                if (i < 0)
-                    i += @intCast(i64, tuple.len);
-                if (i < 0 or i > tuple.len)
-                    return vm.reportErr("index out of bounds");
+            .Tuple => |tuple| switch (index.kind) {
+                .Int => {
+                    var i = index.kind.Int;
+                    if (i < 0)
+                        i += @intCast(i64, tuple.len);
+                    if (i < 0 or i > tuple.len)
+                        return vm.reportErr("index out of bounds");
 
-                return tuple[@intCast(u32, i)];
-            } else {
-                return vm.reportErr("TODO get with ranges");
+                    res.* = tuple[@intCast(u32, i)];
+                },
+                .Range => return vm.reportErr("TODO get with ranges"),
+                .Str => |s| {
+                    if (res.* == null) {
+                        res.* = try vm.gc.alloc();
+                    }
+
+                    if (mem.eql(u8, s, "len")) {
+                        res.*.?.* = .{
+                            .kind = .{ .Int = @intCast(i64, tuple.len) },
+                        };
+                    } else {
+                        return vm.reportErr("no such property");
+                    }
+                },
+                else => return vm.reportErr("invalid index type"),
+            },
+            .List => |list| switch (index.kind) {
+                .Int => {
+                    var i = index.kind.Int;
+                    if (i < 0)
+                        i += @intCast(i64, list.len);
+                    if (i < 0 or i > list.len)
+                        return vm.reportErr("index out of bounds");
+
+                    res.* = list.at(@intCast(u32, i));
+                },
+                .Range => return vm.reportErr("TODO get with ranges"),
+                .Str => |s| {
+                    if (res.* == null) {
+                        res.* = try vm.gc.alloc();
+                    }
+
+                    if (mem.eql(u8, s, "len")) {
+                        res.*.?.* = .{
+                            .kind = .{ .Int = @intCast(i64, list.len) },
+                        };
+                    } else {
+                        return vm.reportErr("no such property");
+                    }
+                },
+                else => return vm.reportErr("invalid index type"),
             },
             .Map => |map| {
                 return vm.reportErr("TODO get map");
-            },
-            .List => |list| if (index.kind == .Int) {
-                var i = index.kind.Int;
-                if (i < 0)
-                    i += @intCast(i64, list.len);
-                if (i < 0 or i > list.len)
-                    return vm.reportErr("index out of bounds");
-
-                return list.toSliceConst()[@intCast(u32, i)];
-            } else {
-                return vm.reportErr("TODO get with ranges");
             },
             .Str => |str| {
                 return vm.reportErr("TODO get string");
@@ -316,7 +346,7 @@ pub const Value = struct {
         }
     }
 
-    pub fn set(val: *Value, index: *Value, new_val: *Value, vm: *Vm) !void {
+    pub fn set(val: *Value, vm: *Vm, index: *Value, new_val: *Value) !void {
         switch (val.kind) {
             .Tuple => |tuple| if (index.kind == .Int) {
                 var i = index.kind.Int;
@@ -352,7 +382,7 @@ pub const Value = struct {
     }
 
     /// `type_id` must be valid and cannot be .Error, .Range, .Fn or .Native
-    pub fn as(val: *Value, type_id: TypeId, vm: *Vm) !*Value {
+    pub fn as(val: *Value, vm: *Vm, type_id: TypeId) !*Value {
         if (type_id == .None) {
             return &Value.None;
         }
@@ -410,6 +440,12 @@ pub const Value = struct {
             _ => unreachable,
         };
         return new_val;
+    }
+
+    pub fn is(val: *Value, type_id: TypeId) bool {
+        if (val.kind == type_id) return true;
+        if (type_id == .Fn and val.kind == .Native) return true;
+        return false;
     }
 
     pub fn in(val: *Value, container: *Value) bool {

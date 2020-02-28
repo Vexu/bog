@@ -35,6 +35,8 @@ pub const RegRef = bytecode.RegRef;
 const native = @import("native.zig");
 pub const NativeFn = native.NativeFn;
 
+pub const repl = @import("repl.zig");
+
 /// file extension of bog text files
 pub const extension = ".bog";
 

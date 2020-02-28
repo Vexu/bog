@@ -1,8 +1,8 @@
 const std = @import("std");
 const process = std.process;
 const mem = std.mem;
-const repl = @import("repl.zig");
 const bog = @import("bog.zig");
+const repl = bog.repl;
 
 const is_debug = @import("builtin").mode == .Debug;
 

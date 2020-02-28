@@ -1,3 +1,12 @@
+test "property access of list" {
+    try expectOutput(
+        \\const list = [1, true, "hello"]
+        \\return list.len
+    ,
+        \\3
+    );
+}
+
 test "string for iter" {
     try expectOutput(
         \\let sum = 0

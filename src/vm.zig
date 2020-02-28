@@ -564,14 +564,14 @@ pub const Vm = struct {
                     const B_val = try vm.getVal(module);
                     const C_val = try vm.getVal(module);
 
-                    A_ref.* = try B_val.get(C_val, vm);
+                    try B_val.get(vm, C_val, A_ref);
                 },
                 .Set => {
                     const A_val = try vm.getVal(module);
                     const B_val = try vm.getVal(module);
                     const C_val = try vm.getVal(module);
 
-                    try A_val.set(B_val, C_val, vm);
+                    try A_val.set(vm, B_val, C_val);
                 },
                 .As => {
                     const A_ref = try vm.getRef(module);
@@ -585,14 +585,20 @@ pub const Vm = struct {
                         _ => return error.MalformedByteCode,
                     }
 
-                    A_ref.* = try B_val.as(type_id, vm);
+                    A_ref.* = try B_val.as(vm, type_id);
                 },
                 .Is => {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getVal(module);
                     const type_id = vm.getArg(module, Value.TypeId);
 
-                    A_ref.* = if (B_val.kind == type_id) &Value.True else &Value.False;
+                    switch (type_id) {
+                        .None, .Int, .Num, .Bool, .Str, .Tuple, .Map, .List, .Error, .Range, .Fn => {},
+                        .Iterator, .Native => return error.MalformedByteCode,
+                        _ => return error.MalformedByteCode,
+                    }
+
+                    A_ref.* = if (B_val.is(type_id)) &Value.True else &Value.False;
                 },
                 .Call => {
                     const A_ref = try vm.getRef(module);
