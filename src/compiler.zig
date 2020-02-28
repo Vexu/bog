@@ -537,7 +537,6 @@ pub const Compiler = struct {
     fn genIf(self: *Compiler, node: *Node.If, res: Result) Error!Value {
         try res.notLval(self, node.if_tok);
 
-        const has_capture = node.capture != null;
         var capture_scope = Scope{
             .id = .Capture,
             .parent = self.cur_scope,
@@ -546,7 +545,8 @@ pub const Compiler = struct {
         var if_skip: usize = undefined;
 
         const cond_val = try self.genNodeNonEmpty(node.cond, .Value);
-        if (has_capture) {
+        if (node.capture != null) {
+            // TODO handle cond_val.isRt()
             const cond_reg = try cond_val.toRt(self);
             // jump past if_body if cond == .None
             try self.emitInstruction(.JumpNone, .{ cond_reg, @as(u32, 0) });
@@ -673,13 +673,24 @@ pub const Compiler = struct {
         self.cur_scope = &loop_scope.base;
         defer self.cur_scope = loop_scope.base.parent.?;
 
-        if (node.capture) |some| return self.reportErr("TODO while let", some.firstToken());
-
         // beginning of condition
         var cond_jump: ?usize = null;
 
         const cond_val = try self.genNode(node.cond, .Value);
-        if (cond_val.isRt()) {
+        if (node.capture != null) {
+            // TODO handle cond_val.isRt()
+            const cond_reg = try cond_val.toRt(self);
+            // jump past exit loop if cond == .None
+            try self.emitInstruction(.JumpNone, .{ cond_reg, @as(u32, 0) });
+            cond_jump = self.code.len;
+
+            const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)
+                Result{ .Lval = .{ .Let = &Value{ .Rt = cond_reg } } }
+            else
+                Result{ .Lval = .{ .Const = &Value{ .Rt = cond_reg } } };
+
+            assert((try self.genNode(node.capture.?, lval_res)) == .Empty);
+        } else if (cond_val.isRt()) {
             try self.emitInstruction(.JumpFalse, .{ cond_val.getRt(), @as(u32, 0) });
             cond_jump = self.code.len;
         } else {

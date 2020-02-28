@@ -75,7 +75,7 @@ if : "if" "(" (decl "=")? expr ")" expr ("else" expr)?
 
 while : "while" "(" (decl "=")? expr ")" expr
 
-for : "for" "(" decl? expr ")" expr
+for : "for" "(" (decl "in")? expr ")" expr
 
 match : "match" "(" expr ")" (NL match_case)+ NL
 

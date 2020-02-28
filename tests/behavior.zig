@@ -1,3 +1,16 @@
+test "while let" {
+    try expectOutput(
+        \\const getSome = fn(val)  if (val == 0) () else val - 1
+        \\
+        \\let val = 10
+        \\while (let newVal = getSome(val))
+        \\    val = newVal
+        \\return val
+    ,
+        \\0
+    );
+}
+
 test "if let" {
     try expectOutput(
         \\const maybeInc = fn(val)
