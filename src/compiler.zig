@@ -75,18 +75,35 @@ pub const Compiler = struct {
             try self.syms.push(sym);
         }
 
-        fn getSymbol(self: *Scope, name: []const u8) ?*Symbol {
-            var it = self.syms.iterator(self.syms.len);
-            while (it.prev()) |sym| {
-                if (mem.eql(u8, sym.name, name)) {
-                    return sym;
+        fn isDeclared(scope: *Scope, name: []const u8) bool {
+            var cur: ?*Scope = scope;
+            while (cur) |some| {
+                var it = some.syms.iterator(some.syms.len);
+                while (it.prev()) |sym| {
+                    if (mem.eql(u8, sym.name, name)) {
+                        return true;
+                    }
+                }
+                cur = some.parent;
+            }
+            return false;
+        }
+
+        fn getSymbol(scope: *Scope, self: *Compiler, name: []const u8, tok: TokenIndex) !*Symbol {
+            var cur: ?*Scope = scope;
+            while (cur) |some| {
+                var it = some.syms.iterator(some.syms.len);
+                while (it.prev()) |sym| {
+                    if (mem.eql(u8, sym.name, name)) {
+                        return sym;
+                    }
+                }
+                cur = some.parent;
+                if (cur.?.id == .Fn) {
+                    return self.reportErr("TODO closures", tok);
                 }
             }
-            if (self.parent) |some| {
-                if (self.id == .Fn) @panic("TODO: closures");
-                return some.getSymbol(name);
-            }
-            return null;
+            return self.reportErr("use of undeclared identifier", tok);
         }
     };
 
@@ -1374,7 +1391,7 @@ pub const Compiler = struct {
         if (res == .Lval) {
             switch (res.Lval) {
                 .Let, .Const => |val| {
-                    if (self.cur_scope.getSymbol(name)) |sym| {
+                    if (self.cur_scope.isDeclared(name)) {
                         return self.reportErr("redeclaration of identifier", node.tok);
                     }
                     var reg = try val.toRt(self);
@@ -1393,38 +1410,35 @@ pub const Compiler = struct {
                     return Value.Empty;
                 },
                 .Assign => |val| {
-                    if (self.cur_scope.getSymbol(name)) |sym| {
-                        if (!sym.mutable) {
-                            return self.reportErr("assignment to constant", node.tok);
-                        }
-                        if (val.* == .Ref) {
-                            try self.emitInstruction(.Copy, .{ sym.reg, val.getRt() });
-                        } else if (val.isRt()) {
-                            try self.emitInstruction(.Move, .{ sym.reg, val.getRt() });
-                        } else {
-                            try self.makeRuntime(sym.reg, val.*);
-                        }
-                        return Value.Empty;
+                    const sym = try self.cur_scope.getSymbol(self, name, node.tok);
+                    if (!sym.mutable) {
+                        return self.reportErr("assignment to constant", node.tok);
                     }
+                    if (val.* == .Ref) {
+                        try self.emitInstruction(.Copy, .{ sym.reg, val.getRt() });
+                    } else if (val.isRt()) {
+                        try self.emitInstruction(.Move, .{ sym.reg, val.getRt() });
+                    } else {
+                        try self.makeRuntime(sym.reg, val.*);
+                    }
+                    return Value.Empty;
                 },
                 .AugAssign => {
-                    if (self.cur_scope.getSymbol(name)) |sym| {
-                        if (!sym.mutable) {
-                            return self.reportErr("assignment to constant", node.tok);
-                        }
-                        return Value{ .Ref = sym.reg };
+                    const sym = try self.cur_scope.getSymbol(self, name, node.tok);
+                    if (!sym.mutable) {
+                        return self.reportErr("assignment to constant", node.tok);
                     }
+                    return Value{ .Ref = sym.reg };
                 },
             }
-        } else if (self.cur_scope.getSymbol(name)) |sym| {
-            if (res == .Rt) {
-                const op_id = if (sym.mutable) .Move else bog.Op.Copy;
-                try self.emitInstruction(op_id, .{ res.Rt, sym.reg });
-                return res.toVal();
-            }
-            return Value{ .Ref = sym.reg };
         }
-        return self.reportErr("use of undeclared identifier", node.tok);
+        const sym = try self.cur_scope.getSymbol(self, name, node.tok);
+        if (res == .Rt) {
+            const op_id = if (sym.mutable) .Move else bog.Op.Copy;
+            try self.emitInstruction(op_id, .{ res.Rt, sym.reg });
+            return res.toVal();
+        }
+        return Value{ .Ref = sym.reg };
     }
 
     fn genLiteral(self: *Compiler, node: *Node.Literal, res: Result) Error!Value {
