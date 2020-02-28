@@ -454,6 +454,14 @@ pub const Vm = struct {
                         vm.ip += addr;
                     }
                 },
+                .JumpNone => {
+                    const A_val = try vm.getVal(module);
+                    const addr = vm.getArg(module, u32);
+
+                    if (A_val.kind == .None) {
+                        vm.ip += addr;
+                    }
+                },
                 .Import => return vm.reportErr("TODO Op.Import"),
                 .Native => return vm.reportErr("TODO Op.Native"),
                 .Discard => {

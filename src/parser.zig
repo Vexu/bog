@@ -816,16 +816,14 @@ pub const Parser = struct {
     fn ifExpr(parser: *Parser, skip_nl: bool) Error!?*Node {
         const tok = parser.eatToken(.Keyword_if, skip_nl) orelse return null;
         _ = try parser.expectToken(.LParen, true);
-        const capture = if (parser.eatToken(.Keyword_let, true) orelse
-            parser.eatToken(.Keyword_const, false)) |_|
-            try parser.primaryExpr(true)
-        else
-            null;
+        const let_const = parser.eatToken(.Keyword_let, true) orelse
+            parser.eatToken(.Keyword_const, false);
         const node = try parser.arena.create(Node.If);
         node.* = .{
             .if_tok = tok,
-            .capture = capture,
-            .eq_tok = if (capture != null) try parser.expectToken(.Equal, true) else null,
+            .let_const = let_const,
+            .capture = if (let_const != null) try parser.primaryExpr(true) else null,
+            .eq_tok = if (let_const != null) try parser.expectToken(.Equal, true) else null,
             .cond = try parser.expr(true),
             .r_paren = try parser.expectToken(.RParen, true),
             .if_body = try parser.expr(skip_nl),
@@ -842,16 +840,14 @@ pub const Parser = struct {
     fn whileExpr(parser: *Parser, skip_nl: bool) Error!?*Node {
         const tok = parser.eatToken(.Keyword_while, skip_nl) orelse return null;
         _ = try parser.expectToken(.LParen, true);
-        const capture = if (parser.eatToken(.Keyword_let, true) orelse
-            parser.eatToken(.Keyword_const, false)) |_|
-            try parser.primaryExpr(true)
-        else
-            null;
+        const let_const = parser.eatToken(.Keyword_let, true) orelse
+            parser.eatToken(.Keyword_const, false);
         const node = try parser.arena.create(Node.While);
         node.* = .{
             .while_tok = tok,
-            .capture = capture,
-            .eq_tok = if (capture != null) try parser.expectToken(.Equal, true) else null,
+            .let_const = let_const,
+            .capture = if (let_const != null) try parser.primaryExpr(true) else null,
+            .eq_tok = if (let_const != null) try parser.expectToken(.Equal, true) else null,
             .cond = try parser.expr(true),
             .r_paren = try parser.expectToken(.RParen, true),
             .body = try parser.expr(skip_nl),
@@ -859,20 +855,18 @@ pub const Parser = struct {
         return &node.base;
     }
 
-    /// for : "for" "(" decl? expr ")" expr
+    /// for : "for" "(" (decl "in")? expr ")" expr
     fn forExpr(parser: *Parser, skip_nl: bool) Error!?*Node {
         const tok = parser.eatToken(.Keyword_for, skip_nl) orelse return null;
         _ = try parser.expectToken(.LParen, true);
-        const capture = if (parser.eatToken(.Keyword_let, true) orelse
-            parser.eatToken(.Keyword_const, false)) |_|
-            try parser.primaryExpr(true)
-        else
-            null;
+        const let_const = parser.eatToken(.Keyword_let, true) orelse
+            parser.eatToken(.Keyword_const, false);
         const node = try parser.arena.create(Node.For);
         node.* = .{
             .for_tok = tok,
-            .capture = capture,
-            .in_tok = if (capture != null) try parser.expectToken(.Keyword_in, true) else null,
+            .let_const = let_const,
+            .capture = if (let_const != null) try parser.primaryExpr(true) else null,
+            .in_tok = if (let_const != null) try parser.expectToken(.Keyword_in, true) else null,
             .cond = try parser.expr(true),
             .r_paren = try parser.expectToken(.RParen, true),
             .body = try parser.expr(skip_nl),

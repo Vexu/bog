@@ -190,7 +190,7 @@ const Renderer = struct {
                 try self.renderToken(while_expr.while_tok, stream, indent, .Space);
                 try self.renderToken(self.nextToken(while_expr.while_tok), stream, indent, .None);
                 if (while_expr.capture) |some| {
-                    try self.renderToken(self.nextToken(while_expr.while_tok), stream, indent, .Space);
+                    try self.renderToken(while_expr.let_const.?, stream, indent, .Space);
                     try self.renderNode(some, stream, indent, .Space);
                     try self.renderToken(while_expr.eq_tok.?, stream, indent, .Space);
                 }
@@ -205,7 +205,7 @@ const Renderer = struct {
                 try self.renderToken(for_expr.for_tok, stream, indent, .Space);
                 try self.renderToken(self.nextToken(for_expr.for_tok), stream, indent, .None);
                 if (for_expr.capture) |some| {
-                    try self.renderToken(self.nextToken(self.nextToken(for_expr.for_tok)), stream, indent, .Space);
+                    try self.renderToken(for_expr.let_const.?, stream, indent, .Space);
                     try self.renderNode(some, stream, indent, .Space);
                     try self.renderToken(for_expr.in_tok.?, stream, indent, .Space);
                 }
@@ -321,7 +321,7 @@ const Renderer = struct {
                 try self.renderToken(if_expr.if_tok, stream, indent, .Space);
                 try self.renderToken(self.nextToken(if_expr.if_tok), stream, indent, .None);
                 if (if_expr.capture) |some| {
-                    try self.renderToken(self.nextToken(self.nextToken(if_expr.if_tok)), stream, indent, .Space);
+                    try self.renderToken(if_expr.let_const.?, stream, indent, .Space);
                     try self.renderNode(some, stream, indent, .Space);
                     try self.renderToken(if_expr.eq_tok.?, stream, indent, .Space);
                 }

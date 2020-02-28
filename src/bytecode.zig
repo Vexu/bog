@@ -138,6 +138,9 @@ pub const Op = enum(u8) {
     /// if (not A is error) ip = arg1
     JumpNotError,
 
+    /// if (A is none) ip = arg1
+    JumpNone, 
+
     /// A = IMPORT(arg1)
     Import,
 
@@ -203,7 +206,7 @@ pub const Module = struct {
                 },
 
                 // A u32
-                .JumpTrue, .JumpFalse, .JumpNotError => {
+                .JumpTrue, .JumpFalse, .JumpNotError, .JumpNone => {
                     const arg_1 = module.getArg(RegRef, &ip);
                     const arg_2 = module.getArg(u32, &ip);
                     try stream.print(" #{} {}\n", .{ arg_1, arg_2 });

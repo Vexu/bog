@@ -1,4 +1,17 @@
-test "fibonacchi" {
+test "if let" {
+    try expectOutput(
+        \\const maybeInc = fn(val)
+        \\    if (let y = val)
+        \\        return y + 4
+        \\    return 2
+        \\
+        \\return maybeInc(()) + maybeInc(4)
+    ,
+        \\10
+    );
+}
+
+test "fibonacci" {
     // TODO should be able to refer to fib directly
     try expectOutput(
         \\const fib = fn(f,n)

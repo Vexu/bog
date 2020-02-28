@@ -537,10 +537,29 @@ pub const Compiler = struct {
     fn genIf(self: *Compiler, node: *Node.If, res: Result) Error!Value {
         try res.notLval(self, node.if_tok);
 
-        if (node.capture) |some| return self.reportErr("TODO if let", some.firstToken());
+        const has_capture = node.capture != null;
+        var capture_scope = Scope{
+            .id = .Capture,
+            .parent = self.cur_scope,
+            .syms = Symbol.List.init(self.arena),
+        };
+        var if_skip: usize = undefined;
 
         const cond_val = try self.genNodeNonEmpty(node.cond, .Value);
-        if (!cond_val.isRt()) {
+        if (has_capture) {
+            const cond_reg = try cond_val.toRt(self);
+            // jump past if_body if cond == .None
+            try self.emitInstruction(.JumpNone, .{ cond_reg, @as(u32, 0) });
+            if_skip = self.code.len;
+
+            self.cur_scope = &capture_scope;
+            const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)
+                Result{ .Lval = .{ .Let = &Value{ .Rt = cond_reg } } }
+            else
+                Result{ .Lval = .{ .Const = &Value{ .Rt = cond_reg } } };
+
+            assert((try self.genNode(node.capture.?, lval_res)) == .Empty);
+        } else if (!cond_val.isRt()) {
             const bool_val = try cond_val.getBool(self, node.cond.firstToken());
 
             if (bool_val) {
@@ -551,6 +570,10 @@ pub const Compiler = struct {
 
             const res_val = Value{ .None = {} };
             return res_val.maybeRt(self, res);
+        } else {
+            // jump past if_body if cond == false
+            try self.emitInstruction(.JumpFalse, .{ cond_val.getRt(), @as(u32, 0) });
+            if_skip = self.code.len;
         }
         const sub_res = switch (res) {
             .Rt, .Discard => res,
@@ -560,10 +583,6 @@ pub const Compiler = struct {
             },
             .Lval => unreachable,
         };
-
-        // jump past if_body if cond == false
-        try self.emitInstruction(.JumpFalse, .{ cond_val.getRt(), @as(u32, 0) });
-        const if_skip = self.code.len;
 
         const if_val = try self.genNode(node.if_body, sub_res);
         if (sub_res != .Rt and if_val.isRt()) {
@@ -578,6 +597,8 @@ pub const Compiler = struct {
         const else_skip = self.code.len;
 
         self.finishJump(if_skip);
+        // end capture scope
+        self.cur_scope = capture_scope.parent.?;
 
         if (node.else_body) |some| {
             const else_val = try self.genNode(some, sub_res);
