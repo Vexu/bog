@@ -1,3 +1,14 @@
+test "error destructure" {
+    try expectOutput(
+        \\const err = fn() error(2)
+        \\
+        \\let error(y) = err()
+        \\return y + 2
+    ,
+        \\4
+    );
+}
+
 test "catch capture" {
     try expectOutput(
         \\const err = fn() error(2)

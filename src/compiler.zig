@@ -1465,7 +1465,27 @@ pub const Compiler = struct {
     }
 
     fn genError(self: *Compiler, node: *Node.Error, res: Result) Error!Value {
-        try res.notLval(self, node.tok);
+        if (res == .Lval) switch (res.Lval) {
+            .Const, .Let, .Assign => |val| {
+                if (!val.isRt()) {
+                    return self.reportErr("expected an error", node.base.firstToken());
+                }
+                const unwrap_reg = self.registerAlloc();
+                try self.emitInstruction(.UnwrapError, .{ unwrap_reg, val.getRt() });
+                const r_val = Value{ .Rt = unwrap_reg };
+                const l_val = try self.genNode(node.value, switch (res.Lval) {
+                    .Const => Result{ .Lval = .{ .Const = &r_val } },
+                    .Let => Result{ .Lval = .{ .Let = &r_val } },
+                    .Assign => Result{ .Lval = .{ .Assign = &r_val } },
+                    else => unreachable,
+                });
+                std.debug.assert(l_val == .Empty);
+                return Value.Empty;
+            },
+            .AugAssign => {
+                return self.reportErr("invalid left hand side to augmented assignment", node.tok);
+            },
+        };
         const val = try self.genNodeNonEmpty(node.value, .Value);
 
         const sub_res = res.toRt(self);

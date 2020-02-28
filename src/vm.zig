@@ -466,7 +466,8 @@ pub const Vm = struct {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getVal(module);
 
-                    if (B_val.kind != .Error) return error.MalformedByteCode;
+                    if (B_val.kind != .Error)
+                        return vm.reportErr("expected an error");
                     A_ref.* = B_val.kind.Error;
                 },
                 .Import => return vm.reportErr("TODO Op.Import"),
