@@ -1,3 +1,20 @@
+test "string for iter" {
+    try expectOutput(
+        \\let sum = 0
+        \\for (let c in "hellö wörld")
+        \\    if (c == "h") sum += 1
+        \\    else if (c == "e") sum += 2
+        \\    else if (c == "l") sum += 3
+        \\    else if (c == "ö") sum += 4
+        \\    else if (c == "w") sum += 5
+        \\    else if (c == "d") sum += 6
+        \\
+        \\return sum
+    ,
+        \\31
+    );
+}
+
 test "for loops" {
     try expectOutput(
         \\let sum = 0
@@ -379,7 +396,7 @@ const testing = std.testing;
 const bog = @import("bog");
 const Vm = bog.Vm;
 
-var buffer: [10 * 1024]u8 = undefined;
+var buffer: [16 * 1024]u8 = undefined;
 
 fn expectOutput(source: []const u8, expected: []const u8) !void {
     var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);

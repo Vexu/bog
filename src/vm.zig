@@ -475,7 +475,7 @@ pub const Vm = struct {
                     if (B_val.kind != .Iterator)
                         return error.MalformedByteCode;
 
-                    A_ref.* = B_val.kind.Iterator.next(vm);
+                    try B_val.kind.Iterator.next(vm, A_ref);
                 },
                 .UnwrapError => {
                     const A_ref = try vm.getRef(module);

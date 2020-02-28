@@ -213,7 +213,10 @@ fn debug_tokens(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     const stream = &std.io.getStdOut().outStream().stream;
     var it = tree.tokens.iterator(0);
     while (it.next()) |tok| {
-        try stream.print("{}  {}...{}\n", .{ @tagName(tok.id), tok.start, tok.end });
+        switch (tok.id) {
+            .Nl, .End, .Begin => try stream.print("{}\n", .{@tagName(tok.id)}),
+            else => try stream.print("{} |{}|\n", .{ @tagName(tok.id), source[tok.start..tok.end] }),
+        }
     }
 }
 

@@ -148,10 +148,7 @@ pub const Parser = struct {
         const res = if (tok.id == .Keyword_return and switch (peek.id) {
             .Nl, .RParen, .RBrace, .RBracket, .Keyword_else, .Comma, .Colon => false,
             else => true,
-        })
-            try parser.expr(false)
-        else
-            null;
+        }) try parser.expr(false) else null;
         const node = try parser.arena.create(Node.Jump);
         node.* = .{
             .tok = tok.index,
@@ -827,11 +824,18 @@ pub const Parser = struct {
             .cond = try parser.expr(true),
             .r_paren = try parser.expectToken(.RParen, true),
             .if_body = try parser.expr(skip_nl),
-            .else_tok = parser.eatToken(.Keyword_else, skip_nl),
+            .else_tok = null,
             .else_body = null,
         };
-        if (node.else_tok != null) {
-            node.else_body = try parser.expr(skip_nl);
+        { // check for else token on next line but don't skip ends
+            const start_index = parser.it.index;
+            _ = parser.eatToken(.Nl, false);
+            if (parser.eatToken(.Keyword_else, skip_nl)) |else_tok| {
+                node.else_tok = else_tok;
+                node.else_body = try parser.expr(skip_nl);
+            } else {
+                parser.it.set(start_index);
+            }
         }
         return &node.base;
     }

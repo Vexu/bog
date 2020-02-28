@@ -67,23 +67,44 @@ pub const Value = struct {
             index: usize,
 
             // TODO protect against concurrent modification
-            pub fn next(iter: *@This(), vm: *Vm) *Value {
-                defer iter.index += 1;
+            pub fn next(iter: *@This(), vm: *Vm, res: *?*Value) !void {
                 switch (iter.value.kind) {
                     .Tuple => |tuple| {
-                        if (iter.index == tuple.len)
-                            return &Value.None;
+                        if (iter.index == tuple.len) {
+                            res.* = &Value.None;
+                            return;
+                        }
 
-                        return tuple[iter.index];
+                        res.* = tuple[iter.index];
+                        iter.index += 1;
                     },
                     .List => |list| {
-                        if (iter.index == list.len)
-                            return &Value.None;
+                        if (iter.index == list.len) {
+                            res.* = &Value.None;
+                            return;
+                        }
 
-                        return list.at(iter.index);
+                        res.* = list.at(iter.index);
+                        iter.index += 1;
                     },
+                    .Str => |str| {
+                        if (iter.index == str.len) {
+                            res.* = &Value.None;
+                            return;
+                        }
+                        if (res.* == null)
+                            res.* = try vm.gc.alloc();
 
-                    .Str => @panic("TODO: string iterator"),
+                        const cp_len = std.unicode.utf8ByteSequenceLength(str[iter.index]) catch
+                            return vm.reportErr("invalid utf-8 sequence");
+                        iter.index += cp_len;
+
+                        res.*.?.* = .{
+                            .kind = .{
+                                .Str = str[iter.index - cp_len .. iter.index],
+                            },
+                        };
+                    },
                     .Map => @panic("TODO: map iterator"),
                     .Range => @panic("TODO: range iterator"),
                     else => unreachable,
@@ -418,10 +439,9 @@ pub const Value = struct {
 
     pub fn iterator(val: *Value, vm: *Vm) !*Value {
         switch (val.kind) {
-            .Str => return vm.reportErr("TODO: string iterator"),
             .Map => return vm.reportErr("TODO: map iterator"),
             .Range => return vm.reportErr("TODO: range iterator"),
-            .Tuple, .List => {},
+            .Str, .Tuple, .List => {},
             .Iterator => unreachable,
             else => return vm.reportErr("invalid type for iteration"),
         }
