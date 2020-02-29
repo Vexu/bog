@@ -742,6 +742,7 @@ pub const Vm = struct {
     }
 
     fn reportErr(vm: *Vm, msg: []const u8) Error {
+        @setCold(true);
         try vm.errors.add(msg, vm.line_loc, .Error);
         var i: u8 = 0;
         while (vm.call_stack.pop()) |some| {

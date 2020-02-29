@@ -1,49 +1,73 @@
 Small, strongly typed, embeddable language. 
----
-Not much is done but this is how it is going to look like
+## Examples
+
+### Hello world (Neither work yet)
 ```rust
-const {print} = import('io')
-
-const assert = fn(ok) if (not ok) error("assertion failure")
-
-let x = 0
-
-# error: cannot convert boolean to integer
-# x + true
-x + (true as int)
-assert(x == 1)
-
-const foo = fn(arg)
-    if (arg == 4)
-        return error(4)
-    arg += if (arg == 2) 1 else 2
-
-let y = foo(x)
-
-assert(x == 2 and y == x)
-
-# copy on assign
-const baz = fn(x)
-    let z = x
-    z += 2
-    z
-
-assert(baz(x) == 4 and x == 2)
-
-# error: error discarded
-# assert(false)
-
-# constant declarations in module scope can be referenced before they 
-# are declared but using them is an error
-const two = fn() one(1)
-# error: use of undefined value
-# two()
-const one = fn(val) val
-
-assert(two() == 1)
-
-# return optional as last statement of block
-return {
-    assert,
-}
+const {print} = import("io")
+print("hello world")
+# or native("std.print")("hello world")
 ```
+
+### Loops
+```rust
+let sum = 0
+for (let c in "hellö wörld")
+    if (c == "h") sum += 1
+    else if (c == "e") sum += 2
+    else if (c == "l") sum += 3
+    else if (c == "ö") sum += 4
+    else if (c == "w") sum += 5
+    else if (c == "d") sum += 6
+
+return sum # 31
+```
+```rust
+const getSome = fn(val)  if (val != 0) val - 1
+
+let val = 10
+while (let newVal = getSome(val))
+    val = newVal
+return val # 0
+```
+
+### Destructuring assignment
+```rust
+const add = fn ((a,b)) a + b
+const tuplify = fn (a,b) (a,b)
+return add(tuplify(1,2)) # 3
+```
+
+## Embed
+```zig
+const bog = @import("bog");
+
+fn run(allocator: *Allocator, source: []const u8, vm: *Vm) !?*bog.Value {
+    var module = try bog.compile(allocator, source, &vm.errors);
+    // TODO defer module.deinit();
+
+    // TODO this should happen in vm.exec but currently that would break repl
+    vm.ip = module.start_index;
+    return try vm.exec(&module);
+}
+
+...
+
+var vm = bog.Vm.init(allocator, false);
+defer vm.deinit();
+
+const res = run(allocator, source, &vm) catch |e| switch (e) {
+    else => |err| return err,
+    error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
+        try vm.errors.render(source, out_stream);
+        return e;
+    },
+};
+
+if (res) |some| ...
+```
+
+## Setup
+* Download latest Zig from https://ziglang.org/download/
+* Clone this repo
+* Build with `zig build`
+* Run with `./zig-cache/bin/bog`

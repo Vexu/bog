@@ -68,7 +68,7 @@ test "catch capture" {
 
 test "while let" {
     try expectOutput(
-        \\const getSome = fn(val)  if (val == 0) () else val - 1
+        \\const getSome = fn(val)  if (val != 0) val - 1
         \\
         \\let val = 10
         \\while (let newVal = getSome(val))
