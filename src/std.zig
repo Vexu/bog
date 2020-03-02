@@ -6,9 +6,9 @@ const Registry = bog.native.Registry;
 
 /// std.io
 pub const io = struct {
-    fn print() void {
+    fn print(str: []const u8) void {
         const stream = &std.io.getStdOut().outStream().stream;
-        stream.write("hello from zig\n") catch return;
+        stream.write(str) catch return;
     }
 
     pub fn register(reg: *Registry) !void {

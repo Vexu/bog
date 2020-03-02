@@ -445,6 +445,9 @@ pub const Vm = struct {
                     }
 
                     if (vm.call_stack.len == start_len) {
+                        if (start_len == 0) {
+                            vm.gc.stackShrink(0);
+                        }
                         // module result
                         return B_val;
                     }
@@ -541,7 +544,7 @@ pub const Vm = struct {
                     if (A_val.kind == .Error) {
                         return vm.reportErr("error discarded");
                     }
-                    if (vm.options.repl and vm.call_stack.len == start_len) {
+                    if (vm.options.repl and vm.call_stack.len == 0) {
                         return A_val;
                     }
                 },
@@ -661,8 +664,12 @@ pub const Vm = struct {
                             return vm.reportErr("unexpected arg count");
                         }
 
-                        // TODO support calling with arguments
-                        A_ref.* = try native.func(vm, &[_]*Value{});
+                        // TODO do this properly
+                        var args: [1]*Value = undefined;
+                        if (arg_count == 1)
+                            args[0] = vm.gc.stackGet(C) catch
+                                return error.MalformedByteCode;
+                        A_ref.* = try native.func(vm, args[0..arg_count]);
                         continue;
                     }
 
@@ -694,6 +701,9 @@ pub const Vm = struct {
                     const A_val = try vm.getVal(module);
 
                     if (vm.call_stack.len == start_len) {
+                        if (start_len == 0) {
+                            vm.gc.stackShrink(0);
+                        }
                         // module result
                         return A_val;
                     }
@@ -713,6 +723,9 @@ pub const Vm = struct {
                 },
                 .ReturnNone => {
                     if (vm.call_stack.len == start_len) {
+                        if (start_len == 0) {
+                            vm.gc.stackShrink(0);
+                        }
                         // module result
                         return &Value.None;
                     }

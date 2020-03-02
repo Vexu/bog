@@ -1,11 +1,11 @@
 Small, strongly typed, embeddable language. 
 ## Examples
 
-### Hello world (Neither work yet)
+### Hello world (only the latter works currently)
 ```rust
 const {print} = import("io")
 print("hello world")
-# or native("std.print")("hello world")
+# or native("std.print")("hello world\n")
 ```
 
 ### Loops
@@ -52,8 +52,9 @@ fn run(allocator: *Allocator, source: []const u8, vm: *Vm) !?*bog.Value {
 
 ...
 
-var vm = bog.Vm.init(allocator, .{});
+var vm = bog.Vm.init(allocator, .{ .import_files = true });
 defer vm.deinit();
+try bog.std.registerAll(&vm.native_registry);
 
 const res = run(allocator, source, &vm) catch |e| switch (e) {
     else => |err| return err,
