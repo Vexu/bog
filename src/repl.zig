@@ -65,6 +65,7 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     defer repl.compiler.strings.deinit();
     defer repl.compiler.root_scope.code.deinit();
     defer repl.compiler.string_interner.deinit();
+    try bog.std.registerAll(&repl.vm.native_registry);
 
     while (true) {
         repl.handleLine(in_stream, out_stream) catch |err| switch (err) {

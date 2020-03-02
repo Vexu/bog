@@ -70,6 +70,7 @@ fn run(alloc: *std.mem.Allocator, args: [][]const u8) !void {
 
     var vm = try bog.Vm.init(alloc, .{ .import_files = true });
     defer vm.deinit();
+    try bog.std.registerAll(&vm.native_registry);
 
     const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
@@ -84,18 +85,24 @@ fn run(alloc: *std.mem.Allocator, args: [][]const u8) !void {
         error.MalformedByteCode => if (is_debug) @panic("malformed") else print_and_exit("attempted to execute invalid bytecode", .{}),
         error.OutOfMemory => return error.OutOfMemory,
     };
-    if (res) |some| {
-        if (some.kind == .Int and some.kind.Int >= 0 and some.kind.Int < std.math.maxInt(u8)) {
-            process.exit(@intCast(u8, some.kind.Int));
-        } else if (some.kind == .Error) {
+    if (res) |some| switch (some.kind) {
+        .Int => |int| {
+            if (int >= 0 and int < std.math.maxInt(u8)) {
+                process.exit(@intCast(u8, int));
+            } else {
+                print_and_exit("invalid exit code: {}", .{int});
+            }
+        },
+        .Error => |err| {
             const stderr = &std.io.getStdErr().outStream().stream;
             try stderr.write("script exited with error: ");
-            try some.kind.Error.dump(stderr, 4);
+            try err.dump(stderr, 4);
             try stderr.write("\n");
             process.exit(1);
-        }
-        print_and_exit("invalid return type '{}'", .{@tagName(some.kind)});
-    }
+        },
+        .None => {},
+        else => print_and_exit("invalid return type '{}'", .{@tagName(some.kind)}),
+    };
 }
 
 fn run_source(alloc: *std.mem.Allocator, vm: *bog.Vm, source: []const u8) !?*bog.Value {

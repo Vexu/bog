@@ -5,9 +5,6 @@ const bog = @import("bog.zig");
 const Value = bog.Value;
 const Vm = bog.Vm;
 
-pub const Native = struct {
-    arg_count: u8,
-
 pub const Registry = struct {
     map: std.StringHashMap(Native),
 
@@ -22,6 +19,10 @@ pub const Registry = struct {
     pub fn deinit(self: *Registry) void {
         self.map.deinit();
     }
+
+    pub fn register(self: *Registry, name: []const u8, comptime func: var) !void {
+        std.debug.assert((try self.map.put(name, wrap(func))) == null);
+    }
 };
 
 pub const Native = struct {
@@ -30,7 +31,7 @@ pub const Native = struct {
     func: fn (*Vm, []*Value) Vm.Error!*Value,
 };
 
-pub fn wrap(comptime func: var) Native {
+fn wrap(comptime func: var) Native {
     const Fn = @typeInfo(@TypeOf(func)).Fn;
     if (Fn.is_generic or Fn.is_var_args or Fn.return_type == null)
         @compileError("unsupported function");

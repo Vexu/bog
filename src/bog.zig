@@ -1,5 +1,5 @@
-const std = @import("std");
-const Allocator = std.mem.Allocator;
+const zig_std = @import("std");
+const Allocator = zig_std.mem.Allocator;
 
 const tokenizer = @import("tokenizer.zig");
 pub const Token = tokenizer.Token;
@@ -36,13 +36,15 @@ pub const native = @import("native.zig");
 
 pub const repl = @import("repl.zig");
 
+pub const std = @import("std.zig");
+
 /// file extension of bog text files
 pub const extension = ".bog";
 
 /// file extension of bog bytecode files, 'byte bog'
 pub const bytecode_extension = ".bbog";
 
-pub const version = std.builtin.Version{
+pub const version = zig_std.builtin.Version{
     .major = 0,
     .minor = 0,
     .patch = 1,
@@ -57,7 +59,7 @@ pub const Errors = struct {
         Trace,
     };
 
-    const List = std.SegmentedList(struct {
+    const List = zig_std.SegmentedList(struct {
         msg: []const u8,
         index: u32,
         kind: Kind,
@@ -96,9 +98,9 @@ pub const Errors = struct {
             try out_stream.print("{}\n" ++ RESET, .{e.msg});
 
             const start = lineBegin(source, e.index);
-            const end = std.mem.indexOfScalarPos(u8, source, e.index, '\n') orelse source.len;
+            const end = zig_std.mem.indexOfScalarPos(u8, source, e.index, '\n') orelse source.len;
             try out_stream.write(source[start..end]);
-            try out_stream.write(std.cstr.line_sep);
+            try out_stream.write(zig_std.cstr.line_sep);
             try out_stream.writeByteNTimes(' ', e.index - start);
             try out_stream.write(GREEN ++ "^\n" ++ RESET);
         }
