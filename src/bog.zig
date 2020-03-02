@@ -32,8 +32,7 @@ pub const Op = bytecode.Op;
 pub const Module = bytecode.Module;
 pub const RegRef = bytecode.RegRef;
 
-const native = @import("native.zig");
-pub const NativeFn = native.NativeFn;
+pub const native = @import("native.zig");
 
 pub const repl = @import("repl.zig");
 

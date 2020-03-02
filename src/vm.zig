@@ -24,6 +24,9 @@ pub const Vm = struct {
     // TODO come up with better debug info
     line_loc: u32 = 0,
 
+    /// all currently registered native functions
+    native_registry: bog.native.Registry,
+
     /// all currently loaded packages and files
     imported_modules: std.StringHashMap(*Module),
 
@@ -61,7 +64,7 @@ pub const Vm = struct {
         MalformedByteCode,
     } || Allocator.Error;
 
-    pub fn init(allocator: *Allocator, options: Options) Vm {
+    pub fn init(allocator: *Allocator, options: Options) !Vm {
         return Vm{
             .ip = 0,
             .sp = 0,
@@ -70,6 +73,7 @@ pub const Vm = struct {
             .errors = Errors.init(allocator),
             .options = options,
             .allocator = allocator,
+            .native_registry = try bog.native.Registry.init(allocator),
             .imported_modules = std.StringHashMap(*Module).init(allocator),
         };
     }
@@ -78,6 +82,7 @@ pub const Vm = struct {
         vm.call_stack.deinit();
         vm.errors.deinit();
         vm.gc.deinit();
+        vm.native_registry.deinit();
         var it = vm.imported_modules.iterator();
         while (it.next()) |mod| {
             mod.value.deinit(vm.allocator);
@@ -519,7 +524,17 @@ pub const Vm = struct {
 
                     A_ref.* = try vm.import(str);
                 },
-                .Native => return vm.reportErr("TODO Op.Native"),
+                .Native => {
+                    const A_val = try vm.getNewVal(module);
+                    const str = try vm.getString(module);
+
+                    A_val.* = .{
+                        .kind = .{
+                            .Native = vm.native_registry.map.getValue(str) orelse
+                                return vm.reportErr("native function not registered"),
+                        },
+                    };
+                },
                 .Discard => {
                     const A_val = try vm.getVal(module);
 
@@ -638,6 +653,18 @@ pub const Vm = struct {
                     const B_val = try vm.getVal(module);
                     const C = vm.getArg(module, RegRef);
                     const arg_count = vm.getArg(module, u16);
+
+                    if (B_val.kind == .Native) {
+                        const native = B_val.kind.Native;
+                        if (native.arg_count != arg_count) {
+                            // TODO improve this error message to tell the expected and given counts
+                            return vm.reportErr("unexpected arg count");
+                        }
+
+                        // TODO support calling with arguments
+                        A_ref.* = try native.func(vm, &[_]*Value{});
+                        continue;
+                    }
 
                     if (B_val.kind != .Fn) {
                         return vm.reportErr("attempt to call non function type");

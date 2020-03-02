@@ -28,7 +28,7 @@ fn expectError(source: []const u8, expected: []const u8) !void {
     var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const alloc = &buf_alloc.allocator;
 
-    var vm = Vm.init(alloc, .{});
+    var vm = try Vm.init(alloc, .{});
 
     run(alloc, source, &vm) catch |e| switch (e) {
         else => return e,
