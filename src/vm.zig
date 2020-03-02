@@ -722,10 +722,30 @@ pub const Vm = struct {
             defer vm.allocator.free(source);
             const mod = bog.compile(vm.allocator, source, &vm.errors) catch
                 return vm.reportErr("import failed");
+            mod.name = try mem.dupe(vm.allocator, u8, id);
             _ = try vm.imported_modules.put(id, mod);
             break :blk mod;
-        } else if (mem.endsWith(u8, id, bog.bytecode_extension)) {
-            return vm.reportErr("TODO: import bytecode module");
+        } else if (mem.endsWith(u8, id, bog.bytecode_extension)) blk: {
+            if (!vm.options.import_files) {
+                return vm.reportErr("import failed");
+            }
+            const source = std.fs.cwd().readFileAlloc(vm.allocator, id, vm.options.max_import_size) catch |e| switch (e) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return vm.reportErr("import failed"),
+            };
+            defer vm.allocator.free(source);
+            const read_module = Module.read(source) catch
+                return vm.reportErr("import failed");
+
+            const mod = try vm.allocator.create(Module);
+            mod.* = .{
+                .name = try mem.dupe(vm.allocator, u8, id),
+                .code = try mem.dupe(vm.allocator, u8, read_module.code),
+                .strings = try mem.dupe(vm.allocator, u8, read_module.strings),
+                .entry = read_module.entry,
+            };
+            _ = try vm.imported_modules.put(id, mod);
+            break :blk mod;
         } else {
             return vm.reportErr("no such package");
         };

@@ -1,9 +1,9 @@
 const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
-const ast = @import("ast.zig");
-const Node = ast.Node;
-const TypeId = @import("value.zig").Value.TypeId;
+const bog = @import("bog.zig");
+const Node = bog.Node;
+const TypeId = bog.Value.TypeId;
 
 // TODO give these numbers once they are more stable
 pub const Op = enum(u8) {
@@ -194,12 +194,87 @@ pub const Module = struct {
         alloc.destroy(module);
     }
 
-    pub fn read(src: []const u8) Module {
-        @panic("TODO");
+    pub const magic = "\x7fbog";
+    pub const header_version = 1;
+    pub const bog_version = @bitCast(u32, packed struct {
+        _pad: u8 = 0,
+        major: u8 = @truncate(u8, bog.version.major),
+        minor: u8 = @truncate(u8, bog.version.minor),
+        patch: u8 = @truncate(u8, bog.version.patch),
+    }{});
+
+    /// all integer values are little-endian
+    pub const Header = packed struct {
+        magic: [4]u8,
+        header_version: u32,
+        bog_version: u32,
+        strings: u32,
+        code: u32,
+        entry: u32,
+    };
+
+    pub const ReadError = error{
+        InvalidMagic,
+        InvalidHeader,
+        UnsupportedVersion,
+    };
+
+    pub fn read(src: []const u8) ReadError!Module {
+        if (!mem.startsWith(u8, src, magic))
+            return error.InvalidMagic;
+        if (src.len < @sizeOf(Header))
+            return error.InvalidHeader;
+
+        const header = if (@import("builtin").endian == .Little)
+            @ptrCast(*const Header, src.ptr).*
+        else
+            Header{
+                .magic = @ptrCast(*const [4]u8, src.ptr).*,
+                .header_version = mem.readIntLittle(u32, @ptrCast(*const [4]u8, src.ptr + 4)),
+                .bog_version = mem.readIntLittle(u32, @ptrCast(*const [4]u8, src.ptr + 8)),
+                .strings = mem.readIntLittle(u32, @ptrCast(*const [4]u8, src.ptr + 12)),
+                .code = mem.readIntLittle(u32, @ptrCast(*const [4]u8, src.ptr + 16)),
+                .entry = mem.readIntLittle(u32, @ptrCast(*const [4]u8, src.ptr + 20)),
+            };
+
+        // strings must come before code
+        if (header.strings > header.code)
+            return error.InvalidHeader;
+        
+        if (src.len < header.code)
+            return error.InvalidHeader;
+
+        return Module{
+            .name = "",
+            .strings = src[header.strings..header.code],
+            .code = src[header.code..],
+            // entry is offset to to the beginning of code
+            .entry = header.entry - header.code,
+        };
     }
 
-    pub fn write(module: Module, stream: var) @TypeOf(stream).Error!void {
-        @panic("TODO");
+    pub fn write(module: Module, stream: var) @TypeOf(stream).Child.Error!void {
+        try stream.write(magic);
+        try stream.writeIntLittle(u32, header_version);
+        try stream.writeIntLittle(u32, bog_version);
+
+        // strings come immediately after header
+        const strings_offset = @intCast(u32, @sizeOf(Header));
+        try stream.writeIntLittle(u32, strings_offset);
+
+        // code comes immediately after strings
+        const code_offset = strings_offset + @intCast(u32, module.strings.len);
+        try stream.writeIntLittle(u32, code_offset);
+
+        // entry is offset to the beginning of the code
+        const entry_offset = code_offset + module.entry;
+        try stream.writeIntLittle(u32, entry_offset);
+
+        // write strings
+        try stream.write(module.strings);
+
+        // write code
+        try stream.write(module.code);
     }
 
     pub fn dump(module: Module, stream: var) @TypeOf(stream).Child.Error!void {

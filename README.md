@@ -47,7 +47,7 @@ fn run(allocator: *Allocator, source: []const u8, vm: *Vm) !?*bog.Value {
 
     // TODO this should happen in vm.exec but currently that would break repl
     vm.ip = module.entry;
-    return try vm.exec(&module);
+    return try vm.exec(module);
 }
 
 ...

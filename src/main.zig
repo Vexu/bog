@@ -25,6 +25,12 @@ pub fn main() !void {
             if (mem.eql(u8, args[1], "debug:tokens")) {
                 return debug_tokens(alloc, args[2..]);
             }
+            if (mem.eql(u8, args[1], "debug:write")) {
+                return debug_write(alloc, args[2..]);
+            }
+            if (mem.eql(u8, args[1], "debug:read")) {
+                return debug_read(alloc, args[2..]);
+            }
         }
         if (!mem.startsWith(u8, "-", args[1])) {
             return run(alloc, args[1..]);
@@ -173,6 +179,7 @@ fn debug_dump(alloc: *std.mem.Allocator, args: [][]const u8) !void {
             process.exit(1);
         },
     };
+    defer module.deinit(alloc);
 
     const stream = &std.io.getStdOut().outStream().stream;
     try module.dump(stream);
@@ -218,6 +225,56 @@ fn debug_tokens(alloc: *std.mem.Allocator, args: [][]const u8) !void {
             else => try stream.print("{} |{}|\n", .{ @tagName(tok.id), source[tok.start..tok.end] }),
         }
     }
+}
+
+fn debug_write(alloc: *std.mem.Allocator, args: [][]const u8) !void {
+    if (args.len != 2) {
+        print_and_exit("expected one argument", .{});
+    }
+    const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => |err| {
+            print_and_exit("unable to open '{}': {}", .{ args[0], err });
+        },
+    };
+    defer alloc.free(source);
+
+    var errors = bog.Errors.init(alloc);
+    defer errors.deinit();
+
+    var module = bog.compile(alloc, source, &errors) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        error.TokenizeError, error.ParseError, error.CompileError => {
+            const stream = &std.io.getStdErr().outStream().stream;
+            try errors.render(source, stream);
+            process.exit(1);
+        },
+    };
+    defer module.deinit(alloc);
+
+    const file = try std.fs.cwd().createFile(args[1], .{});
+    defer file.close();
+
+    const stream = &file.outStream().stream;
+    try module.write(stream);
+}
+
+fn debug_read(alloc: *std.mem.Allocator, args: [][]const u8) !void {
+    if (args.len != 1) {
+        print_and_exit("expected one argument", .{});
+    }
+    const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
+        error.OutOfMemory => return error.OutOfMemory,
+        else => |err| {
+            print_and_exit("unable to open '{}': {}", .{ args[0], err });
+        },
+    };
+    defer alloc.free(source);
+
+    const module = try bog.Module.read(source);
+
+    const stream = &std.io.getStdOut().outStream().stream;
+    try module.dump(stream);
 }
 
 comptime {

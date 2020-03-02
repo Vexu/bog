@@ -43,6 +43,12 @@ pub const extension = ".bog";
 /// file extension of bog bytecode files, 'byte bog'
 pub const bytecode_extension = ".bbog";
 
+pub const version = std.builtin.Version{
+    .major = 0,
+    .minor = 0,
+    .patch = 1,
+};
+
 pub const Errors = struct {
     list: List,
 
