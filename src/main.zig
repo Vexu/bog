@@ -98,7 +98,7 @@ fn run_source(alloc: *std.mem.Allocator, vm: *bog.Vm, source: []const u8) !?*bog
 
     // TODO this should happen in vm.exec but currently that would break repl
     vm.ip = module.entry;
-    return try vm.exec(&module);
+    return try vm.exec(module);
 }
 
 const usage_fmt =

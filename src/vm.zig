@@ -25,7 +25,7 @@ pub const Vm = struct {
     line_loc: u32 = 0,
 
     /// all currently loaded packages and files
-    imported_modules: std.StringHashMap(Module),
+    imported_modules: std.StringHashMap(*Module),
 
     allocator: *Allocator,
 
@@ -53,6 +53,7 @@ pub const Vm = struct {
         sp: usize,
         line_loc: u32,
         ret_loc: *?*Value,
+        module: *Module,
     };
 
     pub const Error = error{
@@ -69,7 +70,7 @@ pub const Vm = struct {
             .errors = Errors.init(allocator),
             .options = options,
             .allocator = allocator,
-            .imported_modules = std.StringHashMap(Module).init(allocator),
+            .imported_modules = std.StringHashMap(*Module).init(allocator),
         };
     }
 
@@ -85,8 +86,9 @@ pub const Vm = struct {
     }
 
     // TODO rename to step and execute 1 instruction
-    pub fn exec(vm: *Vm, module: *Module) Error!?*Value {
+    pub fn exec(vm: *Vm, mod: *Module) Error!?*Value {
         const start_len = vm.call_stack.len;
+        var module = mod;
         while (vm.ip < module.code.len) {
             const op = @intToEnum(Op, vm.getArg(module, u8));
             switch (op) {
@@ -443,6 +445,7 @@ pub const Vm = struct {
                     }
 
                     const frame = vm.call_stack.pop() orelse unreachable;
+                    module = frame.module;
                     frame.ret_loc.* = try vm.gc.alloc();
                     frame.ret_loc.*.?.* = B_val.*;
 
@@ -654,9 +657,11 @@ pub const Vm = struct {
                         .ip = vm.ip,
                         .line_loc = vm.line_loc,
                         .ret_loc = A_ref,
+                        .module = mod,
                     });
                     vm.sp += C;
                     vm.ip = B_val.kind.Fn.offset;
+                    module = B_val.kind.Fn.module;
                 },
                 .Return => {
                     const A_val = try vm.getVal(module);
@@ -667,6 +672,7 @@ pub const Vm = struct {
                     }
 
                     const frame = vm.call_stack.pop() orelse unreachable;
+                    module = frame.module;
                     if (A_val.kind != .Bool and A_val.kind != .None) {
                         frame.ret_loc.* = try vm.gc.alloc();
                         frame.ret_loc.*.?.* = A_val.*;
@@ -684,7 +690,8 @@ pub const Vm = struct {
                         return &Value.None;
                     }
 
-                    const frame = vm.call_stack.pop() orelse return error.MalformedByteCode;
+                    const frame = vm.call_stack.pop() orelse unreachable;
+                    module = frame.module;
                     frame.ret_loc.* = &Value.None;
                     vm.gc.stackShrink(vm.sp);
                     vm.ip = frame.ip;
@@ -730,7 +737,7 @@ pub const Vm = struct {
         vm.sp = vm.gc.stack.len;
 
         vm.ip = mod.entry;
-        const res = try vm.exec(&mod);
+        const res = try vm.exec(mod);
 
         vm.gc.stackShrink(saved_stack_len);
         vm.ip = saved_ip;

@@ -49,5 +49,5 @@ fn run(alloc: *mem.Allocator, source: []const u8, vm: *Vm) !void {
 
     // TODO this should happen in vm.exec but currently that would break repl
     vm.ip = module.entry;
-    _ = try vm.exec(&module);
+    _ = try vm.exec(module);
 }

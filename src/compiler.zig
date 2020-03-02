@@ -270,7 +270,7 @@ pub const Compiler = struct {
         }
     };
 
-    pub fn compile(allocator: *Allocator, source: []const u8, errors: *Errors) (Error || bog.Parser.Error || bog.Tokenizer.Error)!bog.Module {
+    pub fn compile(allocator: *Allocator, source: []const u8, errors: *Errors) (Error || bog.Parser.Error || bog.Tokenizer.Error)!*bog.Module {
         var tree = try bog.parse(allocator, source, errors);
         const arena = &tree.arena_allocator.allocator;
         var compiler = Compiler{
@@ -309,12 +309,14 @@ pub const Compiler = struct {
 
         const entry = compiler.module_code.len;
         try compiler.module_code.appendSlice(compiler.code.toSliceConst());
-        return bog.Module{
+        const mod = try allocator.create(bog.Module);
+        mod.* = .{
             .name = "",
             .code = compiler.module_code.toOwnedSlice(),
             .strings = compiler.strings.toOwnedSlice(),
             .entry = @truncate(u32, entry),
         };
+        return mod;
     }
 
     pub fn compileRepl(self: *Compiler, node: *Node, module: *bog.Module) Error!usize {

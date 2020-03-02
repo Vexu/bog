@@ -187,10 +187,11 @@ pub const Module = struct {
     entry: u32,
     // debug_info,
 
-    pub fn deinit(module: Module, alloc: *std.mem.Allocator) void {
+    pub fn deinit(module: *Module, alloc: *std.mem.Allocator) void {
         alloc.free(module.name);
         alloc.free(module.code);
         alloc.free(module.strings);
+        alloc.destroy(module);
     }
 
     pub fn read(src: []const u8) Module {
