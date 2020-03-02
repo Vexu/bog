@@ -28,7 +28,7 @@ fn expectError(source: []const u8, expected: []const u8) !void {
     var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const alloc = &buf_alloc.allocator;
 
-    var vm = Vm.init(alloc, false);
+    var vm = Vm.init(alloc, .{});
 
     run(alloc, source, &vm) catch |e| switch (e) {
         else => return e,
@@ -48,6 +48,6 @@ fn run(alloc: *mem.Allocator, source: []const u8, vm: *Vm) !void {
     var module = try bog.compile(alloc, source, &vm.errors);
 
     // TODO this should happen in vm.exec but currently that would break repl
-    vm.ip = module.start_index;
+    vm.ip = module.entry;
     _ = try vm.exec(&module);
 }

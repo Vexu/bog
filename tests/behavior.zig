@@ -411,7 +411,7 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
     var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const alloc = &buf_alloc.allocator;
 
-    var vm = Vm.init(alloc, false);
+    var vm = Vm.init(alloc, .{});
     const res = run(alloc, source, &vm) catch |e| switch (e) {
         else => return e,
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
@@ -438,6 +438,6 @@ fn run(alloc: *mem.Allocator, source: []const u8, vm: *Vm) !?*bog.Value {
     var module = try bog.compile(alloc, source, &vm.errors);
 
     // TODO this should happen in vm.exec but currently that would break repl
-    vm.ip = module.start_index;
+    vm.ip = module.entry;
     return try vm.exec(&module);
 }

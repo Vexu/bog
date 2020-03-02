@@ -24,9 +24,9 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
             .name = "<stdin>",
             .code = "",
             .strings = "",
-            .start_index = 0,
+            .entry = 0,
         },
-        .vm = Vm.init(allocator, true),
+        .vm = Vm.init(allocator, .{ .repl = true, .import_files = true }),
         .buffer = try ArrayList(u8).initCapacity(allocator, std.mem.page_size),
         .tokenizer = .{
             .errors = undefined,

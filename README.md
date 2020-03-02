@@ -43,16 +43,16 @@ const bog = @import("bog");
 
 fn run(allocator: *Allocator, source: []const u8, vm: *Vm) !?*bog.Value {
     var module = try bog.compile(allocator, source, &vm.errors);
-    // TODO defer module.deinit();
+    defer module.deinit();
 
     // TODO this should happen in vm.exec but currently that would break repl
-    vm.ip = module.start_index;
+    vm.ip = module.entry;
     return try vm.exec(&module);
 }
 
 ...
 
-var vm = bog.Vm.init(allocator, false);
+var vm = bog.Vm.init(allocator, .{});
 defer vm.deinit();
 
 const res = run(allocator, source, &vm) catch |e| switch (e) {

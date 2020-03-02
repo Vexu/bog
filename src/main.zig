@@ -62,7 +62,7 @@ fn run(alloc: *std.mem.Allocator, args: [][]const u8) !void {
         bytecode = true;
     }
 
-    var vm = bog.Vm.init(alloc, false);
+    var vm = bog.Vm.init(alloc, .{ .import_files = true });
     defer vm.deinit();
 
     const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
@@ -94,10 +94,10 @@ fn run(alloc: *std.mem.Allocator, args: [][]const u8) !void {
 
 fn run_source(alloc: *std.mem.Allocator, vm: *bog.Vm, source: []const u8) !?*bog.Value {
     var module = try bog.compile(alloc, source, &vm.errors);
-    // TODO defer module.deinit()
+    defer module.deinit(alloc);
 
     // TODO this should happen in vm.exec but currently that would break repl
-    vm.ip = module.start_index;
+    vm.ip = module.entry;
     return try vm.exec(&module);
 }
 

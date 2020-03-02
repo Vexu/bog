@@ -307,13 +307,13 @@ pub const Compiler = struct {
             }
         }
 
-        const start_index = compiler.module_code.len;
+        const entry = compiler.module_code.len;
         try compiler.module_code.appendSlice(compiler.code.toSliceConst());
         return bog.Module{
             .name = "",
             .code = compiler.module_code.toOwnedSlice(),
             .strings = compiler.strings.toOwnedSlice(),
-            .start_index = @truncate(u32, start_index),
+            .entry = @truncate(u32, entry),
         };
     }
 

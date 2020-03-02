@@ -19,15 +19,34 @@ pub const Vm = struct {
     call_stack: CallStack,
     gc: Gc,
 
-    repl: bool,
-
     errors: Errors,
 
     // TODO come up with better debug info
     line_loc: u32 = 0,
 
+    /// all currently loaded packages and files
+    imported_modules: std.StringHashMap(Module),
+
+    allocator: *Allocator,
+
+    options: Options,
+
     const CallStack = std.SegmentedList(FunctionFrame, 16);
     const max_depth = 512;
+
+    pub const Options = struct {
+        /// can files be imported
+        import_files: bool = false,
+
+        /// Should gc default to using page_allocator
+        gc_page_allocator: bool = true,
+
+        /// run vm in repl mode
+        repl: bool = false,
+
+        /// maximum size of imported files
+        max_import_size: u32 = 1024 * 1024,
+    };
 
     const FunctionFrame = struct {
         ip: usize,
@@ -41,14 +60,16 @@ pub const Vm = struct {
         MalformedByteCode,
     } || Allocator.Error;
 
-    pub fn init(allocator: *Allocator, repl: bool) Vm {
+    pub fn init(allocator: *Allocator, options: Options) Vm {
         return Vm{
             .ip = 0,
             .sp = 0,
-            .gc = Gc.init(allocator),
+            .gc = Gc.init(if (options.gc_page_allocator) std.heap.page_allocator else allocator),
             .call_stack = CallStack.init(allocator),
-            .repl = repl,
             .errors = Errors.init(allocator),
+            .options = options,
+            .allocator = allocator,
+            .imported_modules = std.StringHashMap(Module).init(allocator),
         };
     }
 
@@ -56,10 +77,16 @@ pub const Vm = struct {
         vm.call_stack.deinit();
         vm.errors.deinit();
         vm.gc.deinit();
+        var it = vm.imported_modules.iterator();
+        while (it.next()) |mod| {
+            mod.value.deinit(vm.allocator);
+        }
+        vm.imported_modules.deinit();
     }
 
     // TODO rename to step and execute 1 instruction
     pub fn exec(vm: *Vm, module: *Module) Error!?*Value {
+        const start_len = vm.call_stack.len;
         while (vm.ip < module.code.len) {
             const op = @intToEnum(Op, vm.getArg(module, u8));
             switch (op) {
@@ -115,13 +142,11 @@ pub const Vm = struct {
                 },
                 .ConstString => {
                     const A_val = try vm.getNewVal(module);
-                    const val = vm.getArg(module, u32);
+                    const str = try vm.getString(module);
 
-                    const len = @ptrCast(*align(1) const u32, module.strings[val..].ptr).*;
-                    const slice = module.strings[val + @sizeOf(u32) ..][0..len];
                     A_val.* = .{
                         .kind = .{
-                            .Str = slice,
+                            .Str = str,
                         },
                     };
                 },
@@ -412,7 +437,7 @@ pub const Vm = struct {
                         continue;
                     }
 
-                    if (vm.call_stack.len == 0) {
+                    if (vm.call_stack.len == start_len) {
                         // module result
                         return B_val;
                     }
@@ -485,7 +510,12 @@ pub const Vm = struct {
                         return vm.reportErr("expected an error");
                     A_ref.* = B_val.kind.Error;
                 },
-                .Import => return vm.reportErr("TODO Op.Import"),
+                .Import => {
+                    const A_ref = try vm.getRef(module);
+                    const str = try vm.getString(module);
+
+                    A_ref.* = try vm.import(str);
+                },
                 .Native => return vm.reportErr("TODO Op.Native"),
                 .Discard => {
                     const A_val = try vm.getVal(module);
@@ -493,7 +523,7 @@ pub const Vm = struct {
                     if (A_val.kind == .Error) {
                         return vm.reportErr("error discarded");
                     }
-                    if (vm.repl and vm.call_stack.len == 0) {
+                    if (vm.options.repl and vm.call_stack.len == start_len) {
                         return A_val;
                     }
                 },
@@ -631,7 +661,7 @@ pub const Vm = struct {
                 .Return => {
                     const A_val = try vm.getVal(module);
 
-                    if (vm.call_stack.len == 0) {
+                    if (vm.call_stack.len == start_len) {
                         // module result
                         return A_val;
                     }
@@ -649,7 +679,7 @@ pub const Vm = struct {
                     vm.line_loc = frame.line_loc;
                 },
                 .ReturnNone => {
-                    if (vm.call_stack.len == 0) {
+                    if (vm.call_stack.len == start_len) {
                         // module result
                         return &Value.None;
                     }
@@ -670,7 +700,43 @@ pub const Vm = struct {
                 },
             }
         }
-        return null;
+        return &Value.None;
+    }
+
+    fn import(vm: *Vm, id: []const u8) !*Value {
+        var mod = vm.imported_modules.getValue(id) orelse if (mem.endsWith(u8, id, bog.extension)) blk: {
+            if (!vm.options.import_files) {
+                return vm.reportErr("import failed");
+            }
+            const source = std.fs.cwd().readFileAlloc(vm.allocator, id, vm.options.max_import_size) catch |e| switch (e) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return vm.reportErr("import failed"),
+            };
+            defer vm.allocator.free(source);
+            const mod = bog.compile(vm.allocator, source, &vm.errors) catch
+                return vm.reportErr("import failed");
+            _ = try vm.imported_modules.put(id, mod);
+            break :blk mod;
+        } else if (mem.endsWith(u8, id, bog.bytecode_extension)) {
+            return vm.reportErr("TODO: import bytecode module");
+        } else {
+            return vm.reportErr("no such package");
+        };
+
+        const saved_sp = vm.sp;
+        const saved_ip = vm.ip;
+        const saved_line_loc = vm.line_loc;
+        const saved_stack_len = vm.gc.stack.len;
+        vm.sp = vm.gc.stack.len;
+
+        vm.ip = mod.entry;
+        const res = try vm.exec(&mod);
+
+        vm.gc.stackShrink(saved_stack_len);
+        vm.ip = saved_ip;
+        vm.sp = saved_sp;
+        vm.line_loc = saved_line_loc;
+        return res orelse &Value.None;
     }
 
     fn getArg(vm: *Vm, module: *Module, comptime T: type) T {
@@ -691,6 +757,13 @@ pub const Vm = struct {
     fn getNewVal(vm: *Vm, module: *Module) !*Value {
         return vm.gc.stackAlloc(vm.getArg(module, RegRef) + vm.sp) catch
             return error.MalformedByteCode;
+    }
+
+    fn getString(vm: *Vm, module: *Module) ![]const u8 {
+        const offset = vm.getArg(module, u32);
+
+        const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
+        return module.strings[offset + @sizeOf(u32) ..][0..len];
     }
 
     fn getBool(vm: *Vm, module: *Module) !bool {

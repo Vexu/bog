@@ -184,8 +184,14 @@ pub const Module = struct {
     name: []const u8,
     code: []const u8,
     strings: []const u8,
-    start_index: u32,
+    entry: u32,
     // debug_info,
+
+    pub fn deinit(module: Module, alloc: *std.mem.Allocator) void {
+        alloc.free(module.name);
+        alloc.free(module.code);
+        alloc.free(module.strings);
+    }
 
     pub fn read(src: []const u8) Module {
         @panic("TODO");
@@ -198,7 +204,7 @@ pub const Module = struct {
     pub fn dump(module: Module, stream: var) @TypeOf(stream).Child.Error!void {
         var ip: usize = 0;
         while (ip < module.code.len) {
-            if (ip == module.start_index) {
+            if (ip == module.entry) {
                 try stream.write("\nentry:");
             }
             const this_offset = ip;
