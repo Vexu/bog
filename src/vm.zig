@@ -659,10 +659,11 @@ pub const Vm = struct {
 
                     if (B_val.kind == .Native) {
                         const native = B_val.kind.Native;
-                        if (native.arg_count != arg_count) {
-                            // TODO improve this error message to tell the expected and given counts
-                            return vm.reportErr("unexpected arg count");
-                        }
+                        // TODO see note comment in native.zig
+                        // if (native.arg_count != arg_count) {
+                        //     // TODO improve this error message to tell the expected and given counts
+                        //     return vm.reportErr("unexpected arg count");
+                        // }
 
                         // TODO do this properly
                         var args: [1]*Value = undefined;

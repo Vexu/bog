@@ -4,6 +4,7 @@ const bog = @import("bog.zig");
 const Vm = bog.Vm;
 const Module = bog.Module;
 const NativeFn = bog.NativeFn;
+const util = @import("util.zig");
 
 pub const Value = struct {
     pub const TypeId = enum(u8) {
@@ -410,7 +411,8 @@ pub const Value = struct {
                         .Int => unreachable,
                         .Num => |num| @floatToInt(i64, num),
                         .Bool => |b| @boolToInt(b),
-                        // .Str => parseInt
+                        .Str => |str| util.parseInt(str) catch
+                            return vm.reportErr("invalid cast to int"),
                         else => return vm.reportErr("invalid cast to int"),
                     },
                 },
@@ -421,7 +423,8 @@ pub const Value = struct {
                         .Num => unreachable,
                         .Int => |int| @intToFloat(f64, int),
                         .Bool => |b| @intToFloat(f64, @boolToInt(b)),
-                        // .Str => parseNum
+                        .Str => |str| util.parseNum(str) catch
+                            return vm.reportErr("invalid cast to num"),
                         else => return vm.reportErr("invalid cast to num"),
                     },
                 },

@@ -8,6 +8,30 @@ print("hello world")
 # or native("std.print")("hello world\n")
 ```
 
+### Calculator
+```rust
+# TODO these should be hidden behind an import
+const input = native("std.input")
+const print = native ("std.print")
+
+const val1 = input("first argument: ") as num
+const op = input("operation: ")
+const val2 = input("second argument: ") as num
+
+if (op == "*")
+    print(val1 * val2)
+else if (op == "+")
+    print(val1 + val2)
+else if (op == "-")
+    print(val1 - val2)
+else if (op == "/")
+    print(val1 / val2)
+else if (op == "**")
+    print(val1 ** val2)
+else 
+    print("unkown op")
+```
+
 ### Loops
 ```rust
 let sum = 0

@@ -10,6 +10,7 @@ const TokenList = bog.Token.List;
 const TokenIndex = bog.Token.Index;
 const RegRef = bog.RegRef;
 const Errors = bog.Errors;
+const util = @import("util.zig");
 
 pub const Error = error{CompileError} || Allocator.Error;
 
@@ -960,7 +961,8 @@ pub const Compiler = struct {
                         .Int => |val| val,
                         .Num => |val| @floatToInt(i64, val),
                         .Bool => |val| @boolToInt(val),
-                        // .Str => parseInt
+                        .Str => |str| util.parseInt(str) catch
+                            return self.reportErr("invalid cast to int", node.lhs.firstToken()),
                         else => return self.reportErr("invalid cast to int", node.lhs.firstToken()),
                     },
                 },
@@ -969,7 +971,8 @@ pub const Compiler = struct {
                         .Num => |val| val,
                         .Int => |val| @intToFloat(f64, val),
                         .Bool => |val| @intToFloat(f64, @boolToInt(val)),
-                        // .Str => parseNum
+                        .Str => |str| util.parseNum(str) catch
+                            return self.reportErr("invalid cast to num", node.lhs.firstToken()),
                         else => return self.reportErr("invalid cast to num", node.lhs.firstToken()),
                     },
                 },
@@ -1520,12 +1523,15 @@ pub const Compiler = struct {
     fn genLiteral(self: *Compiler, node: *Node.Literal, res: Result) Error!Value {
         try res.notLval(self, node.tok);
         const ret_val: Value = switch (node.kind) {
-            .Int => .{ .Int = try self.parseInt(node.tok) },
+            .Int => .{
+                .Int = util.parseInt(self.tokenSlice(node.tok)) catch
+                    return self.reportErr("TODO big int", node.tok),
+            },
             .True => .{ .Bool = true },
             .False => .{ .Bool = false },
             .None => .None,
             .Str => .{ .Str = try self.parseStr(node.tok) },
-            .Num => .{ .Num = self.parseNum(node.tok) },
+            .Num => .{ .Num = util.parseNum(self.tokenSlice(node.tok)) catch unreachable },
         };
         return ret_val.maybeRt(self, res);
     }
@@ -1645,50 +1651,6 @@ pub const Compiler = struct {
             i += 1;
         }
         return buf[0..i];
-    }
-
-    fn parseInt(self: *Compiler, tok: TokenIndex) !i64 {
-        var buf = self.tokenSlice(tok);
-        var radix: u8 = if (buf.len > 2) switch (buf[1]) {
-            'x' => @as(u8, 16),
-            'b' => 2,
-            'o' => 8,
-            else => 10,
-        } else 10;
-        if (radix != 10) buf = buf[2..];
-        var x: i64 = 0;
-
-        for (buf) |c| {
-            const digit = switch (c) {
-                '0'...'9' => c - '0',
-                'A'...'Z' => c - 'A' + 10,
-                'a'...'z' => c - 'a' + 10,
-                '_' => continue,
-                else => unreachable,
-            };
-
-            x = std.math.mul(i64, x, radix) catch
-                return self.reportErr("TODO: bigint", tok);
-            // why is this cast needed?
-            x += @intCast(i32, digit);
-        }
-
-        return x;
-    }
-
-    fn parseNum(self: *Compiler, tok: TokenIndex) f64 {
-        var buf: [256]u8 = undefined;
-        const slice = self.tokenSlice(tok);
-
-        var i: u32 = 0;
-        for (slice) |c| {
-            if (c != '_') {
-                buf[i] = c;
-                i += 1;
-            }
-        }
-
-        return std.fmt.parseFloat(f64, buf[0..i]) catch unreachable;
     }
 
     fn reportErr(self: *Compiler, msg: []const u8, tok: TokenIndex) Error {

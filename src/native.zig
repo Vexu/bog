@@ -36,15 +36,21 @@ fn wrap(comptime func: var) Native {
     if (Fn.is_generic or Fn.is_var_args or Fn.return_type == null)
         @compileError("unsupported function");
 
+    comptime var bog_arg_i: u8 = 0;
     const wrapped_func = struct {
         fn native(vm: *Vm, bog_args: []*Value) Vm.Error!*Value {
-            std.debug.assert(bog_args.len == Fn.args.len);
-
             if (Fn.args.len == 0)
-                return getRet(func());
-            const arg_1 = try getArg(Fn.args[0].arg_type.?, vm, bog_args[0]);
+                return getRet(vm, func());
+
+            const arg_1 = try getArg(Fn.args[0].arg_type.?, vm, bog_args[bog_arg_i]);
+            if (@TypeOf(arg_1) != *Vm) bog_arg_i += 1;
             if (Fn.args.len == 1)
                 return getRet(vm, func(arg_1));
+
+            const arg_2 = try getArg(Fn.args[1].arg_type.?, vm, bog_args[bog_arg_i]);
+            if (@TypeOf(arg_2) != *Vm) bog_arg_i += 1;
+            if (Fn.args.len == 2)
+                return getRet(vm, func(arg_1, arg_2));
 
             @compileError("TODO too many args");
             // var args = .{};
@@ -58,7 +64,8 @@ fn wrap(comptime func: var) Native {
     }.native;
 
     return Native{
-        .arg_count = Fn.args.len,
+        // TODO this is reset to 0 for some reason
+        .arg_count = bog_arg_i,
         .func = wrapped_func,
     };
 }
@@ -67,7 +74,38 @@ fn getRet(vm: *Vm, val: var) Vm.Error!*Value {
     switch (@TypeOf(val)) {
         void => return &Value.None,
         bool => return if (val) &Value.True else &Value.False,
-        else => @compileError("TODO unsupported type"),
+        *Value => return val,
+        []u8 => {
+            // assume val was allocated with vm.gc
+            const str = try vm.gc.alloc();
+            str.* = .{
+                .kind = .{
+                    .Str = val,
+                },
+            };
+            return str;
+        },
+        else => switch (@typeInfo(@TypeOf(val))) {
+            .ErrorUnion => if (val) |some| {
+                return getRet(vm, some);
+            } else |e| {
+                // wrap error string
+                const str = try vm.gc.alloc();
+                str.* = .{
+                    .kind = .{
+                        .Str = @errorName(e),
+                    },
+                };
+                const err = try vm.gc.alloc();
+                err.* = .{
+                    .kind = .{
+                        .Error = str,
+                    },
+                };
+                return err;
+            },
+            else => @compileError("TODO unsupported type"),
+        },
     }
 }
 
@@ -87,8 +125,7 @@ fn getArg(comptime T: type, vm: *Vm, val: *Value) Vm.Error!T {
                 return vm.reportErr("expected num");
             break :blk val.kind.Str;
         },
-        // TODO unable to evaluate constant expression
-        *Vm, *const Vm => vm,
+        *Vm => vm,
         *Value, *const Value => val,
         else => blk: {
             switch (@typeInfo(T)) {
