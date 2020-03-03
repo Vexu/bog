@@ -5,6 +5,14 @@ test "property access of list" {
     ,
         \\3
     );
+    try expectOutput(
+        \\let y = [1,2,3]
+        \\y[-1] = 4
+        \\y["len"]
+        \\return y
+    ,
+        \\[1, 2, 4]
+    );
 }
 
 test "string for iter" {

@@ -282,7 +282,7 @@ pub const Value = struct {
                     var i = index.kind.Int;
                     if (i < 0)
                         i += @intCast(i64, tuple.len);
-                    if (i < 0 or i > tuple.len)
+                    if (i < 0 or i >= tuple.len)
                         return vm.reportErr("index out of bounds");
 
                     res.* = tuple[@intCast(u32, i)];
@@ -308,7 +308,7 @@ pub const Value = struct {
                     var i = index.kind.Int;
                     if (i < 0)
                         i += @intCast(i64, list.len);
-                    if (i < 0 or i > list.len)
+                    if (i < 0 or i >= list.len)
                         return vm.reportErr("index out of bounds");
 
                     res.* = list.at(@intCast(u32, i));
@@ -346,10 +346,10 @@ pub const Value = struct {
                 var i = index.kind.Int;
                 if (i < 0)
                     i += @intCast(i64, tuple.len);
-                if (i < 0 or i > tuple.len)
+                if (i < 0 or i >= tuple.len)
                     return vm.reportErr("index out of bounds");
 
-                tuple[@intCast(u32, i)] = new_val;
+                tuple[@intCast(u32, i)].* = new_val.*;
             } else {
                 return vm.reportErr("TODO set with ranges");
             },
@@ -360,10 +360,10 @@ pub const Value = struct {
                 var i = index.kind.Int;
                 if (i < 0)
                     i += @intCast(i64, list.len);
-                if (i < 0 or i > list.len)
+                if (i < 0 or i >= list.len)
                     return vm.reportErr("index out of bounds");
 
-                list.toSlice()[@intCast(u32, i)] = new_val;
+                list.toSlice()[@intCast(u32, i)].* = new_val.*;
             } else {
                 return vm.reportErr("TODO set with ranges");
             },

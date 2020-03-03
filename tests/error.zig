@@ -1,3 +1,12 @@
+test "index out of bounds" {
+    try expectError(
+        \\let y = [0,0,0]
+        \\y[y["len"]] = true
+    ,
+        \\index out of bounds
+    );
+}
+
 test "invalid namespace for native" {
     try expectError(
         \\native("foo")
