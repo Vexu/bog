@@ -222,7 +222,7 @@ pub const Node = struct {
             DivFloorAssign,
             ModAssign,
             LShiftAssign,
-            RShfitAssign,
+            RShiftAssign,
             BitAndAssign,
             BitOrAssign,
             BitXOrAssign,

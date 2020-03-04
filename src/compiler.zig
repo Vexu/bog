@@ -1087,7 +1087,7 @@ pub const Compiler = struct {
             .Equal,
             .NotEqual,
             .In,
-            => return self.genComparisionInfix(node, res),
+            => return self.genComparisonInfix(node, res),
 
             .Range => return self.reportErr("TODO ranges", node.tok),
 
@@ -1116,7 +1116,7 @@ pub const Compiler = struct {
             .DivFloorAssign,
             .ModAssign,
             .LShiftAssign,
-            .RShfitAssign,
+            .RShiftAssign,
             .BitAndAssign,
             .BitOrAssign,
             .BitXOrAssign,
@@ -1148,7 +1148,7 @@ pub const Compiler = struct {
             => try r_val.checkNum(self, node.rhs.firstToken()),
 
             .LShiftAssign,
-            .RShfitAssign,
+            .RShiftAssign,
             .BitAndAssign,
             .BitOrAssign,
             .BitXOrAssign,
@@ -1165,7 +1165,7 @@ pub const Compiler = struct {
             .DivFloorAssign => .DivFloor,
             .ModAssign => .Mod,
             .LShiftAssign => .LShift,
-            .RShfitAssign => .RShift,
+            .RShiftAssign => .RShift,
             .BitAndAssign => .BitAnd,
             .BitOrAssign => .BitOr,
             .BitXOrAssign => .BitXor,
@@ -1262,7 +1262,7 @@ pub const Compiler = struct {
         return ret_val.maybeRt(self, res);
     }
 
-    fn genComparisionInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
+    fn genComparisonInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
         var l_val = try self.genNodeNonEmpty(node.lhs, .Value);
         var r_val = try self.genNodeNonEmpty(node.rhs, .Value);
 

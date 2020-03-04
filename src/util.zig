@@ -1,6 +1,13 @@
 const std = @import("std");
 
-pub fn parseInt(str: []const u8) !i64 {
+pub fn parseInt(in_str: []const u8) !i64 {
+    var str = in_str;
+    var negate = false;
+    if (str.len > 1 and str[0] == '-') {
+        negate = true;
+        str = str[1..];
+    }
+
     var radix: u8 = if (str.len > 2) switch (str[1]) {
         'x' => @as(u8, 16),
         'b' => 2,
@@ -16,13 +23,16 @@ pub fn parseInt(str: []const u8) !i64 {
             'A'...'Z' => c - 'A' + 10,
             'a'...'z' => c - 'a' + 10,
             '_' => continue,
-            else => unreachable,
+            else => return error.InvalidCharacter,
         };
 
         x = try std.math.mul(i64, x, radix);
         // why is this cast needed?
         x += @intCast(i32, digit);
     }
+
+    if (negate)
+        x = -x;
 
     return x;
 }
