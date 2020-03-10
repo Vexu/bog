@@ -163,21 +163,21 @@ pub const Parser = struct {
     }
 
     /// bool_expr
-    ///     : "not" comparision_expr
-    ///     | comparision_expr ("or" comparision_expr)*
-    ///     | comparision_expr ("and" comparision_expr)*
+    ///     : "not" comparison_expr
+    ///     | comparison_expr ("or" comparison_expr)*
+    ///     | comparison_expr ("and" comparison_expr)*
     fn boolExpr(parser: *Parser, skip_nl: bool) Error!*Node {
         if (parser.eatToken(.Keyword_not, skip_nl)) |tok| {
             parser.skipNl();
             const node = try parser.arena.create(Node.Prefix);
             node.* = .{
                 .op = .BoolNot,
-                .rhs = try parser.comparisionExpr(skip_nl),
+                .rhs = try parser.comparisonExpr(skip_nl),
                 .tok = tok,
             };
             return &node.base;
         }
-        var lhs = try parser.comparisionExpr(skip_nl);
+        var lhs = try parser.comparisonExpr(skip_nl);
 
         // TODO improve
         if (parser.eatToken(.Keyword_or, skip_nl)) |t| {
@@ -189,7 +189,7 @@ pub const Parser = struct {
                     .lhs = lhs,
                     .tok = tok,
                     .op = .BoolOr,
-                    .rhs = try parser.comparisionExpr(skip_nl),
+                    .rhs = try parser.comparisonExpr(skip_nl),
                 };
                 lhs = &node.base;
                 if (parser.eatToken(.Keyword_or, skip_nl)) |tt| tok = tt else break;
@@ -202,7 +202,7 @@ pub const Parser = struct {
                     .lhs = lhs,
                     .tok = tok,
                     .op = .BoolAnd,
-                    .rhs = try parser.comparisionExpr(skip_nl),
+                    .rhs = try parser.comparisonExpr(skip_nl),
                 };
                 lhs = &node.base;
             }
@@ -210,10 +210,10 @@ pub const Parser = struct {
         return lhs;
     }
 
-    /// comparision_expr
+    /// comparison_expr
     ///     : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in") range_expr)?
     ///     | range_expr ("is" type_name)?
-    fn comparisionExpr(parser: *Parser, skip_nl: bool) Error!*Node {
+    fn comparisonExpr(parser: *Parser, skip_nl: bool) Error!*Node {
         var lhs = try parser.rangeExpr(skip_nl);
 
         if (parser.eatTokenId(.LArr, skip_nl) orelse

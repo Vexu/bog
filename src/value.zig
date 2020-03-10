@@ -161,7 +161,7 @@ pub const Value = struct {
                 }
                 return true;
             },
-            .Error => |val| @panic("TODO eql for errors"),
+            .Error => |val| val.eql(b.kind.Error),
             .Range => |val| @panic("TODO eql for ranges"),
             .Fn => |val| {
                 const b_val = b.kind.Fn;
@@ -169,7 +169,7 @@ pub const Value = struct {
                     val.arg_count == b_val.arg_count and
                     val.module == b_val.module;
             },
-            .Native => |val| return val.func == b.kind.Native.func,
+            .Native => |val| val.func == b.kind.Native.func,
             _ => unreachable,
         };
     }
@@ -333,8 +333,23 @@ pub const Value = struct {
             .Map => |map| {
                 return vm.reportErr("TODO get map");
             },
-            .Str => |str| {
-                return vm.reportErr("TODO get string");
+            .Str => |str| switch (index.kind) {
+                .Int => return vm.reportErr("TODO get str"),
+                .Range => return vm.reportErr("TODO get with ranges"),
+                .Str => |s| {
+                    if (res.* == null) {
+                        res.* = try vm.gc.alloc();
+                    }
+
+                    if (mem.eql(u8, s, "len")) {
+                        res.*.?.* = .{
+                            .kind = .{ .Int = @intCast(i64, str.len) },
+                        };
+                    } else {
+                        return vm.reportErr("no such property");
+                    }
+                },
+                else => return vm.reportErr("invalid index type"),
             },
             .Iterator => unreachable,
             else => return vm.reportErr("invalid subscript type"),

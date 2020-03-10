@@ -99,7 +99,7 @@ pub const Compiler = struct {
                         return sym;
                     }
                 }
-                if (some.id == .Fn) {
+                if (some.parent != null and some.id == .Fn) {
                     return self.reportErr("TODO closures", tok);
                 }
                 cur = some.parent;
@@ -117,7 +117,7 @@ pub const Compiler = struct {
     };
 
     const Value = union(enum) {
-        /// result of continue, break, return and assignmnet; cannot exist at runtime
+        /// result of continue, break, return and assignment; cannot exist at runtime
         Empty,
         Rt: RegRef,
 
