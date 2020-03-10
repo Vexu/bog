@@ -17,6 +17,7 @@ pub fn build(b: *Builder) void {
     var exe = b.addExecutable("bog", "src/main.zig");
     exe.setBuildMode(mode);
     exe.install();
+    exe.linkLibC();
 
     // repl doesn't work with this
     // const run_step = b.step("run", "Run");

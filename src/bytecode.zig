@@ -240,7 +240,7 @@ pub const Module = struct {
         // strings must come before code
         if (header.strings > header.code)
             return error.InvalidHeader;
-        
+
         if (src.len < header.code)
             return error.InvalidHeader;
 
@@ -277,11 +277,19 @@ pub const Module = struct {
         try stream.write(module.code);
     }
 
-    pub fn dump(module: Module, stream: var) @TypeOf(stream).Child.Error!void {
+    pub fn dump(module: Module, allocator: *Allocator, stream: var) (@TypeOf(stream).Child.Error || Allocator.Error)!void {
+        var arena_allocator = std.heap.ArenaAllocator.init(allocator);
+        defer arena_allocator.deinit();
+        const arena = &arena_allocator.allocator;
+
+        var jumps = try module.mapJumpTargets(arena);
         var ip: usize = 0;
         while (ip < module.code.len) {
             if (ip == module.entry) {
                 try stream.write("\nentry:");
+            }
+            if (jumps.getValue(ip)) |label| {
+                try stream.print("\n{}:", .{label});
             }
             const this_offset = ip;
             const op = module.getArg(Op, &ip);
@@ -300,7 +308,24 @@ pub const Module = struct {
                 .JumpTrue, .JumpFalse, .JumpNotError, .JumpNone => {
                     const arg_1 = module.getArg(RegRef, &ip);
                     const arg_2 = module.getArg(u32, &ip);
-                    try stream.print(" #{} {}\n", .{ arg_1, arg_2 });
+                    const label = jumps.getValue(ip + arg_2) orelse unreachable;
+                    try stream.print(" #{} {}\n", .{ arg_1, label });
+                },
+
+                // i32
+                .Jump => {
+                    const arg_1 = module.getArg(i32, &ip);
+                    const label = jumps.getValue(@intCast(usize, @intCast(isize, ip) + arg_1)) orelse unreachable;
+                    try stream.print(" {}\n", .{label});
+                },
+
+                // A = Fn(arg_count, offset)
+                .BuildFn => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const arg_2 = module.getArg(u8, &ip);
+                    const arg_3 = module.getArg(u32, &ip);
+                    const label = jumps.getValue(arg_3) orelse unreachable;
+                    try stream.print(" #{} {}({})\n", .{ arg_1, label, arg_2 });
                 },
 
                 // A i32
@@ -401,20 +426,6 @@ pub const Module = struct {
                     try stream.print(" #{} #{} #{} arg_count:{}\n", .{ arg_1, arg_2, arg_3, arg_4 });
                 },
 
-                // A = Fn(arg_count, offset)
-                .BuildFn => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const arg_2 = module.getArg(u8, &ip);
-                    const arg_3 = module.getArg(u32, &ip);
-                    try stream.print(" #{} arg_count:{} offset:{}\n", .{ arg_1, arg_2, arg_3 });
-                },
-
-                // i32
-                .Jump => {
-                    const arg_1 = module.getArg(i32, &ip);
-                    try stream.print(" {}\n", .{arg_1});
-                },
-
                 // u32
                 .LineInfo => {
                     const arg_1 = module.getArg(u32, &ip);
@@ -438,6 +449,117 @@ pub const Module = struct {
                 _ => unreachable,
             }
         }
+    }
+
+    pub const JumpMap = std.AutoHashMap(usize, []const u8);
+
+    pub fn mapJumpTargets(module: Module, arena: *Allocator) Allocator.Error!JumpMap {
+        var map = JumpMap.init(arena);
+        var ip: usize = 0;
+        var mangle: u32 = 0;
+        while (ip < module.code.len) {
+            const op = module.getArg(Op, &ip);
+            switch (op) {
+                // A i8
+                .ConstPrimitive, .ConstInt8 => ip += @sizeOf(RegRef) + @sizeOf(i8),
+
+                // A u32
+                .JumpTrue, .JumpFalse, .JumpNotError, .JumpNone, .Jump => {
+                    var jump_target: usize = undefined;
+                    if (op == .Jump) {
+                        const arg = module.getArg(i32, &ip);
+                        jump_target = @intCast(usize, @intCast(isize, ip) + arg);
+                    } else {
+                        ip += @sizeOf(RegRef);
+                        const arg = module.getArg(u32, &ip);
+                        jump_target = ip + arg;
+                    }
+                    if (map.getValue(jump_target)) |_| continue;
+
+                    _ = try map.put(jump_target, try std.fmt.allocPrint(arena, "{}_{}", .{ @tagName(op), mangle }));
+                    mangle += 1;
+                },
+
+                // A = Fn(arg_count, offset)
+                .BuildFn => {
+                    ip += @sizeOf(RegRef) + @sizeOf(u8);
+                    const offset = module.getArg(u32, &ip);
+
+                    _ = try map.put(offset, try std.fmt.allocPrint(arena, "function_{}", .{mangle}));
+                    mangle += 1;
+                },
+
+                // A i32
+                .ConstInt32 => ip += @sizeOf(RegRef) + @sizeOf(i32),
+
+                // A i64
+                .ConstInt64 => ip += @sizeOf(RegRef) + @sizeOf(i64),
+
+                // A STRING(arg1)
+                .Import, .Native, .ConstString => ip += @sizeOf(RegRef) + @sizeOf(u32),
+
+                // A f64
+                .ConstNum => ip += @sizeOf(RegRef) + @sizeOf(f64),
+
+                // A B C
+                .DivFloor,
+                .Div,
+                .Mul,
+                .Pow,
+                .Mod,
+                .Add,
+                .Sub,
+                .LShift,
+                .RShift,
+                .BitAnd,
+                .BitOr,
+                .BitXor,
+                .Equal,
+                .NotEqual,
+                .LessThan,
+                .LessThanEqual,
+                .GreaterThan,
+                .GreaterThanEqual,
+                .In,
+                .BoolAnd,
+                .BoolOr,
+                .Get,
+                .Set,
+                => ip += @sizeOf(RegRef) * 3,
+
+                // A B
+                .Move,
+                .Copy,
+                .BoolNot,
+                .BitNot,
+                .Negate,
+                .Try,
+                .BuildError,
+                .UnwrapError,
+                .IterInit,
+                .IterNext,
+                => ip += @sizeOf(RegRef) * 2,
+
+                // A = (B, B + 1, ... B + N)
+                .BuildTuple, .BuildList => ip += @sizeOf(RegRef) * 2 + @sizeOf(u16),
+
+                // A = B(C, C + 1, ... C + N)
+                .Call => ip += @sizeOf(RegRef) * 3 + @sizeOf(u16),
+
+                // u32
+                .LineInfo => ip += @sizeOf(u32),
+
+                // A B TYPEID
+                .Is, .As => ip += @sizeOf(RegRef) * 2 + @sizeOf(TypeId),
+
+                // A
+                .Discard, .Return => ip += @sizeOf(RegRef),
+
+                .ReturnNone => {},
+                _ => unreachable,
+            }
+        }
+        return map;
     }
 
     fn getArg(module: Module, comptime T: type, ip: *usize) T {

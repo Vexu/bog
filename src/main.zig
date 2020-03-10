@@ -7,7 +7,7 @@ const repl = bog.repl;
 const is_debug = @import("builtin").mode == .Debug;
 
 pub fn main() !void {
-    const alloc = std.heap.page_allocator;
+    const alloc = std.heap.c_allocator;
 
     const args = try process.argsAlloc(alloc);
     defer process.argsFree(alloc, args);
@@ -189,7 +189,7 @@ fn debug_dump(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     defer module.deinit(alloc);
 
     const stream = &std.io.getStdOut().outStream().stream;
-    try module.dump(stream);
+    try module.dump(alloc, stream);
 }
 
 fn debug_tokens(alloc: *std.mem.Allocator, args: [][]const u8) !void {
@@ -281,7 +281,7 @@ fn debug_read(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     const module = try bog.Module.read(source);
 
     const stream = &std.io.getStdOut().outStream().stream;
-    try module.dump(stream);
+    try module.dump(alloc, stream);
 }
 
 comptime {
