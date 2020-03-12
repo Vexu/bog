@@ -106,12 +106,12 @@ const Repl = struct {
     }
 
     fn readLine(repl: *Repl, prompt: []const u8, in_stream: var, out_stream: var) !void {
-        try out_stream.write(prompt);
+        try out_stream.writeAll(prompt);
         const start_len = repl.buffer.len;
         while (true) {
             var byte: u8 = in_stream.readByte() catch |e| switch (e) {
                 error.EndOfStream => if (start_len == repl.buffer.len) {
-                    try out_stream.write(std.cstr.line_sep);
+                    try out_stream.writeAll(std.cstr.line_sep);
                     return error.EndOfStream;
                 } else continue,
                 else => |err| return err,

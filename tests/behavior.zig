@@ -423,15 +423,13 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
     const res = run(alloc, source, &vm) catch |e| switch (e) {
         else => return e,
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
-            const stream = &std.io.getStdErr().outStream().stream;
-            try vm.errors.render(source, stream);
+            try vm.errors.render(source, std.io.getStdErr().outStream());
             return e;
         },
     };
     if (res) |some| {
         var out_buf = try std.Buffer.initSize(alloc, 0);
-        var out_stream = std.io.BufferOutStream.init(&out_buf);
-        try some.dump(&out_stream.stream, 2);
+        try some.dump(out_buf.outStream(), 2);
         const result = out_buf.toSliceConst();
         if (!mem.eql(u8, result, expected)) {
             warn("\n---expected----\n{}\n-----found-----\n{}\n---------------\n", .{ expected, result });

@@ -91,18 +91,18 @@ pub const Errors = struct {
         var it = self.list.iterator(0);
         while (it.next()) |e| {
             switch (e.kind) {
-                .Error => try out_stream.write(RED ++ "error: " ++ BOLD),
-                .Note => try out_stream.write(CYAN ++ "note: " ++ BOLD),
+                .Error => try out_stream.writeAll(RED ++ "error: " ++ BOLD),
+                .Note => try out_stream.writeAll(CYAN ++ "note: " ++ BOLD),
                 .Trace => {},
             }
             try out_stream.print("{}\n" ++ RESET, .{e.msg});
 
             const start = lineBegin(source, e.index);
             const end = zig_std.mem.indexOfScalarPos(u8, source, e.index, '\n') orelse source.len;
-            try out_stream.write(source[start..end]);
-            try out_stream.write(zig_std.cstr.line_sep);
+            try out_stream.writeAll(source[start..end]);
+            try out_stream.writeAll(zig_std.cstr.line_sep);
             try out_stream.writeByteNTimes(' ', e.index - start);
-            try out_stream.write(GREEN ++ "^\n" ++ RESET);
+            try out_stream.writeAll(GREEN ++ "^\n" ++ RESET);
         }
         self.list.shrink(0);
     }

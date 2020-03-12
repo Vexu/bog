@@ -200,15 +200,13 @@ fn fmt(source: []const u8) ![]u8 {
     var tree = bog.parse(alloc, source, &errors) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.TokenizeError, error.ParseError => {
-            const stream = &std.io.getStdErr().outStream().stream;
-            try errors.render(source, stream);
+            try errors.render(source, std.io.getStdErr().outStream());
             return e;
         },
     };
 
     var out_buf = try std.Buffer.initSize(alloc, 0);
-    var out_stream = std.io.BufferOutStream.init(&out_buf);
-    try tree.render(&out_stream.stream);
+    try tree.render(out_buf.outStream());
     return out_buf.toOwnedSlice();
 }
 

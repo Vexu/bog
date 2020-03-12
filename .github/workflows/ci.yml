@@ -11,3 +11,11 @@ jobs:
         with:
           version: master
       - run: zig build test
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: goto-bus-stop/setup-zig@v1.2.1
+        with:
+          version: master
+      - run: zig fmt --check build.zig src

@@ -5,7 +5,7 @@ const Node = bog.Node;
 const TokenList = bog.Token.List;
 const TokenIndex = bog.Token.Index;
 
-pub fn render(tree: *Tree, stream: var) @TypeOf(stream).Child.Error!void {
+pub fn render(tree: *Tree, stream: var) @TypeOf(stream).Error!void {
     var renderer = Renderer{
         .source = tree.source,
         .tokens = &tree.tokens,
@@ -55,7 +55,7 @@ const Renderer = struct {
         return @truncate(TokenIndex, it.index - 1);
     }
 
-    fn renderNode(self: *Renderer, node: *Node, stream: var, indent: u32, space: Space) @TypeOf(stream).Child.Error!void {
+    fn renderNode(self: *Renderer, node: *Node, stream: var, indent: u32, space: Space) @TypeOf(stream).Error!void {
         switch (node.id) {
             .Literal => {
                 const literal = @fieldParentPtr(Node.Literal, "base", node);
@@ -122,7 +122,7 @@ const Renderer = struct {
                                 if (self.tokens.at(comma).id == .Comma)
                                     try self.renderToken(comma, stream, indent, .Newline)
                                 else
-                                    try stream.write(",\n");
+                                    try stream.writeAll(",\n");
                             }
                         } else {
                             while (it.next()) |param| {
@@ -232,7 +232,7 @@ const Renderer = struct {
                         if (self.tokens.at(comma).id == .Comma)
                             try self.renderToken(comma, stream, indent, .Newline)
                         else
-                            try stream.write(",\n");
+                            try stream.writeAll(",\n");
                     }
                 } else {
                     while (it.next()) |param| {
@@ -265,7 +265,7 @@ const Renderer = struct {
                         if (self.tokens.at(comma).id == .Comma)
                             try self.renderToken(comma, stream, indent, .Newline)
                         else
-                            try stream.write(",\n");
+                            try stream.writeAll(",\n");
                     }
                     try stream.writeByteNTimes(' ', indent);
                 } else {
@@ -404,7 +404,7 @@ const Renderer = struct {
 
     fn renderToken(self: *Renderer, token: TokenIndex, stream: var, indent: u32, space: Space) !void {
         var tok = self.tokens.at(token);
-        try stream.write(self.source[tok.start..tok.end]);
+        try stream.writeAll(self.source[tok.start..tok.end]);
         switch (space) {
             .None => if (tok.id == .Comment) try stream.writeByte('\n'),
             .Newline => try stream.writeByte('\n'),
@@ -425,7 +425,7 @@ const Renderer = struct {
                 else => break,
             }
 
-            try stream.write(self.source[tok.start..tok.end]);
+            try stream.writeAll(self.source[tok.start..tok.end]);
             try stream.writeByte('\n');
             if (space != .Newline)
                 try stream.writeByteNTimes(' ', indent + indent_delta);

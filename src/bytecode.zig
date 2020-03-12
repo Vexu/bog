@@ -253,8 +253,8 @@ pub const Module = struct {
         };
     }
 
-    pub fn write(module: Module, stream: var) @TypeOf(stream).Child.Error!void {
-        try stream.write(magic);
+    pub fn write(module: Module, stream: var) @TypeOf(stream).Error!void {
+        try stream.writeAll(magic);
         try stream.writeIntLittle(u32, header_version);
         try stream.writeIntLittle(u32, bog_version);
 
@@ -271,13 +271,13 @@ pub const Module = struct {
         try stream.writeIntLittle(u32, entry_offset);
 
         // write strings
-        try stream.write(module.strings);
+        try stream.writeAll(module.strings);
 
         // write code
-        try stream.write(module.code);
+        try stream.writeAll(module.code);
     }
 
-    pub fn dump(module: Module, allocator: *Allocator, stream: var) (@TypeOf(stream).Child.Error || Allocator.Error)!void {
+    pub fn dump(module: Module, allocator: *Allocator, stream: var) (@TypeOf(stream).Error || Allocator.Error)!void {
         var arena_allocator = std.heap.ArenaAllocator.init(allocator);
         defer arena_allocator.deinit();
         const arena = &arena_allocator.allocator;
@@ -286,7 +286,7 @@ pub const Module = struct {
         var ip: usize = 0;
         while (ip < module.code.len) {
             if (ip == module.entry) {
-                try stream.write("\nentry:");
+                try stream.writeAll("\nentry:");
             }
             if (jumps.getValue(ip)) |label| {
                 try stream.print("\n{}:", .{label});

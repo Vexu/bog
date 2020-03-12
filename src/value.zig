@@ -174,29 +174,29 @@ pub const Value = struct {
         };
     }
 
-    pub fn dump(value: Value, stream: var, level: u32) (@TypeOf(stream.*).Error || error{Unimplemented})!void {
+    pub fn dump(value: Value, stream: var, level: u32) (@TypeOf(stream).Error || error{Unimplemented})!void {
         switch (value.kind) {
             .Iterator => unreachable,
             .Int => |val| try stream.print("{}", .{val}),
             .Num => |val| try stream.print("{d}", .{val}),
-            .Bool => |val| try stream.write(if (val) "true" else "false"),
-            .None => try stream.write("()"),
+            .Bool => |val| try stream.writeAll(if (val) "true" else "false"),
+            .None => try stream.writeAll("()"),
             .Range => |val| {
                 if (level == 0) {
-                    try stream.write("(range)");
+                    try stream.writeAll("(range)");
                 } else {
                     try val.begin.dump(stream, level - 1);
-                    try stream.write("...");
+                    try stream.writeAll("...");
                     try val.end.dump(stream, level - 1);
                 }
             },
             .Tuple => |val| {
                 if (level == 0) {
-                    try stream.write("(...)");
+                    try stream.writeAll("(...)");
                 } else {
                     try stream.writeByte('(');
                     for (val) |v, i| {
-                        if (i != 0) try stream.write(", ");
+                        if (i != 0) try stream.writeAll(", ");
                         try v.dump(stream, level - 1);
                     }
                     try stream.writeByte(')');
@@ -204,18 +204,18 @@ pub const Value = struct {
             },
             .Map => {
                 if (level == 0) {
-                    try stream.write("{...}");
+                    try stream.writeAll("{...}");
                 } else {
                     return error.Unimplemented;
                 }
             },
             .List => |val| {
                 if (level == 0) {
-                    try stream.write("[...]");
+                    try stream.writeAll("[...]");
                 } else {
                     try stream.writeByte('[');
                     for (val.toSliceConst()) |v, i| {
-                        if (i != 0) try stream.write(", ");
+                        if (i != 0) try stream.writeAll(", ");
                         try v.dump(stream, level - 1);
                     }
                     try stream.writeByte(']');
@@ -223,9 +223,9 @@ pub const Value = struct {
             },
             .Error => |val| {
                 if (level == 0) {
-                    try stream.write("error(...)");
+                    try stream.writeAll("error(...)");
                 } else {
-                    try stream.write("error(");
+                    try stream.writeAll("error(");
                     try val.dump(stream, level - 1);
                     try stream.writeByte(')');
                 }
@@ -234,11 +234,11 @@ pub const Value = struct {
                 try stream.writeByte('"');
                 for (val) |c| {
                     switch (c) {
-                        '\n' => try stream.write("\\n"),
-                        '\t' => try stream.write("\\t"),
-                        '\r' => try stream.write("\\r"),
-                        '\'' => try stream.write("\\'"),
-                        '"' => try stream.write("\\\""),
+                        '\n' => try stream.writeAll("\\n"),
+                        '\t' => try stream.writeAll("\\t"),
+                        '\r' => try stream.writeAll("\\r"),
+                        '\'' => try stream.writeAll("\\'"),
+                        '"' => try stream.writeAll("\\\""),
                         else => if (std.ascii.isCntrl(c))
                             try stream.print("\\x{x:0<2}", .{c})
                         else

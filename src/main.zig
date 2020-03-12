@@ -37,11 +37,10 @@ pub fn main() !void {
         }
     }
 
-    var stdin_unbuf = std.io.getStdIn().inStream();
-    const in = &std.io.BufferedInStream(@TypeOf(stdin_unbuf).Error).init(&stdin_unbuf.stream).stream;
+    const in = std.io.bufferedInStream(std.io.getStdIn().inStream()).inStream();
     var stdout = std.io.getStdOut().outStream();
 
-    try repl.run(alloc, in, &stdout.stream);
+    try repl.run(alloc, in, stdout);
 }
 
 const usage =
@@ -56,8 +55,8 @@ const usage =
 ;
 
 fn help() !void {
-    const stdout = &std.io.getStdOut().outStream().stream;
-    try stdout.write(usage);
+    const stdout = &std.io.getStdOut().outStream();
+    try stdout.writeAll(usage);
     process.exit(0);
 }
 
@@ -94,10 +93,10 @@ fn run(alloc: *std.mem.Allocator, args: [][]const u8) !void {
             }
         },
         .Error => |err| {
-            const stderr = &std.io.getStdErr().outStream().stream;
-            try stderr.write("script exited with error: ");
+            const stderr = std.io.getStdErr().outStream();
+            try stderr.writeAll("script exited with error: ");
             try err.dump(stderr, 4);
-            try stderr.write("\n");
+            try stderr.writeAll("\n");
             process.exit(1);
         },
         .None => {},
@@ -147,19 +146,16 @@ fn fmt(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     const file = try std.fs.cwd().createFile(args[0], .{});
     defer file.close();
 
-    var out_stream = &file.outStream().stream;
-    try tree.render(out_stream);
+    try tree.render(file.outStream());
 }
 
 fn print_errors_and_exit(errors: *bog.Errors, source: []const u8) noreturn {
-    const stderr = &std.io.getStdErr().outStream().stream;
-    errors.render(source, stderr) catch {};
+    errors.render(source, std.io.getStdErr().outStream()) catch {};
     process.exit(1);
 }
 
 fn print_and_exit(comptime msg: []const u8, args: var) noreturn {
-    const stderr = &std.io.getStdErr().outStream().stream;
-    stderr.print(msg ++ "\n", args) catch {};
+    std.io.getStdErr().outStream().print(msg ++ "\n", args) catch {};
     process.exit(1);
 }
 
@@ -181,15 +177,13 @@ fn debug_dump(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     var module = bog.compile(alloc, source, &errors) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.TokenizeError, error.ParseError, error.CompileError => {
-            const stream = &std.io.getStdErr().outStream().stream;
-            try errors.render(source, stream);
+            try errors.render(source, std.io.getStdErr().outStream());
             process.exit(1);
         },
     };
     defer module.deinit(alloc);
 
-    const stream = &std.io.getStdOut().outStream().stream;
-    try module.dump(alloc, stream);
+    try module.dump(alloc, std.io.getStdOut().outStream());
 }
 
 fn debug_tokens(alloc: *std.mem.Allocator, args: [][]const u8) !void {
@@ -218,13 +212,12 @@ fn debug_tokens(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     bog.tokenize(&tree, &errors) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.TokenizeError => {
-            const stream = &std.io.getStdErr().outStream().stream;
-            try errors.render(source, stream);
+            try errors.render(source, std.io.getStdErr().outStream());
             process.exit(1);
         },
     };
 
-    const stream = &std.io.getStdOut().outStream().stream;
+    const stream = std.io.getStdOut().outStream();
     var it = tree.tokens.iterator(0);
     while (it.next()) |tok| {
         switch (tok.id) {
@@ -252,8 +245,7 @@ fn debug_write(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     var module = bog.compile(alloc, source, &errors) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.TokenizeError, error.ParseError, error.CompileError => {
-            const stream = &std.io.getStdErr().outStream().stream;
-            try errors.render(source, stream);
+            try errors.render(source, std.io.getStdErr().outStream());
             process.exit(1);
         },
     };
@@ -262,8 +254,7 @@ fn debug_write(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     const file = try std.fs.cwd().createFile(args[1], .{});
     defer file.close();
 
-    const stream = &file.outStream().stream;
-    try module.write(stream);
+    try module.write(file.outStream());
 }
 
 fn debug_read(alloc: *std.mem.Allocator, args: [][]const u8) !void {
@@ -280,8 +271,7 @@ fn debug_read(alloc: *std.mem.Allocator, args: [][]const u8) !void {
 
     const module = try bog.Module.read(source);
 
-    const stream = &std.io.getStdOut().outStream().stream;
-    try module.dump(alloc, stream);
+    try module.dump(alloc, std.io.getStdOut().outStream());
 }
 
 comptime {
