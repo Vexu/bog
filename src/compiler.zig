@@ -362,9 +362,9 @@ pub const Compiler = struct {
             .Import => return self.genImport(@fieldParentPtr(Node.Import, "base", node), res),
             .Native => return self.genNative(@fieldParentPtr(Node.Native, "base", node), res),
             .For => return self.genFor(@fieldParentPtr(Node.For, "base", node), res),
+            .Map => return self.genMap(@fieldParentPtr(Node.ListTupleMap, "base", node), res),
+            .MapItem => unreachable,
 
-            .Map => return self.reportErr("TODO: Map", node.firstToken()),
-            .MapItem => return self.reportErr("TODO: MapItem", node.firstToken()),
             .Match => return self.reportErr("TODO: Match", node.firstToken()),
             .MatchCatchAll => return self.reportErr("TODO: MatchCatchAll", node.firstToken()),
             .MatchLet => return self.reportErr("TODO: MatchLet", node.firstToken()),
@@ -379,6 +379,48 @@ pub const Compiler = struct {
             return self.reportErr("expected a value", node.firstToken());
         }
         return val;
+    }
+
+    fn genMap(self: *Compiler, node: *Node.ListTupleMap, res: Result) Error!Value {
+        if (res == .Lval) {
+            return self.reportErr("TODO map destructuring", node.r_tok);
+        }
+        const sub_res = res.toRt(self);
+        const start = self.used_regs;
+        self.used_regs += @intCast(RegRef, node.values.len * 2);
+
+        var it = node.values.iterator(0);
+        var i = start;
+        while (it.next()) |n| {
+            const item = @fieldParentPtr(Node.MapItem, "base", n.*);
+
+            if (item.key) |some| {
+                const last_node = self.getLastNode(some, false);
+                if (last_node.id == .Identifier) {
+                    // `ident: value` is equal to `"ident": value`
+                    const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
+                    const str_loc = try self.putString(self.tokenSlice(ident.tok));
+                    try self.emitInstruction(.ConstString, .{ i, str_loc });
+                } else {
+                    _ = try self.genNode(some, Result{ .Rt = i });
+                }
+            } else {
+                const last_node = self.getLastNode(item.value, false);
+                if (last_node.id != .Identifier) {
+                    return self.reportErr("expected a key", item.value.firstToken());
+                }
+                // `ident` is equal to `"ident": ident`
+                const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
+                const str_loc = try self.putString(self.tokenSlice(ident.tok));
+                try self.emitInstruction(.ConstString, .{ i, str_loc });
+            }
+
+            _ = try self.genNode(item.value, Result{ .Rt = i + 1 });
+            i += 2;
+        }
+
+        try self.emitInstruction(.BuildMap, .{ sub_res.Rt, start, @intCast(u16, node.values.len * 2) });
+        return sub_res.toVal();
     }
 
     fn genTupleList(self: *Compiler, node: *Node.ListTupleMap, res: Result) Error!Value {
@@ -485,7 +527,7 @@ pub const Compiler = struct {
         // gen body and return result
         try self.addLineInfo(node.body);
 
-        const last_node = self.getLastNode(node.body);
+        const last_node = self.getLastNode(node.body, true);
         const last_is_ret = last_node.id == .Jump and
             @fieldParentPtr(Node.Jump, "base", last_node).op == .Return;
 
@@ -1604,12 +1646,13 @@ pub const Compiler = struct {
             @truncate(u32, self.code.len - jump_addr);
     }
 
-    fn getLastNode(self: *Compiler, first_node: *Node) *Node {
+    fn getLastNode(self: *Compiler, first_node: *Node, allow_block: bool) *Node {
         var node = first_node;
         while (true) {
             switch (node.id) {
                 .Grouped => node = @fieldParentPtr(Node.Grouped, "base", node).expr,
                 .Block => {
+                    if (!allow_block) return node;
                     const blk = @fieldParentPtr(Node.Block, "base", node);
                     node = blk.stmts.at(blk.stmts.len - 1).*;
                 },

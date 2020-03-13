@@ -1,3 +1,14 @@
+test "map" {
+    try expectOutput(
+        \\let y = 2
+        \\const map = {1: 2, y}
+        \\map["foo"] = "bar"
+        \\return map
+    ,
+        \\{"y": 2, "foo": "bar", 1: 2}
+    );
+}
+
 test "property access of list" {
     try expectOutput(
         \\const list = [1, true, "hello"]

@@ -220,65 +220,74 @@ pub const Value = struct {
         };
     }
 
-    pub fn dump(value: Value, stream: var, level: u32) (@TypeOf(stream).Error || error{Unimplemented})!void {
+    pub fn dump(value: Value, stream: var, level: u32) @TypeOf(stream).Error!void {
         switch (value.kind) {
             .Iterator => unreachable,
-            .Int => |val| try stream.print("{}", .{val}),
-            .Num => |val| try stream.print("{d}", .{val}),
-            .Bool => |val| try stream.writeAll(if (val) "true" else "false"),
+            .Int => |int| try stream.print("{}", .{int}),
+            .Num => |num| try stream.print("{d}", .{num}),
+            .Bool => |b| try stream.writeAll(if (b) "true" else "false"),
             .None => try stream.writeAll("()"),
-            .Range => |val| {
+            .Range => |range| {
                 if (level == 0) {
                     try stream.writeAll("(range)");
                 } else {
-                    try val.begin.dump(stream, level - 1);
+                    try range.begin.dump(stream, level - 1);
                     try stream.writeAll("...");
-                    try val.end.dump(stream, level - 1);
+                    try range.end.dump(stream, level - 1);
                 }
             },
-            .Tuple => |val| {
+            .Tuple => |tuple| {
                 if (level == 0) {
                     try stream.writeAll("(...)");
                 } else {
                     try stream.writeByte('(');
-                    for (val) |v, i| {
+                    for (tuple) |v, i| {
                         if (i != 0) try stream.writeAll(", ");
                         try v.dump(stream, level - 1);
                     }
                     try stream.writeByte(')');
                 }
             },
-            .Map => {
+            .Map => |map| {
                 if (level == 0) {
                     try stream.writeAll("{...}");
                 } else {
-                    return error.Unimplemented;
+                    try stream.writeByte('{');
+                    var it = map.iterator();
+                    while (it.next()) |kv| {
+                        if (it.count != 1)
+                            try stream.writeAll(", ");
+                        try kv.key.dump(stream, level - 1);
+                        try stream.writeAll(": ");
+                        try kv.value.dump(stream, level - 1);
+                    }
+                    try stream.writeByte('}');
                 }
             },
-            .List => |val| {
+            .List => |list| {
                 if (level == 0) {
                     try stream.writeAll("[...]");
                 } else {
                     try stream.writeByte('[');
-                    for (val.toSliceConst()) |v, i| {
+                    for (list.toSliceConst()) |v, i| {
                         if (i != 0) try stream.writeAll(", ");
                         try v.dump(stream, level - 1);
                     }
                     try stream.writeByte(']');
                 }
             },
-            .Error => |val| {
+            .Error => |err| {
                 if (level == 0) {
                     try stream.writeAll("error(...)");
                 } else {
                     try stream.writeAll("error(");
-                    try val.dump(stream, level - 1);
+                    try err.dump(stream, level - 1);
                     try stream.writeByte(')');
                 }
             },
-            .Str => |val| {
+            .Str => |str| {
                 try stream.writeByte('"');
-                for (val) |c| {
+                for (str) |c| {
                     switch (c) {
                         '\n' => try stream.writeAll("\\n"),
                         '\t' => try stream.writeAll("\\t"),
@@ -293,11 +302,11 @@ pub const Value = struct {
                 }
                 try stream.writeByte('"');
             },
-            .Fn => |val| {
-                try stream.print("fn({})@0x{X}", .{ val.arg_count, val.offset });
+            .Fn => |func| {
+                try stream.print("fn({})@0x{X}", .{ func.arg_count, func.offset });
             },
-            .Native => |val| {
-                try stream.print("native({})@0x{}", .{ val.arg_count, @ptrToInt(val.func) });
+            .Native => |func| {
+                try stream.print("native({})@0x{}", .{ func.arg_count, @ptrToInt(func.func) });
             },
             _ => unreachable,
         }
@@ -377,7 +386,8 @@ pub const Value = struct {
                 else => return vm.reportErr("invalid index type"),
             },
             .Map => |map| {
-                return vm.reportErr("TODO get map");
+                res.* = map.getValue(index) orelse
+                    return vm.reportErr("TODO better handling undefined key");
             },
             .Str => |str| switch (index.kind) {
                 .Int => return vm.reportErr("TODO get str"),
@@ -415,8 +425,8 @@ pub const Value = struct {
             } else {
                 return vm.reportErr("TODO set with ranges");
             },
-            .Map => |map| {
-                return vm.reportErr("TODO set map");
+            .Map => |*map| {
+                _ = try map.put(index, new_val);
             },
             .List => |list| if (index.kind == .Int) {
                 var i = index.kind.Int;
