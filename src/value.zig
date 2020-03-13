@@ -28,7 +28,7 @@ pub const Value = struct {
         _,
     };
 
-    pub const Map = std.StringHashMap(*Value);
+    pub const Map = std.HashMap(*Value, *Value, hash, eql);
     pub const List = std.ArrayList(*Value);
 
     marked: bool = false,
@@ -121,6 +121,52 @@ pub const Value = struct {
     pub var False = Value{
         .kind = .{ .Bool = false },
     };
+
+    pub fn hash(key: *Value) u32 {
+        const autoHash = std.hash.autoHash;
+
+        var hasher = std.hash.Wyhash.init(0);
+        autoHash(&hasher, @as(TypeId, key.kind));
+        switch (key.kind) {
+            .Iterator => unreachable,
+            .None => {},
+            .Int => |int| autoHash(&hasher, int),
+            .Num => |num| autoHash(&hasher, num),
+            .Bool => |b| autoHash(&hasher, b),
+            .Str => |str| hasher.update(str),
+            .Tuple => |tuple| {
+                autoHash(&hasher, tuple.len);
+                autoHash(&hasher, tuple.ptr);
+            },
+            .Map => |map| {
+                autoHash(&hasher, map.size);
+                autoHash(&hasher, map.entries.len);
+                autoHash(&hasher, map.entries.ptr);
+                autoHash(&hasher, map.max_distance_from_start_index);
+            },
+            .List => |list| {
+                autoHash(&hasher, list.len);
+                autoHash(&hasher, list.items.len);
+                autoHash(&hasher, list.items.ptr);
+            },
+            .Error => |err| autoHash(&hasher, @as(TypeId, err.kind)),
+            .Range => |range| {
+                autoHash(&hasher, @as(TypeId, range.begin.kind));
+                autoHash(&hasher, @as(TypeId, range.end.kind));
+            },
+            .Fn => |func| {
+                autoHash(&hasher, func.offset);
+                autoHash(&hasher, func.arg_count);
+                autoHash(&hasher, func.module);
+            },
+            .Native => |func| {
+                autoHash(&hasher, func.arg_count);
+                autoHash(&hasher, func.func);
+            },
+            _ => unreachable,
+        }
+        return @truncate(u32, hasher.final());
+    }
 
     pub fn eql(a: *Value, b: *Value) bool {
         switch (a.kind) {

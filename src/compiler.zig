@@ -1556,7 +1556,7 @@ pub const Compiler = struct {
             return self.reportErr("invalid namespace", node.str_tok);
         }
         const str_loc = try self.putString(str);
-        try self.emitInstruction(.Native, .{ sub_res.Rt, str_loc });
+        try self.emitInstruction(.BuildNative, .{ sub_res.Rt, str_loc });
         return sub_res.toVal();
     }
 

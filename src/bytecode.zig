@@ -126,6 +126,12 @@ pub const Op = enum(u8) {
     /// A = Fn(arg_count, offset)
     BuildFn,
 
+    /// A = NATIVE(arg1)
+    BuildNative,
+
+    /// A = {B: B + 1, B + 2: ... N - 1: N}
+    BuildMap,
+
     /// ip = arg1
     Jump,
 
@@ -152,9 +158,6 @@ pub const Op = enum(u8) {
 
     /// A = IMPORT(arg1)
     Import,
-
-    /// A = NATIVE(arg1)
-    Native,
 
     /// A = B is TYPEID
     Is,
@@ -343,7 +346,7 @@ pub const Module = struct {
                 },
 
                 // A STRING(arg1)
-                .Import, .Native, .ConstString => {
+                .Import, .BuildNative, .ConstString => {
                     const arg_1 = module.getArg(RegRef, &ip);
                     const offset = module.getArg(u32, &ip);
 
@@ -410,6 +413,7 @@ pub const Module = struct {
                 // A = (B, B + 1, ... B + N)
                 .BuildTuple,
                 .BuildList,
+                .BuildMap,
                 => {
                     const arg_1 = module.getArg(RegRef, &ip);
                     const arg_2 = module.getArg(RegRef, &ip);
@@ -496,7 +500,7 @@ pub const Module = struct {
                 .ConstInt64 => ip += @sizeOf(RegRef) + @sizeOf(i64),
 
                 // A STRING(arg1)
-                .Import, .Native, .ConstString => ip += @sizeOf(RegRef) + @sizeOf(u32),
+                .Import, .BuildNative, .ConstString => ip += @sizeOf(RegRef) + @sizeOf(u32),
 
                 // A f64
                 .ConstNum => ip += @sizeOf(RegRef) + @sizeOf(f64),
@@ -541,7 +545,7 @@ pub const Module = struct {
                 => ip += @sizeOf(RegRef) * 2,
 
                 // A = (B, B + 1, ... B + N)
-                .BuildTuple, .BuildList => ip += @sizeOf(RegRef) * 2 + @sizeOf(u16),
+                .BuildTuple, .BuildList, .BuildMap => ip += @sizeOf(RegRef) * 2 + @sizeOf(u16),
 
                 // A = B(C, C + 1, ... C + N)
                 .Call => ip += @sizeOf(RegRef) * 3 + @sizeOf(u16),

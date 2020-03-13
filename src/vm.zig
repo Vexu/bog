@@ -527,7 +527,7 @@ pub const Vm = struct {
 
                     A_ref.* = try vm.import(str);
                 },
-                .Native => {
+                .BuildNative => {
                     const A_val = try vm.getNewVal(module);
                     const str = try vm.getString(module);
 
@@ -583,6 +583,33 @@ pub const Vm = struct {
                     while (i < arg_count) : (i += 1) {
                         A_val.kind.List.append(vm.gc.stackGet(B + vm.sp + i) catch
                             return error.MalformedByteCode) catch unreachable;
+                    }
+                },
+                .BuildMap => {
+                    const A_val = try vm.getNewVal(module);
+                    const B = vm.getArg(module, RegRef);
+                    const arg_count = vm.getArg(module, u16);
+
+                    if (arg_count & 1 != 0) return error.MalformedByteCode;
+                    A_val.* = .{
+                        .kind = .{
+                            // TODO gc this
+                            .Map = Value.Map.init(vm.call_stack.allocator),
+                        },
+                    };
+
+                    const map = &A_val.kind.Map;
+                    try map.ensureCapacity(arg_count);
+
+                    // TODO maps lists and tuples need to be initialized differently or
+                    // we'll quickly run out of registers.
+                    var i: u32 = 0;
+                    while (i < arg_count) : (i += 2) {
+                        const key = vm.gc.stackGet(B + vm.sp + i) catch
+                            return error.MalformedByteCode;
+                        const val = vm.gc.stackGet(B + vm.sp + i + 1) catch
+                            return error.MalformedByteCode;
+                        _ = try map.put(key, val);
                     }
                 },
                 .BuildError => {
