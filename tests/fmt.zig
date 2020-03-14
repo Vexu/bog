@@ -1,3 +1,38 @@
+test "two empty lines after block" {
+    try testTransform(
+        \\const foo = fn(a)
+        \\    a * 4
+        \\const bar = 2
+    ,
+        \\const foo = fn(a)
+        \\    a * 4
+        \\
+        \\
+        \\const bar = 2
+        \\
+    );
+}
+
+test "respect new lines" {
+    try testCanonical(
+        \\const foo = 1
+        \\
+        \\const bar = 2
+        \\
+    );
+    try testTransform(
+        \\const foo = 1
+        \\
+        \\
+        \\const bar = 2
+    ,
+        \\const foo = 1
+        \\
+        \\const bar = 2
+        \\
+    );
+}
+
 test "native function" {
     try testCanonical(
         \\const foo = native("bar.foo")

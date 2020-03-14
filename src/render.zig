@@ -10,19 +10,20 @@ pub fn render(tree: *Tree, stream: var) @TypeOf(stream).Error!void {
         .source = tree.source,
         .tokens = &tree.tokens,
     };
-    {
-        var it = tree.tokens.iterator(0);
-        while (it.next()) |tok| {
-            if (tok.id == .Nl) continue;
-            if (tok.id == .Comment)
-                try renderer.renderToken(@truncate(u32, it.index - 1), stream, 0, .Newline);
-            break;
-        }
-    }
+    try renderer.renderComments(0, stream, 0, .Newline);
     {
         var it = tree.nodes.iterator(0);
         while (it.next()) |node| {
             try renderer.renderNode(node.*, stream, 0, .Newline);
+
+            if (it.peek() == null) break;
+            const last_token = node.*.lastToken();
+            if (renderer.lineDist(last_token, renderer.nextToken(last_token)) > 1) {
+                try stream.writeByte('\n');
+            }
+            if (Renderer.isBlock(node.*)) {
+                try stream.writeAll("\n\n");
+            }
         }
     }
 }
@@ -53,6 +54,19 @@ const Renderer = struct {
             }
         }
         return @truncate(TokenIndex, it.index - 1);
+    }
+
+    fn lineDist(self: *Renderer, a: TokenIndex, b: TokenIndex) u32 {
+        const first_end = self.tokens.at(a).end;
+        const second_start = self.tokens.at(b).start;
+        var i = first_end;
+        var count: u32 = 0;
+        while (i < second_start) : (i += 1) {
+            if (self.source[i] == '\n') {
+                count += 1;
+            }
+        }
+        return count;
     }
 
     fn renderNode(self: *Renderer, node: *Node, stream: var, indent: u32, space: Space) @TypeOf(stream).Error!void {
@@ -289,6 +303,15 @@ const Renderer = struct {
                 while (it.next()) |stmt| {
                     try stream.writeByteNTimes(' ', new_indet);
                     try self.renderNode(stmt.*, stream, new_indet, .Newline);
+
+                    if (it.peek() == null) break;
+                    const last_token = stmt.*.lastToken();
+                    if (self.lineDist(last_token, self.nextToken(last_token)) != 1) {
+                        try stream.writeByte('\n');
+                    }
+                    if (isBlock(stmt.*)) {
+                        try stream.writeAll("\n\n");
+                    }
                 }
             },
             .MapItem => {
@@ -396,6 +419,62 @@ const Renderer = struct {
         }
     }
 
+    fn renderComments(self: *Renderer, token: TokenIndex, stream: var, indent: u32, space: Space) !void {
+        var i = token;
+        while (true) : (i += 1) {
+            var tok = self.tokens.at(i);
+            switch (tok.id) {
+                .Nl, .End, .Begin => continue,
+                .Comment => {},
+                else => break,
+            }
+
+            const slice = self.source[tok.start..tok.end];
+            const trimmed = std.mem.trimRight(u8, slice, " \t\r");
+            if (trimmed.len == 1) continue;
+
+            try stream.writeAll(trimmed);
+            try stream.writeByte('\n');
+            try stream.writeByteNTimes(' ', indent);
+
+            if (space != .Newline)
+                try stream.writeByteNTimes(' ', indent_delta);
+        }
+    }
+
+    fn isBlock(node: *Node) bool {
+        switch (node.id) {
+            .Match, .Block => return true,
+            .If => {
+                const if_node = @fieldParentPtr(Node.If, "base", node);
+                if (if_node.else_body) |some|
+                    return isBlock(some);
+                return isBlock(if_node.if_body);
+            },
+            .For => {
+                const for_node = @fieldParentPtr(Node.For, "base", node);
+                return isBlock(for_node.body);
+            },
+            .While => {
+                const while_node = @fieldParentPtr(Node.While, "base", node);
+                return isBlock(while_node.body);
+            },
+            .Decl => {
+                const decl = @fieldParentPtr(Node.Decl, "base", node);
+                return isBlock(decl.value);
+            },
+            .Fn => {
+                const fn_node = @fieldParentPtr(Node.Fn, "base", node);
+                return isBlock(fn_node.body);
+            },
+            .Catch => {
+                const catch_node = @fieldParentPtr(Node.Catch, "base", node);
+                return isBlock(catch_node.rhs);
+            },
+            else => return false,
+        }
+    }
+
     const Space = enum {
         None,
         Newline,
@@ -406,7 +485,7 @@ const Renderer = struct {
         var tok = self.tokens.at(token);
         try stream.writeAll(self.source[tok.start..tok.end]);
         switch (space) {
-            .None => if (tok.id == .Comment) try stream.writeByte('\n'),
+            .None => {},
             .Newline => try stream.writeByte('\n'),
             .Space => if (self.tokens.len > token + 2 and self.tokens.at(token + 2).id == .Begin) {
                 try stream.writeByte('\n');
@@ -414,21 +493,6 @@ const Renderer = struct {
                 try stream.writeByte(' ');
             },
         }
-        var i = token;
-        tok = self.tokens.at(i);
-        while (true) {
-            i += 1;
-            tok = self.tokens.at(i);
-            switch (tok.id) {
-                .Nl, .End, .Begin => continue,
-                .Comment => {},
-                else => break,
-            }
-
-            try stream.writeAll(self.source[tok.start..tok.end]);
-            try stream.writeByte('\n');
-            if (space != .Newline)
-                try stream.writeByteNTimes(' ', indent + indent_delta);
-        }
+        try self.renderComments(token + 1, stream, indent, space);
     }
 };
