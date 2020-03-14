@@ -383,7 +383,58 @@ pub const Compiler = struct {
 
     fn genMap(self: *Compiler, node: *Node.ListTupleMap, res: Result) Error!Value {
         if (res == .Lval) {
-            return self.reportErr("TODO map destructuring", node.r_tok);
+            switch (res.Lval) {
+                .Const, .Let, .Assign => |val| {
+                    if (!val.isRt()) {
+                        return self.reportErr("expected a map", node.base.firstToken());
+                    }
+                    const reg = val.getRt();
+                    const index_reg = self.registerAlloc();
+                    var sub_reg = self.registerAlloc();
+
+                    var it = node.values.iterator(0);
+                    while (it.next()) |n| {
+                        const item = @fieldParentPtr(Node.MapItem, "base", n.*);
+
+                        if (item.key) |some| {
+                            const last_node = self.getLastNode(some, false);
+                            if (last_node.id == .Identifier) {
+                                // `oldname: newname` is equal to `"oldname": newname`
+                                const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
+                                const str_loc = try self.putString(self.tokenSlice(ident.tok));
+                                try self.emitInstruction(.ConstString, .{ index_reg, str_loc });
+                            } else {
+                                _ = try self.genNode(some, Result{ .Rt = index_reg });
+                            }
+                        } else {
+                            const last_node = self.getLastNode(item.value, false);
+                            if (last_node.id != .Identifier) {
+                                return self.reportErr("expected a key", item.value.firstToken());
+                            }
+                            // `oldname` is equal to `"oldname": oldname`
+                            const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
+                            const str_loc = try self.putString(self.tokenSlice(ident.tok));
+                            try self.emitInstruction(.ConstString, .{ index_reg, str_loc });
+                        }
+
+                        try self.emitInstruction(.Get, .{ sub_reg, reg, index_reg });
+                        const rt_val = Value{ .Rt = sub_reg };
+                        const l_val = try self.genNode(item.value, switch (res.Lval) {
+                            .Const => Result{ .Lval = .{ .Const = &rt_val } },
+                            .Let => Result{ .Lval = .{ .Let = &rt_val } },
+                            .Assign => Result{ .Lval = .{ .Assign = &rt_val } },
+                            else => unreachable,
+                        });
+                        std.debug.assert(l_val == .Empty);
+
+                        if (it.peek() != null and res.Lval != .Assign) sub_reg = self.registerAlloc();
+                    }
+                    return Value.Empty;
+                },
+                .AugAssign => {
+                    return self.reportErr("invalid left hand side to augmented assignment", node.r_tok);
+                },
+            }
         }
         const sub_res = res.toRt(self);
         const start = self.used_regs;
@@ -428,7 +479,7 @@ pub const Compiler = struct {
             switch (res.Lval) {
                 .Const, .Let, .Assign => |val| {
                     if (!val.isRt()) {
-                        return self.reportErr("expected a tuple", node.base.firstToken());
+                        return self.reportErr("expected a tuple/list", node.base.firstToken());
                     }
                     const reg = val.getRt();
                     const index_reg = self.registerAlloc();
@@ -455,7 +506,6 @@ pub const Compiler = struct {
                         std.debug.assert(l_val == .Empty);
                         index_val.Int += 1;
 
-                        // TODO this should probably be done in genIdentifier
                         if (it.peek() != null and res.Lval != .Assign) sub_reg = self.registerAlloc();
                     }
                     return Value.Empty;

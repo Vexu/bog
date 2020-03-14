@@ -7,6 +7,15 @@ test "map" {
     ,
         \\{"y": 2, "foo": "bar", 1: 2}
     );
+    try expectOutput(
+        \\let y = 2
+        \\const map = {1: 2, x: y}
+        \\const {x} = map
+        \\const {x: foo} = map
+        \\return x == foo
+    ,
+        \\true
+    );
 }
 
 test "property access of list" {

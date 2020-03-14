@@ -1,3 +1,11 @@
+test "invalid map" {
+    try expectError(
+        \\let y = {1}
+    ,
+        \\expected a key
+    );
+}
+
 test "index out of bounds" {
     try expectError(
         \\let y = [0,0,0]
