@@ -1,3 +1,4 @@
+name: CI
 on: [push]
 jobs:
   test:
@@ -6,7 +7,7 @@ jobs:
         os: [ubuntu-latest]
     runs-on: ${{matrix.os}}
     steps:
-      - uses: actions/checkout@v1
+      - uses: actions/checkout@v2
       - uses: goto-bus-stop/setup-zig@v1.2.1
         with:
           version: master

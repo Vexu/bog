@@ -9,13 +9,30 @@ pub const Gc = struct {
     values: Pool,
     stack: Stack,
 
-    const Stack = std.SegmentedList(?*Value, 512);
-    const Pool = std.SegmentedList(Value, 1024);
+    const Stack = std.ArrayList(?*Value);
+    const Pool = struct {
+        items: []Value,
+        free: usize = 0,
+        allocator: *Allocator,
 
-    pub fn init(allocator: *Allocator) Gc {
-        return .{
+        const initial_size = @divExact(mem.page_size * 16, @sizeOf(Value));
+
+        fn init(allocator: *Allocator) !Pool {
+            return Pool{
+                .allocator = allocator,
+                .items = try allocator.alloc(Value, initial_size),
+            };
+        }
+
+        fn deinit(pool: *Pool) void {
+            pool.allocator.free(pool.items);
+        }
+    };
+
+    pub fn init(allocator: *Allocator) !Gc {
+        return Gc{
             .stack = Stack.init(allocator),
-            .values = Pool.init(allocator),
+            .values = try Pool.init(allocator),
         };
     }
 
@@ -25,10 +42,16 @@ pub const Gc = struct {
     }
 
     pub fn alloc(gc: *Gc) !*Value {
-        return try gc.values.addOne();
+        if (gc.values.free == gc.values.items.len) {
+            try gc.collect();
+            @panic("TODO collect");
+        }
+        const val = &gc.values.items[gc.values.free];
+        gc.values.free += 1;
+        return val;
     }
 
-    pub fn free(gc: *Gc) void {
+    pub fn collect(gc: *Gc) !void {
         gc.mark();
         if (gc.sweep() != 0) {
             // TODO compact/move
@@ -36,9 +59,8 @@ pub const Gc = struct {
     }
 
     pub fn mark(gc: *Gc) void {
-        var it = gc.stack.iterator(0);
-        while (it.next()) |val| {
-            if (val.*) |some| {
+        for (gc.stack.span()) |val| {
+            if (val) |some| {
                 some.mark();
             }
         }
@@ -46,10 +68,9 @@ pub const Gc = struct {
 
     pub fn sweep(gc: *Gc) u32 {
         var freed: u32 = 0;
-        var it = gc.values.iterator(0);
-        while (it.next()) |val| {
-            if (val.*.marked) {
-                val.*.marked = false;
+        for (gc.values.items) |*val| {
+            if (val.marked) {
+                val.marked = false;
             } else {
                 freed += 1;
             }
@@ -61,7 +82,7 @@ pub const Gc = struct {
         if (index > gc.stack.len)
             return error.NullPtrDeref;
 
-        return gc.stack.at(index).* orelse
+        return gc.stack.span()[index] orelse
             error.NullPtrDeref;
     }
 
@@ -76,11 +97,12 @@ pub const Gc = struct {
         return val.*.?;
     }
 
+    /// Only valid while no allocations happen
     pub fn stackRef(gc: *Gc, index: usize) !*?*Value {
         while (index >= gc.stack.len) {
-            try gc.stack.push(null);
+            try gc.stack.append(null);
         }
-        return gc.stack.at(index);
+        return &gc.stack.span()[index];
     }
 
     pub fn stackShrink(gc: *Gc, size: usize) void {

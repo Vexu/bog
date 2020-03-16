@@ -55,7 +55,7 @@ pub const Vm = struct {
         ip: usize,
         sp: usize,
         line_loc: u32,
-        ret_loc: *?*Value,
+        ret_reg: RegRef,
         module: *Module,
     };
 
@@ -68,7 +68,7 @@ pub const Vm = struct {
         return Vm{
             .ip = 0,
             .sp = 0,
-            .gc = Gc.init(if (options.gc_page_allocator) std.heap.page_allocator else allocator),
+            .gc = try Gc.init(if (options.gc_page_allocator) std.heap.page_allocator else allocator),
             .call_stack = CallStack.init(allocator),
             .errors = Errors.init(allocator),
             .options = options,
@@ -454,13 +454,14 @@ pub const Vm = struct {
 
                     const frame = vm.call_stack.pop() orelse unreachable;
                     module = frame.module;
-                    frame.ret_loc.* = try vm.gc.alloc();
-                    frame.ret_loc.*.?.* = B_val.*;
 
                     vm.gc.stackShrink(vm.sp);
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
+
+                    const ret_val = try vm.gc.stackAlloc(vm.sp + frame.ret_reg);
+                    ret_val.* = B_val.*;
                 },
                 .JumpFalse => {
                     const A_val = try vm.getBool(module);
@@ -679,7 +680,7 @@ pub const Vm = struct {
                     A_ref.* = if (B_val.is(type_id)) &Value.True else &Value.False;
                 },
                 .Call => {
-                    const A_ref = try vm.getRef(module);
+                    const A = vm.getArg(module, RegRef);
                     const B_val = try vm.getVal(module);
                     const C = vm.getArg(module, RegRef);
                     const arg_count = vm.getArg(module, u16);
@@ -692,12 +693,15 @@ pub const Vm = struct {
                         //     return vm.reportErr("unexpected arg count");
                         // }
 
-                        // TODO do this properly
-                        var args: [1]*Value = undefined;
-                        if (arg_count == 1)
-                            args[0] = vm.gc.stackGet(C) catch
+                        const args = vm.gc.stack.span()[vm.ip + C ..][0..arg_count];
+                        for (args) |arg| {
+                            if (arg == null)
                                 return error.MalformedByteCode;
-                        A_ref.* = try native.func(vm, args[0..arg_count]);
+                        }
+
+                        const ret_val = try native.func(vm, @bitCast([]*Value, args));
+                        const ret_ref = try vm.gc.stackRef(vm.sp + A);
+                        ret_ref.* = ret_val;
                         continue;
                     }
 
@@ -718,7 +722,7 @@ pub const Vm = struct {
                         .sp = vm.sp,
                         .ip = vm.ip,
                         .line_loc = vm.line_loc,
-                        .ret_loc = A_ref,
+                        .ret_reg = A,
                         .module = mod,
                     });
                     vm.sp += C;
@@ -738,16 +742,13 @@ pub const Vm = struct {
 
                     const frame = vm.call_stack.pop() orelse unreachable;
                     module = frame.module;
-                    if (A_val.kind != .Bool and A_val.kind != .None) {
-                        frame.ret_loc.* = try vm.gc.alloc();
-                        frame.ret_loc.*.?.* = A_val.*;
-                    } else {
-                        frame.ret_loc.* = A_val;
-                    }
                     vm.gc.stackShrink(vm.sp);
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
+
+                    const ret_val = try vm.gc.stackAlloc(vm.sp + frame.ret_reg);
+                    ret_val.* = A_val.*;
                 },
                 .ReturnNone => {
                     if (vm.call_stack.len == start_len) {
@@ -760,11 +761,13 @@ pub const Vm = struct {
 
                     const frame = vm.call_stack.pop() orelse unreachable;
                     module = frame.module;
-                    frame.ret_loc.* = &Value.None;
                     vm.gc.stackShrink(vm.sp);
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
+
+                    const ret_val = try vm.gc.stackRef(vm.sp + frame.ret_reg);
+                    ret_val.* = &Value.None;
                 },
                 .LineInfo => {
                     const line = vm.getArg(module, u32);
@@ -850,8 +853,7 @@ pub const Vm = struct {
     }
 
     fn getNewVal(vm: *Vm, module: *Module) !*Value {
-        return vm.gc.stackAlloc(vm.getArg(module, RegRef) + vm.sp) catch
-            return error.MalformedByteCode;
+        return try vm.gc.stackAlloc(vm.getArg(module, RegRef) + vm.sp);
     }
 
     fn getString(vm: *Vm, module: *Module) ![]const u8 {
