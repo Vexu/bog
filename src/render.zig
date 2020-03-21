@@ -18,11 +18,11 @@ pub fn render(tree: *Tree, stream: var) @TypeOf(stream).Error!void {
 
             if (it.peek() == null) break;
             const last_token = node.*.lastToken();
-            if (renderer.lineDist(last_token, renderer.nextToken(last_token)) > 1) {
-                try stream.writeByte('\n');
-            }
+
             if (Renderer.isBlock(node.*)) {
                 try stream.writeAll("\n\n");
+            } else if (renderer.lineDist(last_token, renderer.nextToken(last_token)) > 1) {
+                try stream.writeByte('\n');
             }
         }
     }
@@ -127,7 +127,8 @@ const Renderer = struct {
                         var it = params.iterator(0);
                         const prev = self.tokens.at(suffix.r_tok - 1).id;
                         if (prev == .Comma or prev == .Nl or prev == .End) {
-                            try stream.writeByte('\n');
+                            if (self.tokens.at(suffix.l_tok + 2).id != .Begin)
+                                try stream.writeByte('\n');
                             const new_indet = indent + indent_delta;
                             while (it.next()) |param| {
                                 try stream.writeByteNTimes(' ', new_indet);
@@ -301,16 +302,14 @@ const Renderer = struct {
                 const new_indet = indent + indent_delta;
                 var it = blk.stmts.iterator(0);
                 while (it.next()) |stmt| {
-                    try stream.writeByteNTimes(' ', new_indet);
                     try self.renderNode(stmt.*, stream, new_indet, .Newline);
 
                     if (it.peek() == null) break;
                     const last_token = stmt.*.lastToken();
-                    if (self.lineDist(last_token, self.nextToken(last_token)) != 1) {
-                        try stream.writeByte('\n');
-                    }
                     if (isBlock(stmt.*)) {
                         try stream.writeAll("\n\n");
+                    } else if (self.lineDist(last_token, self.nextToken(last_token)) != 1) {
+                        try stream.writeByte('\n');
                     }
                 }
             },
@@ -369,12 +368,11 @@ const Renderer = struct {
                 try self.renderToken(match_expr.match_tok, stream, indent, .Space);
                 try self.renderToken(self.nextToken(match_expr.match_tok), stream, indent, .None);
                 try self.renderNode(match_expr.expr, stream, indent, .None);
-                try self.renderToken(match_expr.r_paren, stream, indent, .Newline);
 
                 const new_indet = indent + indent_delta;
+                try self.renderToken(match_expr.r_paren, stream, new_indet, .Newline);
                 var it = match_expr.body.iterator(0);
                 while (it.next()) |n| {
-                    try stream.writeByteNTimes(' ', new_indet);
                     try self.renderNode(n.*, stream, new_indet, .Newline);
                 }
                 try stream.writeByteNTimes(' ', indent);
@@ -420,25 +418,43 @@ const Renderer = struct {
     }
 
     fn renderComments(self: *Renderer, token: TokenIndex, stream: var, indent: u32, space: Space) !void {
+        if (self.tokens.len <= token + 1) {
+            // EOF no comments to be rendered
+            return;
+        }
+
+        var commment_indent = indent;
         var i = token;
+        var wrote_comments = false;
         while (true) : (i += 1) {
             var tok = self.tokens.at(i);
             switch (tok.id) {
-                .Nl, .End, .Begin => continue,
+                .End => {
+                    if (commment_indent == 0)
+                        return;
+                    commment_indent -= indent;
+                    continue;
+                },
+                .Nl, .Begin => continue,
                 .Comment => {},
-                else => break,
+                else => {
+                    if (space == .Newline or wrote_comments)
+                        try stream.writeByteNTimes(' ', commment_indent);
+                    return;
+                },
+            }
+            if (!wrote_comments and space != .Newline) {
+                try stream.writeByte('\n');
+                commment_indent += indent_delta;
             }
 
             const slice = self.source[tok.start..tok.end];
             const trimmed = std.mem.trimRight(u8, slice, " \t\r");
-            if (trimmed.len == 1) continue;
 
+            try stream.writeByteNTimes(' ', commment_indent);
             try stream.writeAll(trimmed);
             try stream.writeByte('\n');
-            try stream.writeByteNTimes(' ', indent);
-
-            if (space != .Newline)
-                try stream.writeByteNTimes(' ', indent_delta);
+            wrote_comments = true;
         }
     }
 
@@ -485,10 +501,15 @@ const Renderer = struct {
         var tok = self.tokens.at(token);
         try stream.writeAll(self.source[tok.start..tok.end]);
         switch (space) {
-            .None => {},
+            // +2 because .Begin comes after .Nl
+            .None => if (self.tokens.len > token + 2 and self.tokens.at(token + 2).id == .Begin) {
+                try stream.writeByte('\n');
+                return self.renderComments(token + 1, stream, indent + indent_delta, .Newline);
+            },
             .Newline => try stream.writeByte('\n'),
             .Space => if (self.tokens.len > token + 2 and self.tokens.at(token + 2).id == .Begin) {
                 try stream.writeByte('\n');
+                return self.renderComments(token + 1, stream, indent + indent_delta, .Newline);
             } else {
                 try stream.writeByte(' ');
             },

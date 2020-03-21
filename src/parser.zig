@@ -984,12 +984,18 @@ pub const Parser = struct {
 
     fn eatTokenId(parser: *Parser, id: Token.Id, skip_nl: bool) ?TokAndId {
         var next_tok = parser.it.next().?;
+        var saw_comment = false;
         while (true) {
             switch (next_tok.id) {
                 // skip nl, begin and end if they are not meaningful
-                .Nl, .Begin, .End => if (!skip_nl) break,
+                .Nl, .Begin, .End => {
+                    if (saw_comment)
+                        saw_comment = false
+                    else if (!skip_nl)
+                        break;
+                },
                 // always skip comments
-                .Comment => {},
+                .Comment => saw_comment = true,
                 else => break,
             }
             next_tok = parser.it.next().?;
