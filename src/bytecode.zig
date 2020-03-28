@@ -16,7 +16,13 @@ pub const Op = enum(u8) {
     /// DISCARD(A)
     Discard,
 
-    /// A = PRIMTIVE(arg1)
+    /// A = CAPTURE(B, arg1)
+    LoadCapture,
+
+    /// CAPTURE(A, arg1) = B
+    StoreCapture,
+
+    /// A = PRIMITIVE(arg1)
     /// 0 = ()
     /// 1 = false
     /// 2 = true
@@ -123,7 +129,7 @@ pub const Op = enum(u8) {
     /// A = [B, B + 1, ... B + N]
     BuildList,
 
-    /// A = Fn(arg_count, offset)
+    /// A = Fn(arg_count, captures, offset)
     BuildFn,
 
     /// A = NATIVE(arg1)
@@ -410,6 +416,14 @@ pub const Module = struct {
                     try stream.print(" #{} #{}\n", .{ arg_1, arg_2 });
                 },
 
+                // A B u8
+                .LoadCapture, .StoreCapture => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const arg_2 = module.getArg(RegRef, &ip);
+                    const arg_3 = module.getArg(u8, &ip);
+                    try stream.print(" #{} #{} [{}]\n", .{ arg_1, arg_2, arg_3 });
+                },
+
                 // A = (B, B + 1, ... B + N)
                 .BuildTuple,
                 .BuildList,
@@ -543,6 +557,9 @@ pub const Module = struct {
                 .IterInit,
                 .IterNext,
                 => ip += @sizeOf(RegRef) * 2,
+
+                // A B u8
+                .LoadCapture, .StoreCapture => ip += @sizeOf(RegRef) * 2 + @sizeOf(u8),
 
                 // A = (B, B + 1, ... B + N)
                 .BuildTuple, .BuildList, .BuildMap => ip += @sizeOf(RegRef) * 2 + @sizeOf(u16),

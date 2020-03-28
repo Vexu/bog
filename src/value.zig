@@ -1,5 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
+const Allocator = mem.Allocator;
 const bog = @import("bog.zig");
 const Vm = bog.Vm;
 const Module = bog.Module;
@@ -37,7 +38,10 @@ pub const Value = struct {
     __padding: u32 = 0,
 
     kind: union(TypeId) {
-        Tuple: []*Value,
+        Tuple: struct {
+            values: []*Value,
+            allocator: *Allocator,
+        },
         Map: Map,
         List: List,
         Error: *Value,
@@ -55,6 +59,9 @@ pub const Value = struct {
 
             /// module in which this function exists
             module: *Module,
+
+            captures: []*Value,
+            allocator: *Allocator,
         },
         Native: bog.native.Native,
         Iterator: struct {
@@ -65,12 +72,12 @@ pub const Value = struct {
             pub fn next(iter: *@This(), vm: *Vm, res: *?*Value) !void {
                 switch (iter.value.kind) {
                     .Tuple => |tuple| {
-                        if (iter.index == tuple.len) {
+                        if (iter.index == tuple.values.len) {
                             res.* = &Value.None;
                             return;
                         }
 
-                        res.* = tuple[iter.index];
+                        res.* = tuple.values[iter.index];
                         iter.index += 1;
                     },
                     .List => |list| {
@@ -122,6 +129,26 @@ pub const Value = struct {
         .kind = .{ .Bool = false },
     };
 
+    pub fn deinit(value: *Value) void {
+        switch (value.kind) {
+            .Int, .Num, .None, .Bool, .Native => {},
+            .Tuple => |t| t.allocator.free(t.values),
+            .Map => |m| m.deinit(),
+            .List => |l| l.deinit(),
+            .Error => |e| e.deinit(),
+            .Range => |r| {
+                r.begin.deinit();
+                r.end.deinit();
+            },
+            .Str => {
+                // TODO string memory management
+            },
+            .Fn => |f| f.allocator.free(f.captures),
+            .Iterator => |i| i.value.deinit(),
+            _ => unreachable,
+        }
+    }
+
     pub fn hash(key: *Value) u32 {
         const autoHash = std.hash.autoHash;
 
@@ -135,8 +162,8 @@ pub const Value = struct {
             .Bool => |b| autoHash(&hasher, b),
             .Str => |str| hasher.update(str),
             .Tuple => |tuple| {
-                autoHash(&hasher, tuple.len);
-                autoHash(&hasher, tuple.ptr);
+                autoHash(&hasher, tuple.values.len);
+                autoHash(&hasher, tuple.values.ptr);
             },
             .Map => |map| {
                 autoHash(&hasher, map.size);
@@ -170,14 +197,14 @@ pub const Value = struct {
 
     pub fn eql(a: *Value, b: *Value) bool {
         switch (a.kind) {
-            .Int => |val| return switch (b.kind) {
-                .Int => |b_val| val == b_val,
-                .Num => |b_val| @intToFloat(f64, val) == b_val,
+            .Int => |i| return switch (b.kind) {
+                .Int => |b_val| i == b_val,
+                .Num => |b_val| @intToFloat(f64, i) == b_val,
                 else => false,
             },
-            .Num => |val| return switch (b.kind) {
-                .Int => |b_val| val == @intToFloat(f64, b_val),
-                .Num => |b_val| val == b_val,
+            .Num => |n| return switch (b.kind) {
+                .Int => |b_val| n == @intToFloat(f64, b_val),
+                .Num => |b_val| n == b_val,
                 else => false,
             },
             else => if (a.kind != @as(@TagType(@TypeOf(b.kind)), b.kind)) return false,
@@ -185,37 +212,37 @@ pub const Value = struct {
         return switch (a.kind) {
             .Iterator, .Int, .Num => unreachable,
             .None => true,
-            .Bool => |val| val == b.kind.Bool,
-            .Str => |val| {
+            .Bool => |bool_val| bool_val == b.kind.Bool,
+            .Str => |s| {
                 const b_val = b.kind.Str;
-                return std.mem.eql(u8, val, b_val);
+                return std.mem.eql(u8, s, b_val);
             },
-            .Tuple => |val| {
-                const b_val = b.kind.Tuple;
-                if (val.len != b_val.len) return false;
-                for (val) |v, i| {
+            .Tuple => |t| {
+                const b_val = b.kind.Tuple.values;
+                if (t.values.len != b_val.len) return false;
+                for (t.values) |v, i| {
                     if (!v.eql(b_val[i])) return false;
                 }
                 return true;
             },
-            .Map => |val| @panic("TODO eql for maps"),
-            .List => |val| {
+            .Map => |m| @panic("TODO eql for maps"),
+            .List => |l| {
                 const b_val = b.kind.List;
-                if (val.len != b_val.len) return false;
-                for (val.toSliceConst()) |v, i| {
+                if (l.len != b_val.len) return false;
+                for (l.toSliceConst()) |v, i| {
                     if (!v.eql(b_val.toSliceConst()[i])) return false;
                 }
                 return true;
             },
-            .Error => |val| val.eql(b.kind.Error),
-            .Range => |val| @panic("TODO eql for ranges"),
-            .Fn => |val| {
+            .Error => |e| e.eql(b.kind.Error),
+            .Range => |r| @panic("TODO eql for ranges"),
+            .Fn => |f| {
                 const b_val = b.kind.Fn;
-                return val.offset == b_val.offset and
-                    val.arg_count == b_val.arg_count and
-                    val.module == b_val.module;
+                return f.offset == b_val.offset and
+                    f.arg_count == b_val.arg_count and
+                    f.module == b_val.module;
             },
-            .Native => |val| val.func == b.kind.Native.func,
+            .Native => |n| n.func == b.kind.Native.func,
             _ => unreachable,
         };
     }
@@ -223,37 +250,37 @@ pub const Value = struct {
     pub fn dump(value: Value, stream: var, level: u32) @TypeOf(stream).Error!void {
         switch (value.kind) {
             .Iterator => unreachable,
-            .Int => |int| try stream.print("{}", .{int}),
-            .Num => |num| try stream.print("{d}", .{num}),
+            .Int => |i| try stream.print("{}", .{i}),
+            .Num => |n| try stream.print("{d}", .{n}),
             .Bool => |b| try stream.writeAll(if (b) "true" else "false"),
             .None => try stream.writeAll("()"),
-            .Range => |range| {
+            .Range => |r| {
                 if (level == 0) {
                     try stream.writeAll("(range)");
                 } else {
-                    try range.begin.dump(stream, level - 1);
+                    try r.begin.dump(stream, level - 1);
                     try stream.writeAll("...");
-                    try range.end.dump(stream, level - 1);
+                    try r.end.dump(stream, level - 1);
                 }
             },
-            .Tuple => |tuple| {
+            .Tuple => |t| {
                 if (level == 0) {
                     try stream.writeAll("(...)");
                 } else {
                     try stream.writeByte('(');
-                    for (tuple) |v, i| {
+                    for (t.values) |v, i| {
                         if (i != 0) try stream.writeAll(", ");
                         try v.dump(stream, level - 1);
                     }
                     try stream.writeByte(')');
                 }
             },
-            .Map => |map| {
+            .Map => |m| {
                 if (level == 0) {
                     try stream.writeAll("{...}");
                 } else {
                     try stream.writeByte('{');
-                    var it = map.iterator();
+                    var it = m.iterator();
                     while (it.next()) |kv| {
                         if (it.count != 1)
                             try stream.writeAll(", ");
@@ -264,30 +291,30 @@ pub const Value = struct {
                     try stream.writeByte('}');
                 }
             },
-            .List => |list| {
+            .List => |l| {
                 if (level == 0) {
                     try stream.writeAll("[...]");
                 } else {
                     try stream.writeByte('[');
-                    for (list.toSliceConst()) |v, i| {
+                    for (l.toSliceConst()) |v, i| {
                         if (i != 0) try stream.writeAll(", ");
                         try v.dump(stream, level - 1);
                     }
                     try stream.writeByte(']');
                 }
             },
-            .Error => |err| {
+            .Error => |e| {
                 if (level == 0) {
                     try stream.writeAll("error(...)");
                 } else {
                     try stream.writeAll("error(");
-                    try err.dump(stream, level - 1);
+                    try e.dump(stream, level - 1);
                     try stream.writeByte(')');
                 }
             },
-            .Str => |str| {
+            .Str => |s| {
                 try stream.writeByte('"');
-                for (str) |c| {
+                for (s) |c| {
                     switch (c) {
                         '\n' => try stream.writeAll("\\n"),
                         '\t' => try stream.writeAll("\\t"),
@@ -302,11 +329,11 @@ pub const Value = struct {
                 }
                 try stream.writeByte('"');
             },
-            .Fn => |func| {
-                try stream.print("fn({})@0x{X}", .{ func.arg_count, func.offset });
+            .Fn => |f| {
+                try stream.print("fn({})@0x{X}[{}]", .{ f.arg_count, f.offset, f.captures.len });
             },
-            .Native => |func| {
-                try stream.print("native({})@0x{}", .{ func.arg_count, @ptrToInt(func.func) });
+            .Native => |n| {
+                try stream.print("native({})@0x{}", .{ n.arg_count, @ptrToInt(n.func) });
             },
             _ => unreachable,
         }
@@ -316,16 +343,20 @@ pub const Value = struct {
         if (value.marked) return;
         value.marked = true;
         switch (value.kind) {
-            .None, .Int, .Num, .Fn, .Bool, .Str, .Native => {},
+            .None, .Int, .Num, .Bool, .Str, .Native => {},
 
-            .Iterator => |val| val.value.mark(),
-            .Tuple => |val| for (val) |v| v.mark(),
-            .Map => @panic("TODO mark for maps"),
-            .List => |val| for (val.toSliceConst()) |v| v.mark(),
-            .Error => |val| val.mark(),
-            .Range => |val| {
-                val.begin.mark();
-                val.end.mark();
+            .Fn => |f| for (f.captures) |v| v.mark(),
+            .Iterator => |i| i.value.mark(),
+            .Tuple => |t| for (t.values) |v| v.mark(),
+            .Map => |m| {
+                var it = m.iterator();
+                while (it.next()) |kv| kv.value.mark();
+            },
+            .List => |l| for (l.toSliceConst()) |v| v.mark(),
+            .Error => |e| e.mark(),
+            .Range => |r| {
+                r.begin.mark();
+                r.end.mark();
             },
             _ => unreachable,
         }
@@ -337,11 +368,11 @@ pub const Value = struct {
                 .Int => {
                     var i = index.kind.Int;
                     if (i < 0)
-                        i += @intCast(i64, tuple.len);
-                    if (i < 0 or i >= tuple.len)
+                        i += @intCast(i64, tuple.values.len);
+                    if (i < 0 or i >= tuple.values.len)
                         return vm.reportErr("index out of bounds");
 
-                    res.* = tuple[@intCast(u32, i)];
+                    res.* = tuple.values[@intCast(u32, i)];
                 },
                 .Range => return vm.reportErr("TODO get with ranges"),
                 .Str => |s| {
@@ -351,7 +382,7 @@ pub const Value = struct {
 
                     if (mem.eql(u8, s, "len")) {
                         res.*.?.* = .{
-                            .kind = .{ .Int = @intCast(i64, tuple.len) },
+                            .kind = .{ .Int = @intCast(i64, tuple.values.len) },
                         };
                     } else {
                         return vm.reportErr("no such property");
@@ -417,11 +448,11 @@ pub const Value = struct {
             .Tuple => |tuple| if (index.kind == .Int) {
                 var i = index.kind.Int;
                 if (i < 0)
-                    i += @intCast(i64, tuple.len);
-                if (i < 0 or i >= tuple.len)
+                    i += @intCast(i64, tuple.values.len);
+                if (i < 0 or i >= tuple.values.len)
                     return vm.reportErr("index out of bounds");
 
-                tuple[@intCast(u32, i)].* = new_val.*;
+                tuple.values[@intCast(u32, i)].* = new_val.*;
             } else {
                 return vm.reportErr("TODO set with ranges");
             },
@@ -523,7 +554,7 @@ pub const Value = struct {
                 return mem.indexOf(u8, str, val.kind.Str) != null;
             },
             .Tuple => |tuple| {
-                for (tuple) |v| {
+                for (tuple.values) |v| {
                     if (v.eql(val)) return true;
                 }
                 return false;

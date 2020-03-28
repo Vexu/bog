@@ -554,8 +554,7 @@ pub const Vm = struct {
                     const B = vm.getArg(module, RegRef);
                     const arg_count = vm.getArg(module, u16);
 
-                    // TODO gc this
-                    const vals = try vm.call_stack.allocator.alloc(*Value, arg_count);
+                    const vals = try vm.allocator.alloc(*Value, arg_count);
                     var i: u32 = 0;
                     while (i < arg_count) : (i += 1) {
                         vals[i] = vm.gc.stackGet(B + vm.sp + i) catch
@@ -564,7 +563,10 @@ pub const Vm = struct {
 
                     A_val.* = .{
                         .kind = .{
-                            .Tuple = vals,
+                            .Tuple = .{
+                                .values = vals,
+                                .allocator = vm.allocator,
+                            },
                         },
                     };
                 },
@@ -575,8 +577,7 @@ pub const Vm = struct {
 
                     A_val.* = .{
                         .kind = .{
-                            // TODO gc this
-                            .List = try Value.List.initCapacity(vm.call_stack.allocator, arg_count),
+                            .List = try Value.List.initCapacity(vm.allocator, arg_count),
                         },
                     };
 
@@ -594,8 +595,7 @@ pub const Vm = struct {
                     if (arg_count & 1 != 0) return error.MalformedByteCode;
                     A_val.* = .{
                         .kind = .{
-                            // TODO gc this
-                            .Map = Value.Map.init(vm.call_stack.allocator),
+                            .Map = Value.Map.init(vm.allocator),
                         },
                     };
 
@@ -626,6 +626,7 @@ pub const Vm = struct {
                 .BuildFn => {
                     const A_val = try vm.getNewVal(module);
                     const arg_count = vm.getArg(module, u8);
+                    const captures = vm.getArg(module, u8);
                     const offset = vm.getArg(module, u32);
 
                     A_val.* = .{
@@ -634,6 +635,8 @@ pub const Vm = struct {
                                 .arg_count = arg_count,
                                 .offset = offset,
                                 .module = module,
+                                .allocator = vm.allocator,
+                                .captures = try vm.allocator.alloc(*Value, captures), 
                             },
                         },
                     };
@@ -768,6 +771,28 @@ pub const Vm = struct {
 
                     const ret_val = try vm.gc.stackRef(vm.sp + frame.ret_reg);
                     ret_val.* = &Value.None;
+                },
+                .LoadCapture => {
+                    const A_ref = try vm.getRef(module);
+                    const B_val = try vm.getVal(module);
+                    const n = vm.getArg(module, u8);
+
+                    if (B_val.kind != .Fn) return error.MalformedByteCode;
+                    const func = B_val.kind.Fn;
+                    if (n > func.captures.len) return error.MalformedByteCode;
+
+                    A_ref.* = func.captures[n];
+                },
+                .StoreCapture => {
+                    const A_val = try vm.getVal(module);
+                    const B_val = try vm.getVal(module);
+                    const n = vm.getArg(module, u8);
+
+                    if (A_val.kind != .Fn) return error.MalformedByteCode;
+                    const func = A_val.kind.Fn;
+                    if (n > func.captures.len) return error.MalformedByteCode;
+
+                    func.captures[n] = B_val;
                 },
                 .LineInfo => {
                     const line = vm.getArg(module, u32);
