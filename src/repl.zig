@@ -48,6 +48,7 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
                     .syms = Compiler.Symbol.List.init(arena),
                 },
                 .code = Compiler.Code.init(allocator),
+                .captures = undefined,
             },
             .string_interner = std.StringHashMap(u32).init(arena),
             .module_code = Compiler.Code.init(allocator),

@@ -16,7 +16,7 @@ pub const Op = enum(u8) {
     /// DISCARD(A)
     Discard,
 
-    /// A = CAPTURE(B, arg1)
+    /// A = CAPTURE(arg1)
     LoadCapture,
 
     /// CAPTURE(A, arg1) = B
@@ -328,13 +328,14 @@ pub const Module = struct {
                     try stream.print(" {}\n", .{label});
                 },
 
-                // A = Fn(arg_count, offset)
+                // A = Fn(arg_count, captures, offset)
                 .BuildFn => {
                     const arg_1 = module.getArg(RegRef, &ip);
                     const arg_2 = module.getArg(u8, &ip);
-                    const arg_3 = module.getArg(u32, &ip);
+                    const arg_3 = module.getArg(u8, &ip);
+                    const arg_4 = module.getArg(u32, &ip);
                     const label = jumps.getValue(arg_3) orelse unreachable;
-                    try stream.print(" #{} {}({})\n", .{ arg_1, label, arg_2 });
+                    try stream.print(" #{} {}({})[{}]\n", .{ arg_1, label, arg_2, arg_3 });
                 },
 
                 // A i32
@@ -417,11 +418,18 @@ pub const Module = struct {
                 },
 
                 // A B u8
-                .LoadCapture, .StoreCapture => {
+                .StoreCapture => {
                     const arg_1 = module.getArg(RegRef, &ip);
                     const arg_2 = module.getArg(RegRef, &ip);
                     const arg_3 = module.getArg(u8, &ip);
-                    try stream.print(" #{} #{} [{}]\n", .{ arg_1, arg_2, arg_3 });
+                    try stream.print(" #{}[{}] = #{}\n", .{ arg_1, arg_3, arg_2 });
+                },
+
+                // A u8
+                .LoadCapture => {
+                    const arg_1 = module.getArg(RegRef, &ip);
+                    const arg_2 = module.getArg(u8, &ip);
+                    try stream.print(" #{} = [{}]\n", .{ arg_1, arg_2 });
                 },
 
                 // A = (B, B + 1, ... B + N)
@@ -479,7 +487,7 @@ pub const Module = struct {
             const op = module.getArg(Op, &ip);
             switch (op) {
                 // A i8
-                .ConstPrimitive, .ConstInt8 => ip += @sizeOf(RegRef) + @sizeOf(i8),
+                .LoadCapture, .ConstPrimitive, .ConstInt8 => ip += @sizeOf(RegRef) + @sizeOf(i8),
 
                 // A u32
                 .JumpTrue, .JumpFalse, .JumpNotError, .JumpNone, .Jump => {
@@ -498,9 +506,9 @@ pub const Module = struct {
                     mangle += 1;
                 },
 
-                // A = Fn(arg_count, offset)
+                // A = Fn(arg_count, captures, offset)
                 .BuildFn => {
-                    ip += @sizeOf(RegRef) + @sizeOf(u8);
+                    ip += @sizeOf(RegRef) + @sizeOf(u8) * 2;
                     const offset = module.getArg(u32, &ip);
 
                     _ = try map.put(offset, try std.fmt.allocPrint(arena, "function_{}", .{mangle}));
@@ -559,7 +567,7 @@ pub const Module = struct {
                 => ip += @sizeOf(RegRef) * 2,
 
                 // A B u8
-                .LoadCapture, .StoreCapture => ip += @sizeOf(RegRef) * 2 + @sizeOf(u8),
+                .StoreCapture => ip += @sizeOf(RegRef) * 2 + @sizeOf(u8),
 
                 // A = (B, B + 1, ... B + N)
                 .BuildTuple, .BuildList, .BuildMap => ip += @sizeOf(RegRef) * 2 + @sizeOf(u16),

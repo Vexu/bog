@@ -62,6 +62,14 @@ pub const Compiler = struct {
         const Fn = struct {
             base: Scope,
             code: Code,
+            captures: Symbol.List,
+
+            fn emitInstruction(scope: *Fn, self: *Compiler, op: bog.Op, args: var) !void {
+                try scope.code.append(@enumToInt(op));
+                inline for (std.meta.fields(@TypeOf(args))) |f| {
+                    try scope.code.appendSlice(mem.asBytes(&@field(args, f.name)));
+                }
+            }
         };
 
         const Loop = struct {
@@ -90,22 +98,66 @@ pub const Compiler = struct {
             return false;
         }
 
-        fn getSymbol(scope: *Scope, self: *Compiler, name: []const u8, tok: TokenIndex) !*Symbol {
+        fn getSymbol(scope: *Scope, self: *Compiler, name: []const u8, tok: TokenIndex) !RegAndMut {
+            return try scope.getSymbolTail(self, name, null, tok);
+        }
+
+        fn getSymbolTail(scope: *Scope, self: *Compiler, name: []const u8, func: ?*Fn, tok: TokenIndex) error{OutOfMemory, CompileError}!RegAndMut {
             var cur: ?*Scope = scope;
-            while (cur) |some| {
+            blk: while (cur) |some| {
                 var it = some.syms.iterator(some.syms.len);
                 while (it.prev()) |sym| {
                     if (mem.eql(u8, sym.name, name)) {
-                        return sym;
+                        if (func) |parent| {
+                            try parent.captures.push(sym.*);
+                            return RegAndMut{
+                                .reg = @truncate(RegRef, parent.captures.len - 1),
+                                .mutable = sym.mutable,
+                            };
+                        }
+                        return RegAndMut{
+                            .reg = sym.reg,
+                            .mutable = sym.mutable,
+                        };
                     }
                 }
-                if (some.parent != null and some.id == .Fn) {
-                    return self.reportErr("TODO closures", tok);
+                if (some.id == .Fn) {
+                    const new_func = @fieldParentPtr(Fn, "base", some);
+                    const res = self.registerAlloc();
+
+                    it = new_func.captures.iterator(new_func.captures.len);
+                    while (it.prev()) |sym| {
+                        if (!mem.eql(u8, sym.name, name)) continue;
+
+                        try new_func.emitInstruction(self, .LoadCapture, .{
+                            res,
+                            @truncate(u8, sym.reg),
+                        });
+                        return RegAndMut{
+                            .reg = res,
+                            .mutable = sym.mutable,
+                        };
+                    }
+                    const parent = some.parent orelse break :blk;
+                    const sub = try parent.getSymbolTail(self, name, new_func, tok);
+                    try new_func.emitInstruction(self, .LoadCapture, .{
+                        res,
+                        sub.reg,
+                    });
+                    return RegAndMut{
+                        .reg = res,
+                        .mutable = sub.mutable,
+                    };
                 }
                 cur = some.parent;
             }
             return self.reportErr("use of undeclared identifier", tok);
         }
+
+        const RegAndMut = struct {
+            reg: RegRef,
+            mutable: bool,
+        };
     };
 
     pub const Symbol = struct {
@@ -285,6 +337,7 @@ pub const Compiler = struct {
                     .syms = Symbol.List.init(arena),
                 },
                 .code = Code.init(arena),
+                .captures = undefined,
             },
             .module_code = Code.init(allocator),
             .strings = Code.init(allocator),
@@ -551,6 +604,7 @@ pub const Compiler = struct {
                 .syms = Symbol.List.init(self.arena),
             },
             .code = try Code.initCapacity(self.arena, 256),
+            .captures = Symbol.List.init(self.arena),
         };
         defer fn_scope.code.deinit();
         self.cur_scope = &fn_scope.base;
@@ -609,8 +663,17 @@ pub const Compiler = struct {
         try self.emitInstruction(.BuildFn, .{
             sub_res.Rt,
             @truncate(u8, node.params.len),
+            @truncate(u8, fn_scope.captures.len),
             @truncate(u32, self.module_code.len),
         });
+        var capture_it = fn_scope.captures.iterator(0);
+        while (capture_it.next()) |capture| {
+            try self.emitInstruction(.StoreCapture, .{
+                sub_res.Rt,
+                capture.reg,
+                capture_it.index - 1,
+            });
+        }
         try self.module_code.appendSlice(fn_scope.code.toSlice());
         return sub_res.toVal();
     }
@@ -1382,7 +1445,7 @@ pub const Compiler = struct {
             return sub_res.toVal();
         }
 
-        // order comparisions are only allowed on numbers
+        // order comparisons are only allowed on numbers
         switch (node.op) {
             .In, .Equal, .NotEqual => {},
             else => {

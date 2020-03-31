@@ -57,6 +57,7 @@ pub const Vm = struct {
         line_loc: u32,
         ret_reg: RegRef,
         module: *Module,
+        captures: []*Value,
     };
 
     pub const Error = error{
@@ -711,8 +712,9 @@ pub const Vm = struct {
                     if (B_val.kind != .Fn) {
                         return vm.reportErr("attempt to call non function type");
                     }
+                    const func = B_val.kind.Fn;
 
-                    if (B_val.kind.Fn.arg_count != arg_count) {
+                    if (func.arg_count != arg_count) {
                         // TODO improve this error message to tell the expected and given counts
                         return vm.reportErr("unexpected arg count");
                     }
@@ -727,10 +729,11 @@ pub const Vm = struct {
                         .line_loc = vm.line_loc,
                         .ret_reg = A,
                         .module = mod,
+                        .captures = func.captures,
                     });
                     vm.sp += C;
-                    vm.ip = B_val.kind.Fn.offset;
-                    module = B_val.kind.Fn.module;
+                    vm.ip = func.offset;
+                    module = func.module;
                 },
                 .Return => {
                     const A_val = try vm.getVal(module);
@@ -774,14 +777,12 @@ pub const Vm = struct {
                 },
                 .LoadCapture => {
                     const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getVal(module);
                     const n = vm.getArg(module, u8);
 
-                    if (B_val.kind != .Fn) return error.MalformedByteCode;
-                    const func = B_val.kind.Fn;
-                    if (n > func.captures.len) return error.MalformedByteCode;
+                    const frame = vm.call_stack.at(vm.call_stack.len -1);
+                    if (n > frame.captures.len) return error.MalformedByteCode;
 
-                    A_ref.* = func.captures[n];
+                    A_ref.* = frame.captures[n];
                 },
                 .StoreCapture => {
                     const A_val = try vm.getVal(module);
