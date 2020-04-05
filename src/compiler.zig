@@ -102,7 +102,7 @@ pub const Compiler = struct {
             return try scope.getSymbolTail(self, name, null, tok);
         }
 
-        fn getSymbolTail(scope: *Scope, self: *Compiler, name: []const u8, func: ?*Fn, tok: TokenIndex) error{OutOfMemory, CompileError}!RegAndMut {
+        fn getSymbolTail(scope: *Scope, self: *Compiler, name: []const u8, func: ?*Fn, tok: TokenIndex) Error!RegAndMut {
             var cur: ?*Scope = scope;
             blk: while (cur) |some| {
                 var it = some.syms.iterator(some.syms.len);
@@ -125,6 +125,7 @@ pub const Compiler = struct {
                     const new_func = @fieldParentPtr(Fn, "base", some);
                     const res = self.registerAlloc();
 
+                    // check if we have already captured this variable
                     it = new_func.captures.iterator(new_func.captures.len);
                     while (it.prev()) |sym| {
                         if (!mem.eql(u8, sym.name, name)) continue;
@@ -142,8 +143,17 @@ pub const Compiler = struct {
                     const sub = try parent.getSymbolTail(self, name, new_func, tok);
                     try new_func.emitInstruction(self, .LoadCapture, .{
                         res,
-                        sub.reg,
+                        @truncate(u8, sub.reg),
                     });
+
+                    // forward captured symbol
+                    if (func) |parent_fn| {
+                        try parent_fn.captures.push(.{
+                            .name = name,
+                            .reg = res,
+                            .mutable = sub.mutable,
+                        });
+                    }
                     return RegAndMut{
                         .reg = res,
                         .mutable = sub.mutable,
@@ -599,7 +609,7 @@ pub const Compiler = struct {
 
         var fn_scope = Scope.Fn{
             .base = .{
-                .id = .Block,
+                .id = .Fn,
                 .parent = self.cur_scope,
                 .syms = Symbol.List.init(self.arena),
             },
@@ -671,7 +681,7 @@ pub const Compiler = struct {
             try self.emitInstruction(.StoreCapture, .{
                 sub_res.Rt,
                 capture.reg,
-                capture_it.index - 1,
+                @truncate(u8, capture_it.index - 1),
             });
         }
         try self.module_code.appendSlice(fn_scope.code.toSlice());

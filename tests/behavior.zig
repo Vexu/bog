@@ -1,3 +1,26 @@
+test "closures" {
+    try expectOutput(
+        \\let x = 2
+        \\const foo = fn()
+        \\    return x + 5
+        \\return foo()
+    ,
+        \\7
+    );
+    // TODO multilevel captures
+    // try expectOutput(
+    //     \\let x = 2
+    //     \\const foo = fn()
+    //     \\    return fn()
+    //     \\        return x + 5
+    //     \\
+    //     \\const bar = foo()
+    //     \\return bar()
+    // ,
+    //     \\7
+    // );
+}
+
 test "map" {
     try expectOutput(
         \\let y = 2

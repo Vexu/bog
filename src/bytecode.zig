@@ -330,12 +330,12 @@ pub const Module = struct {
 
                 // A = Fn(arg_count, captures, offset)
                 .BuildFn => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const arg_2 = module.getArg(u8, &ip);
-                    const arg_3 = module.getArg(u8, &ip);
-                    const arg_4 = module.getArg(u32, &ip);
-                    const label = jumps.getValue(arg_3) orelse unreachable;
-                    try stream.print(" #{} {}({})[{}]\n", .{ arg_1, label, arg_2, arg_3 });
+                    const res = module.getArg(RegRef, &ip);
+                    const arg_count = module.getArg(u8, &ip);
+                    const captures = module.getArg(u8, &ip);
+                    const offset = module.getArg(u32, &ip);
+                    const label = jumps.getValue(offset) orelse unreachable;
+                    try stream.print(" #{} {}({})[{}]\n", .{ res, label, arg_count, captures });
                 },
 
                 // A i32

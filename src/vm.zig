@@ -637,7 +637,7 @@ pub const Vm = struct {
                                 .offset = offset,
                                 .module = module,
                                 .allocator = vm.allocator,
-                                .captures = try vm.allocator.alloc(*Value, captures), 
+                                .captures = try vm.allocator.alloc(*Value, captures),
                             },
                         },
                     };
@@ -697,7 +697,7 @@ pub const Vm = struct {
                         //     return vm.reportErr("unexpected arg count");
                         // }
 
-                        const args = vm.gc.stack.span()[vm.ip + C ..][0..arg_count];
+                        const args = vm.gc.stack.span()[vm.sp + C ..][0..arg_count];
                         for (args) |arg| {
                             if (arg == null)
                                 return error.MalformedByteCode;
@@ -779,8 +779,8 @@ pub const Vm = struct {
                     const A_ref = try vm.getRef(module);
                     const n = vm.getArg(module, u8);
 
-                    const frame = vm.call_stack.at(vm.call_stack.len -1);
-                    if (n > frame.captures.len) return error.MalformedByteCode;
+                    const frame = vm.call_stack.at(vm.call_stack.len - 1);
+                    if (n >= frame.captures.len) return error.MalformedByteCode;
 
                     A_ref.* = frame.captures[n];
                 },
@@ -791,7 +791,7 @@ pub const Vm = struct {
 
                     if (A_val.kind != .Fn) return error.MalformedByteCode;
                     const func = A_val.kind.Fn;
-                    if (n > func.captures.len) return error.MalformedByteCode;
+                    if (n >= func.captures.len) return error.MalformedByteCode;
 
                     func.captures[n] = B_val;
                 },
