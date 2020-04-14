@@ -850,8 +850,8 @@ pub const Vm = struct {
         const saved_sp = vm.sp;
         const saved_ip = vm.ip;
         const saved_line_loc = vm.line_loc;
-        const saved_stack_len = vm.gc.stack.len;
-        vm.sp = vm.gc.stack.len;
+        const saved_stack_len = vm.gc.stack.items.len;
+        vm.sp = vm.gc.stack.items.len;
 
         vm.ip = mod.entry;
         const res = try vm.exec(mod);

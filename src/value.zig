@@ -81,12 +81,12 @@ pub const Value = struct {
                         iter.index += 1;
                     },
                     .List => |list| {
-                        if (iter.index == list.len) {
+                        if (iter.index == list.items.len) {
                             res.* = &Value.None;
                             return;
                         }
 
-                        res.* = list.at(iter.index);
+                        res.* = list.items[iter.index];
                         iter.index += 1;
                     },
                     .Str => |str| {
@@ -172,7 +172,6 @@ pub const Value = struct {
                 autoHash(&hasher, map.max_distance_from_start_index);
             },
             .List => |list| {
-                autoHash(&hasher, list.len);
                 autoHash(&hasher, list.items.len);
                 autoHash(&hasher, list.items.ptr);
             },
@@ -228,9 +227,9 @@ pub const Value = struct {
             .Map => |m| @panic("TODO eql for maps"),
             .List => |l| {
                 const b_val = b.kind.List;
-                if (l.len != b_val.len) return false;
-                for (l.toSliceConst()) |v, i| {
-                    if (!v.eql(b_val.toSliceConst()[i])) return false;
+                if (l.items.len != b_val.items.len) return false;
+                for (l.items) |v, i| {
+                    if (!v.eql(b_val.items[i])) return false;
                 }
                 return true;
             },
@@ -296,7 +295,7 @@ pub const Value = struct {
                     try stream.writeAll("[...]");
                 } else {
                     try stream.writeByte('[');
-                    for (l.toSliceConst()) |v, i| {
+                    for (l.items) |v, i| {
                         if (i != 0) try stream.writeAll(", ");
                         try v.dump(stream, level - 1);
                     }
@@ -352,7 +351,7 @@ pub const Value = struct {
                 var it = m.iterator();
                 while (it.next()) |kv| kv.value.mark();
             },
-            .List => |l| for (l.toSliceConst()) |v| v.mark(),
+            .List => |l| for (l.items) |v| v.mark(),
             .Error => |e| e.mark(),
             .Range => |r| {
                 r.begin.mark();
@@ -394,11 +393,11 @@ pub const Value = struct {
                 .Int => {
                     var i = index.kind.Int;
                     if (i < 0)
-                        i += @intCast(i64, list.len);
-                    if (i < 0 or i >= list.len)
+                        i += @intCast(i64, list.items.len);
+                    if (i < 0 or i >= list.items.len)
                         return vm.reportErr("index out of bounds");
 
-                    res.* = list.at(@intCast(u32, i));
+                    res.* = list.items[@intCast(u32, i)];
                 },
                 .Range => return vm.reportErr("TODO get with ranges"),
                 .Str => |s| {
@@ -408,7 +407,7 @@ pub const Value = struct {
 
                     if (mem.eql(u8, s, "len")) {
                         res.*.?.* = .{
-                            .kind = .{ .Int = @intCast(i64, list.len) },
+                            .kind = .{ .Int = @intCast(i64, list.items.len) },
                         };
                     } else {
                         return vm.reportErr("no such property");
@@ -462,11 +461,11 @@ pub const Value = struct {
             .List => |list| if (index.kind == .Int) {
                 var i = index.kind.Int;
                 if (i < 0)
-                    i += @intCast(i64, list.len);
-                if (i < 0 or i >= list.len)
+                    i += @intCast(i64, list.items.len);
+                if (i < 0 or i >= list.items.len)
                     return vm.reportErr("index out of bounds");
 
-                list.toSlice()[@intCast(u32, i)].* = new_val.*;
+                list.items[@intCast(u32, i)].* = new_val.*;
             } else {
                 return vm.reportErr("TODO set with ranges");
             },
@@ -560,7 +559,7 @@ pub const Value = struct {
                 return false;
             },
             .List => |list| {
-                for (list.toSliceConst()) |v| {
+                for (list.items) |v| {
                     if (v.eql(val)) return true;
                 }
                 return false;
@@ -603,7 +602,7 @@ fn testDump(val: Value, expected: []const u8) !void {
     var out_stream = std.io.BufferOutStream.init(&out_buf);
 
     try val.dump(&out_stream.stream, 4);
-    const result = out_buf.toSliceConst();
+    const result = out_buf.items;
 
     if (!std.mem.eql(u8, result, expected)) {
         std.debug.warn("\n---expected----\n{}\n-----found-----\n{}\n---------------\n", .{ expected, result });

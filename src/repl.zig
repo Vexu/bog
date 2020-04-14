@@ -43,12 +43,11 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
             .arena = arena,
             .root_scope = .{
                 .base = .{
-                    .id = .Fn,
+                    .id = .Module,
                     .parent = null,
                     .syms = Compiler.Symbol.List.init(arena),
                 },
                 .code = Compiler.Code.init(allocator),
-                .captures = undefined,
             },
             .string_interner = std.StringHashMap(u32).init(arena),
             .module_code = Compiler.Code.init(allocator),
@@ -71,10 +70,10 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     while (true) {
         repl.handleLine(in_stream, out_stream) catch |err| switch (err) {
             error.EndOfStream => return,
-            error.TokenizeError, error.ParseError, error.CompileError => try repl.vm.errors.render(repl.buffer.toSliceConst(), out_stream),
+            error.TokenizeError, error.ParseError, error.CompileError => try repl.vm.errors.render(repl.buffer.items, out_stream),
             error.RuntimeError => {
                 repl.vm.ip = repl.module.code.len;
-                try repl.vm.errors.render(repl.buffer.toSliceConst(), out_stream);
+                try repl.vm.errors.render(repl.buffer.items, out_stream);
             },
             else => |e| return e,
         };
@@ -92,7 +91,7 @@ const Repl = struct {
         var begin_index = repl.compiler.tree.tokens.len;
         if (begin_index != 0) begin_index -= 1;
         try repl.readLine(">>> ", in_stream, out_stream);
-        while (!(try repl.tokenizer.tokenizeRepl(repl.buffer.toSliceConst()))) {
+        while (!(try repl.tokenizer.tokenizeRepl(repl.buffer.items))) {
             try repl.readLine("... ", in_stream, out_stream);
         }
         const node = (try bog.Parser.parseRepl(repl.compiler.tree, begin_index, &repl.vm.errors)) orelse return;
@@ -108,10 +107,10 @@ const Repl = struct {
 
     fn readLine(repl: *Repl, prompt: []const u8, in_stream: var, out_stream: var) !void {
         try out_stream.writeAll(prompt);
-        const start_len = repl.buffer.len;
+        const start_len = repl.buffer.items.len;
         while (true) {
             var byte: u8 = in_stream.readByte() catch |e| switch (e) {
-                error.EndOfStream => if (start_len == repl.buffer.len) {
+                error.EndOfStream => if (start_len == repl.buffer.items.len) {
                     try out_stream.writeAll(std.cstr.line_sep);
                     return error.EndOfStream;
                 } else continue,
@@ -123,7 +122,7 @@ const Repl = struct {
                 return;
             }
 
-            if (repl.buffer.len - start_len == 1024) {
+            if (repl.buffer.items.len - start_len == 1024) {
                 return error.StreamTooLong;
             }
         }

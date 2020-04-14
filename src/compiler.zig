@@ -18,7 +18,7 @@ pub const Compiler = struct {
     tree: *Tree,
     errors: *Errors,
     arena: *Allocator,
-    root_scope: Scope.Fn,
+    root_scope: Scope.Module,
     cur_scope: *Scope,
     used_regs: RegRef = 0,
     code: *Code,
@@ -53,6 +53,7 @@ pub const Compiler = struct {
         syms: Symbol.List,
 
         const Id = enum {
+            Module,
             Fn,
             Loop,
             Block,
@@ -70,6 +71,11 @@ pub const Compiler = struct {
                     try scope.code.appendSlice(mem.asBytes(&@field(args, f.name)));
                 }
             }
+        };
+
+        const Module = struct {
+            base: Scope,
+            code: Code,
         };
 
         const Loop = struct {
@@ -288,7 +294,7 @@ pub const Compiler = struct {
 
     fn putString(self: *Compiler, str: []const u8) !u32 {
         if (self.string_interner.getValue(str)) |some| return some;
-        const offset = @intCast(u32, self.strings.len);
+        const offset = @intCast(u32, self.strings.items.len);
         try self.strings.appendSlice(mem.asBytes(&@intCast(u32, str.len)));
         try self.strings.appendSlice(str);
 
@@ -342,12 +348,11 @@ pub const Compiler = struct {
             .arena = arena,
             .root_scope = .{
                 .base = .{
-                    .id = .Fn,
+                    .id = .Module,
                     .parent = null,
                     .syms = Symbol.List.init(arena),
                 },
                 .code = Code.init(arena),
-                .captures = undefined,
             },
             .module_code = Code.init(allocator),
             .strings = Code.init(allocator),
@@ -371,8 +376,8 @@ pub const Compiler = struct {
             }
         }
 
-        const entry = compiler.module_code.len;
-        try compiler.module_code.appendSlice(compiler.code.toSliceConst());
+        const entry = compiler.module_code.items.len;
+        try compiler.module_code.appendSlice(compiler.code.items);
         const mod = try allocator.create(bog.Module);
         mod.* = .{
             .name = "",
@@ -384,7 +389,7 @@ pub const Compiler = struct {
     }
 
     pub fn compileRepl(self: *Compiler, node: *Node, module: *bog.Module) Error!usize {
-        const start_len = self.module_code.len;
+        const start_len = self.module_code.items.len;
         try self.addLineInfo(node);
         const val = try self.genNode(node, .Discard);
         if (val != .Empty) {
@@ -393,12 +398,12 @@ pub const Compiler = struct {
 
             try self.emitInstruction(.Discard, .{reg});
         }
-        const final_len = self.module_code.len;
-        try self.module_code.appendSlice(self.code.toSliceConst());
+        const final_len = self.module_code.items.len;
+        try self.module_code.appendSlice(self.code.items);
 
-        module.code = self.module_code.toSliceConst();
+        module.code = self.module_code.items;
         self.module_code.resize(final_len) catch unreachable;
-        module.strings = self.strings.toSliceConst();
+        module.strings = self.strings.items;
         return final_len - start_len;
     }
 
@@ -674,7 +679,7 @@ pub const Compiler = struct {
             sub_res.Rt,
             @truncate(u8, node.params.len),
             @truncate(u8, fn_scope.captures.len),
-            @truncate(u32, self.module_code.len),
+            @truncate(u32, self.module_code.items.len),
         });
         var capture_it = fn_scope.captures.iterator(0);
         while (capture_it.next()) |capture| {
@@ -684,7 +689,7 @@ pub const Compiler = struct {
                 @truncate(u8, capture_it.index - 1),
             });
         }
-        try self.module_code.appendSlice(fn_scope.code.toSlice());
+        try self.module_code.appendSlice(fn_scope.code.items);
         return sub_res.toVal();
     }
 
@@ -735,7 +740,7 @@ pub const Compiler = struct {
             const cond_reg = try cond_val.toRt(self);
             // jump past if_body if cond == .None
             try self.emitInstruction(.JumpNone, .{ cond_reg, @as(u32, 0) });
-            if_skip = self.code.len;
+            if_skip = self.code.items.len;
 
             self.cur_scope = &capture_scope;
             const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)
@@ -758,7 +763,7 @@ pub const Compiler = struct {
         } else {
             // jump past if_body if cond == false
             try self.emitInstruction(.JumpFalse, .{ cond_val.getRt(), @as(u32, 0) });
-            if_skip = self.code.len;
+            if_skip = self.code.items.len;
         }
         const sub_res = switch (res) {
             .Rt, .Discard => res,
@@ -779,7 +784,7 @@ pub const Compiler = struct {
         if (else_skip_needed) {
             try self.emitInstruction(.Jump, .{@as(u32, 0)});
         }
-        const else_skip = self.code.len;
+        const else_skip = self.code.items.len;
 
         self.finishJump(if_skip);
         // end capture scope
@@ -833,11 +838,11 @@ pub const Compiler = struct {
         };
         if (node.op == .Continue) {
             try self.emitInstruction(.Jump, .{
-                @truncate(i32, -@intCast(isize, self.code.len - loop_scope.cond_begin)),
+                @truncate(i32, -@intCast(isize, self.code.items.len - loop_scope.cond_begin)),
             });
         } else {
             try self.emitInstruction(.Jump, .{@as(u32, 0)});
-            try loop_scope.breaks.push(@intCast(u32, self.code.len));
+            try loop_scope.breaks.push(@intCast(u32, self.code.items.len));
         }
 
         return Value{ .Empty = {} };
@@ -853,7 +858,7 @@ pub const Compiler = struct {
                 .syms = Symbol.List.init(self.arena),
             },
             .breaks = Scope.Loop.BreakList.init(self.arena),
-            .cond_begin = @intCast(u32, self.code.len),
+            .cond_begin = @intCast(u32, self.code.items.len),
         };
         self.cur_scope = &loop_scope.base;
         defer self.cur_scope = loop_scope.base.parent.?;
@@ -867,7 +872,7 @@ pub const Compiler = struct {
             const cond_reg = try cond_val.toRt(self);
             // jump past exit loop if cond == .None
             try self.emitInstruction(.JumpNone, .{ cond_reg, @as(u32, 0) });
-            cond_jump = self.code.len;
+            cond_jump = self.code.items.len;
 
             const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)
                 Result{ .Lval = .{ .Let = &Value{ .Rt = cond_reg } } }
@@ -877,7 +882,7 @@ pub const Compiler = struct {
             assert((try self.genNode(node.capture.?, lval_res)) == .Empty);
         } else if (cond_val.isRt()) {
             try self.emitInstruction(.JumpFalse, .{ cond_val.getRt(), @as(u32, 0) });
-            cond_jump = self.code.len;
+            cond_jump = self.code.items.len;
         } else {
             const bool_val = try cond_val.getBool(self, node.cond.firstToken());
             if (bool_val == false) {
@@ -900,7 +905,7 @@ pub const Compiler = struct {
 
         // jump back to condition
         try self.emitInstruction(.Jump, .{
-            @truncate(i32, -@intCast(isize, self.code.len + @sizeOf(bog.Op) + @sizeOf(u32) - loop_scope.cond_begin)),
+            @truncate(i32, -@intCast(isize, self.code.items.len + @sizeOf(bog.Op) + @sizeOf(u32) - loop_scope.cond_begin)),
         });
 
         // exit loop if cond == false
@@ -946,12 +951,12 @@ pub const Compiler = struct {
         defer self.registerFree(iter_val_reg);
 
         // loop condition
-        loop_scope.cond_begin = @intCast(u32, self.code.len);
+        loop_scope.cond_begin = @intCast(u32, self.code.items.len);
         try self.emitInstruction(.IterNext, .{ iter_val_reg, iter_reg });
 
         // exit loop
         try self.emitInstruction(.JumpNone, .{ iter_val_reg, @as(u32, 0) });
-        const exit_jump = self.code.len;
+        const exit_jump = self.code.items.len;
 
         if (node.capture != null) {
             const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)
@@ -975,7 +980,7 @@ pub const Compiler = struct {
 
         // jump to the start of the loop
         try self.emitInstruction(.Jump, .{
-            @truncate(i32, -@intCast(isize, self.code.len + @sizeOf(bog.Op) + @sizeOf(u32) - loop_scope.cond_begin)),
+            @truncate(i32, -@intCast(isize, self.code.items.len + @sizeOf(bog.Op) + @sizeOf(u32) - loop_scope.cond_begin)),
         });
 
         // exit loop when IterNext results in None
@@ -1006,7 +1011,7 @@ pub const Compiler = struct {
         };
 
         try self.emitInstruction(.JumpNotError, .{ sub_res.Rt, @as(u32, 0) });
-        const catch_skip = self.code.len;
+        const catch_skip = self.code.items.len;
 
         var capture_scope = Scope{
             .id = .Capture,
@@ -1765,8 +1770,8 @@ pub const Compiler = struct {
     }
 
     fn finishJump(self: *Compiler, jump_addr: usize) void {
-        @ptrCast(*align(1) u32, self.code.toSlice()[jump_addr - @sizeOf(u32) ..].ptr).* =
-            @truncate(u32, self.code.len - jump_addr);
+        @ptrCast(*align(1) u32, self.code.items[jump_addr - @sizeOf(u32) ..].ptr).* =
+            @truncate(u32, self.code.items.len - jump_addr);
     }
 
     fn getLastNode(self: *Compiler, first_node: *Node, allow_block: bool) *Node {

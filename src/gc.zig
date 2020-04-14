@@ -79,7 +79,7 @@ pub const Gc = struct {
     }
 
     pub fn stackGet(gc: *Gc, index: usize) !*Value {
-        if (index > gc.stack.len)
+        if (index > gc.stack.items.len)
             return error.NullPtrDeref;
 
         return gc.stack.span()[index] orelse
@@ -99,14 +99,14 @@ pub const Gc = struct {
 
     /// Only valid while no allocations happen
     pub fn stackRef(gc: *Gc, index: usize) !*?*Value {
-        while (index >= gc.stack.len) {
+        while (index >= gc.stack.items.len) {
             try gc.stack.append(null);
         }
         return &gc.stack.span()[index];
     }
 
     pub fn stackShrink(gc: *Gc, size: usize) void {
-        if (size > gc.stack.len) return;
-        gc.stack.len = size;
+        if (size > gc.stack.items.len) return;
+        gc.stack.items.len = size;
     }
 };

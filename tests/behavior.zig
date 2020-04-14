@@ -471,9 +471,9 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
         },
     };
     if (res) |some| {
-        var out_buf = try std.Buffer.initSize(alloc, 0);
+        var out_buf = std.ArrayList(u8).init(alloc);
         try some.dump(out_buf.outStream(), 2);
-        const result = out_buf.toSliceConst();
+        const result = out_buf.items;
         if (!mem.eql(u8, result, expected)) {
             warn("\n---expected----\n{}\n-----found-----\n{}\n---------------\n", .{ expected, result });
             return error.TestFailed;

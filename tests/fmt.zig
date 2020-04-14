@@ -240,7 +240,7 @@ fn fmt(source: []const u8) ![]u8 {
         },
     };
 
-    var out_buf = try std.Buffer.initSize(alloc, 0);
+    var out_buf = std.ArrayList(u8).init(alloc);
     try tree.render(out_buf.outStream());
     return out_buf.toOwnedSlice();
 }

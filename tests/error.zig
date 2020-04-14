@@ -1,3 +1,11 @@
+test "invalid type" {
+    try expectError(
+        \\foo
+    ,
+        \\use of undeclared identifier
+    );
+}
+
 test "invalid map" {
     try expectError(
         \\let y = {1}
