@@ -90,18 +90,18 @@ pub const Compiler = struct {
             try self.syms.push(sym);
         }
 
-        fn isDeclared(scope: *Scope, name: []const u8) bool {
+        fn isDeclared(scope: *Scope, name: []const u8) ?*Symbol {
             var cur: ?*Scope = scope;
             while (cur) |some| {
                 var it = some.syms.iterator(some.syms.len);
                 while (it.prev()) |sym| {
                     if (mem.eql(u8, sym.name, name)) {
-                        return true;
+                        return sym;
                     }
                 }
                 cur = some.parent;
             }
-            return false;
+            return null;
         }
 
         fn getSymbol(scope: *Scope, self: *Compiler, name: []const u8, tok: TokenIndex) !RegAndMut {
@@ -180,6 +180,8 @@ pub const Compiler = struct {
         name: []const u8,
         reg: RegRef,
         mutable: bool,
+
+        forward_decl: bool = false,
 
         pub const List = std.SegmentedList(Symbol, 4);
     };
@@ -1640,8 +1642,20 @@ pub const Compiler = struct {
         if (res == .Lval) {
             switch (res.Lval) {
                 .Let, .Const => |val| {
-                    if (self.cur_scope.isDeclared(name)) {
+                    const sym = self.cur_scope.isDeclared(name);
+                    if (sym != null and !sym.?.forward_decl) {
                         return self.reportErr("redeclaration of identifier", node.tok);
+                    }
+                    if (sym) |some| {
+                        some.forward_decl = false;
+                        if (val.isRt()) {
+                            // copy on assign
+                            try self.emitInstruction(.Move, .{ some.reg, val.getRt() });
+                        } else {
+                            try self.makeRuntime(some.reg, val.*);
+                        }
+
+                        return Value.Empty;
                     }
                     var reg = try val.toRt(self);
 
