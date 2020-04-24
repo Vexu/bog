@@ -1004,8 +1004,9 @@ pub const Parser = struct {
     fn eatTokenIdNoNl(parser: *Parser, id: Token.Id, skip_nl: bool) ?TokAndId {
         const start_index = parser.it.index;
         _ = parser.eatToken(.Nl, false);
-        if (parser.eatToken(.End, false) == null)
-            return parser.eatTokenId(id, true);
+        if (parser.eatTokenId(id, true)) |some| {
+            return some;
+        }
 
         parser.it.set(start_index);
         return null;
