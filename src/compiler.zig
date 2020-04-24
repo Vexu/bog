@@ -63,7 +63,7 @@ pub const Compiler = struct {
         const Fn = struct {
             base: Scope,
             code: Code,
-            captures: Symbol.List,
+            captures: *Symbol.List,
 
             fn emitInstruction(scope: *Fn, self: *Compiler, op: bog.Op, args: var) !void {
                 try scope.code.append(@enumToInt(op));
@@ -202,7 +202,7 @@ pub const Compiler = struct {
         Fn: struct {
             params: u8,
             offset: u32,
-            captures: Symbol.List,
+            captures: *Symbol.List,
         },
 
         fn isRt(val: Value) bool {
@@ -299,9 +299,7 @@ pub const Compiler = struct {
             .Fn => |*v| {
                 try self.emitInstruction(.BuildFn, .{ res, v.params, @truncate(u8, v.captures.len), v.offset });
 
-                // const iterator pls
-                const captures = @intToPtr(*Symbol.List, @ptrToInt(&v.captures));
-                var capture_it = captures.iterator(0);
+                var capture_it = v.captures.iterator(0);
                 while (capture_it.next()) |capture| {
                     try self.emitInstruction(.StoreCapture, .{
                         res,
@@ -661,6 +659,9 @@ pub const Compiler = struct {
 
         const old_used_regs = self.used_regs;
 
+        const captures = try self.arena.create(Symbol.List);
+        captures.* = Symbol.List.init(self.arena);
+
         var fn_scope = Scope.Fn{
             .base = .{
                 .id = .Fn,
@@ -668,7 +669,7 @@ pub const Compiler = struct {
                 .syms = Symbol.List.init(self.arena),
             },
             .code = try Code.initCapacity(self.arena, 256),
-            .captures = Symbol.List.init(self.arena),
+            .captures = captures,
         };
         defer fn_scope.code.deinit();
         self.cur_scope = &fn_scope.base;
@@ -730,9 +731,7 @@ pub const Compiler = struct {
             .Fn = .{
                 .params = param_count,
                 .offset = offset,
-
-                // should be fine
-                .captures = fn_scope.captures,
+                .captures = captures,
             },
         };
         return ret_val.maybeRt(self, res);
