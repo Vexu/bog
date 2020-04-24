@@ -144,13 +144,12 @@ test "if let" {
 }
 
 test "fibonacci" {
-    // TODO should be able to refer to fib directly
     try expectOutput(
-        \\const fib = fn(f,n)
+        \\const fib = fn(n)
         \\    if (n < 2) return n
-        \\    return f(f, n - 1) + f(f, n-2)
+        \\    return fib(n - 1) + fib(n-2)
         \\
-        \\return fib(fib, 10)
+        \\return fib(10)
     ,
         \\55
     );

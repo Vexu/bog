@@ -199,6 +199,11 @@ pub const Compiler = struct {
         Num: f64,
         Bool: bool,
         Str: []const u8,
+        Fn: struct {
+            params: u8,
+            offset: u32,
+            captures: Symbol.List,
+        },
 
         fn isRt(val: Value) bool {
             return switch (val) {
@@ -291,6 +296,20 @@ pub const Compiler = struct {
             .Num => |v| try self.emitInstruction(.ConstNum, .{ res, v }),
             .Bool => |v| try self.emitInstruction(.ConstPrimitive, .{ res, @as(u8, @boolToInt(v)) + 1 }),
             .Str => |v| try self.emitInstruction(.ConstString, .{ res, try self.putString(v) }),
+            .Fn => |*v| {
+                try self.emitInstruction(.BuildFn, .{ res, v.params, @truncate(u8, v.captures.len), v.offset });
+
+                // const iterator pls
+                const captures = @intToPtr(*Symbol.List, @ptrToInt(&v.captures));
+                var capture_it = captures.iterator(0);
+                while (capture_it.next()) |capture| {
+                    try self.emitInstruction(.StoreCapture, .{
+                        res,
+                        capture.reg,
+                        @truncate(u8, capture_it.index - 1),
+                    });
+                }
+            },
         };
     }
 
@@ -367,6 +386,10 @@ pub const Compiler = struct {
 
         var it = tree.nodes.iterator(0);
         while (it.next()) |n| {
+            try compiler.autoForwardDecl(n.*);
+        }
+        it = tree.nodes.iterator(0);
+        while (it.next()) |n| {
             try compiler.addLineInfo(n.*);
 
             const val = try compiler.genNode(n.*, .Discard);
@@ -391,6 +414,8 @@ pub const Compiler = struct {
     }
 
     pub fn compileRepl(self: *Compiler, node: *Node, module: *bog.Module) Error!usize {
+        try self.autoForwardDecl(node);
+
         const start_len = self.module_code.items.len;
         try self.addLineInfo(node);
         const val = try self.genNode(node, .Discard);
@@ -407,6 +432,27 @@ pub const Compiler = struct {
         self.module_code.resize(final_len) catch unreachable;
         module.strings = self.strings.items;
         return final_len - start_len;
+    }
+
+    fn autoForwardDecl(self: *Compiler, node: *Node) error{OutOfMemory}!void {
+        if (node.id != .Decl) return;
+        const decl = @fieldParentPtr(Node.Decl, "base", node);
+
+        // only forward declarations like
+        // `const IDENTIFIER = fn ...`
+        if (self.tree.tokens.at(decl.let_const).id == .Keyword_const and
+            decl.capture.id != .Identifier or decl.value.id != .Fn)
+            return;
+
+        const ident = @fieldParentPtr(Node.SingleToken, "base", decl.capture);
+        const reg = self.registerAlloc();
+
+        try self.cur_scope.declSymbol(.{
+            .name = self.tokenSlice(ident.tok),
+            .mutable = false,
+            .reg = reg,
+            .forward_decl = true,
+        });
     }
 
     fn genNode(self: *Compiler, node: *Node, res: Result) Error!Value {
@@ -611,6 +657,7 @@ pub const Compiler = struct {
         if (node.params.len > std.math.maxInt(u8)) {
             return self.reportErr("too many parameters", node.fn_tok);
         }
+        const param_count = @truncate(u8, node.params.len);
 
         const old_used_regs = self.used_regs;
 
@@ -674,25 +721,21 @@ pub const Compiler = struct {
 
         // reset regs after generating body
         self.used_regs = old_used_regs;
-        const sub_res = res.toRt(self);
-
         self.code = old_code;
-        try self.emitInstruction(.BuildFn, .{
-            sub_res.Rt,
-            @truncate(u8, node.params.len),
-            @truncate(u8, fn_scope.captures.len),
-            @truncate(u32, self.module_code.items.len),
-        });
-        var capture_it = fn_scope.captures.iterator(0);
-        while (capture_it.next()) |capture| {
-            try self.emitInstruction(.StoreCapture, .{
-                sub_res.Rt,
-                capture.reg,
-                @truncate(u8, capture_it.index - 1),
-            });
-        }
+
+        const offset = @truncate(u32, self.module_code.items.len);
         try self.module_code.appendSlice(fn_scope.code.items);
-        return sub_res.toVal();
+
+        const ret_val = Value{
+            .Fn = .{
+                .params = param_count,
+                .offset = offset,
+
+                // should be fine
+                .captures = fn_scope.captures,
+            },
+        };
+        return ret_val.maybeRt(self, res);
     }
 
     fn genBlock(self: *Compiler, node: *Node.Block, res: Result) Error!Value {
@@ -1520,7 +1563,7 @@ pub const Compiler = struct {
                         .Str => |b_val| mem.eql(u8, a_val, b_val),
                         else => false,
                     },
-                    .Empty, .Rt, .Ref => unreachable,
+                    .Empty, .Rt, .Ref, .Fn => unreachable,
                 };
                 // broken LLVM module found: Terminator found in the middle of a basic block!
                 // break :blk Value{ .Bool = if (node.op == .Equal) eql else !eql };
@@ -1648,12 +1691,10 @@ pub const Compiler = struct {
                     }
                     if (sym) |some| {
                         some.forward_decl = false;
-                        if (val.isRt()) {
-                            // copy on assign
-                            try self.emitInstruction(.Move, .{ some.reg, val.getRt() });
-                        } else {
-                            try self.makeRuntime(some.reg, val.*);
-                        }
+
+                        // only functions can be forward declared
+                        assert(val.* == .Fn);
+                        try self.makeRuntime(some.reg, val.*);
 
                         return Value.Empty;
                     }
