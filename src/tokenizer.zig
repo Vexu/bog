@@ -396,7 +396,7 @@ pub const Tokenizer = struct {
         try self.errors.add(
             msg,
             @truncate(u32, self.it.i - (unicode.utf8CodepointSequenceLength(c) catch unreachable)),
-            .Error,
+            .err,
         );
         self.it.i = self.it.bytes.len;
         return error.TokenizeError;

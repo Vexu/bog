@@ -939,13 +939,13 @@ pub const Vm = struct {
 
     fn reportErr(vm: *Vm, msg: []const u8) Error {
         @setCold(true);
-        try vm.errors.add(msg, vm.line_loc, .Error);
+        try vm.errors.add(msg, vm.line_loc, .err);
         var i: u8 = 0;
         while (vm.call_stack.pop()) |some| {
-            try vm.errors.add("called here", some.line_loc, .Trace);
+            try vm.errors.add("called here", some.line_loc, .trace);
             i += 1;
             if (i > 32) {
-                try vm.errors.add("too many calls, stopping now", some.line_loc, .Note);
+                try vm.errors.add("too many calls, stopping now", some.line_loc, .note);
                 break;
             }
         }

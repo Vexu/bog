@@ -171,7 +171,7 @@ pub const Parser = struct {
             parser.skipNl();
             const node = try parser.arena.create(Node.Prefix);
             node.* = .{
-                .op = .BoolNot,
+                .op = .boolNot,
                 .rhs = try parser.comparisonExpr(skip_nl),
                 .tok = tok,
             };
@@ -246,7 +246,7 @@ pub const Parser = struct {
             const node = try parser.arena.create(Node.TypeInfix);
             node.* = .{
                 .lhs = lhs,
-                .op = .Is,
+                .op = .is,
                 .tok = tok,
                 .type_tok = try parser.typeName(),
             };
@@ -431,7 +431,7 @@ pub const Parser = struct {
             const node = try parser.arena.create(Node.TypeInfix);
             node.* = .{
                 .lhs = lhs,
-                .op = .As,
+                .op = .as,
                 .tok = tok,
                 .type_tok = try parser.typeName(),
             };
@@ -453,9 +453,9 @@ pub const Parser = struct {
             node.* = .{
                 .op = switch (tok.id) {
                     .Keyword_try => .Try,
-                    .Minus => .Minus,
-                    .Plus => .Plus,
-                    .Tilde => .BitNot,
+                    .Minus => .minus,
+                    .Plus => .plus,
+                    .Tilde => .bitNot,
                     else => unreachable,
                 },
                 .tok = tok.index,
@@ -497,7 +497,7 @@ pub const Parser = struct {
                 node.* = .{
                     .lhs = lhs,
                     .l_tok = tok,
-                    .op = .{ .Subscript = try parser.expr(true) },
+                    .op = .{ .subscript = try parser.expr(true) },
                     .r_tok = try parser.expectToken(.RBracket, true),
                 };
                 lhs = &node.base;
@@ -507,7 +507,7 @@ pub const Parser = struct {
                 node.* = .{
                     .lhs = lhs,
                     .l_tok = tok,
-                    .op = .{ .Call = NodeList.init(parser.arena) },
+                    .op = .{ .call = NodeList.init(parser.arena) },
                     .r_tok = undefined,
                 };
                 var end = false;
@@ -519,7 +519,7 @@ pub const Parser = struct {
                         node.r_tok = try parser.expectToken(.RParen, true);
                         break;
                     }
-                    try node.op.Call.push(try parser.expr(true));
+                    try node.op.call.push(try parser.expr(true));
                     if (parser.eatToken(.Comma, true) == null) end = true;
                 }
                 lhs = &node.base;
@@ -529,7 +529,7 @@ pub const Parser = struct {
                 node.* = .{
                     .lhs = lhs,
                     .l_tok = tok,
-                    .op = .Member,
+                    .op = .member,
                     .r_tok = try parser.expectToken(.Identifier, true),
                 };
                 lhs = &node.base;
@@ -614,9 +614,9 @@ pub const Parser = struct {
             node.* = .{
                 .tok = tok.index,
                 .kind = switch (tok.id) {
-                    .Number => .Num,
-                    .Integer => .Int,
-                    .String => .Str,
+                    .Number => .num,
+                    .Integer => .int,
+                    .String => .str,
                     .Keyword_true => .True,
                     .Keyword_false => .False,
                     else => unreachable,
@@ -675,7 +675,7 @@ pub const Parser = struct {
                 const node = try parser.arena.create(Node.Literal);
                 node.* = .{
                     .tok = rparen,
-                    .kind = .None,
+                    .kind = .none,
                 };
                 return &node.base;
             } else {
@@ -961,7 +961,7 @@ pub const Parser = struct {
     }
 
     fn reportErr(parser: *Parser, msg: []const u8, tok: *Token) Error {
-        try parser.errors.add(msg, tok.start, .Error);
+        try parser.errors.add(msg, tok.start, .err);
         return error.ParseError;
     }
 

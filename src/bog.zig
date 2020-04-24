@@ -54,9 +54,9 @@ pub const Errors = struct {
     list: List,
 
     const Kind = enum {
-        Error,
-        Note,
-        Trace,
+        err,
+        note,
+        trace,
     };
 
     const List = zig_std.SegmentedList(struct {
@@ -91,9 +91,9 @@ pub const Errors = struct {
         var it = self.list.iterator(0);
         while (it.next()) |e| {
             switch (e.kind) {
-                .Error => try out_stream.writeAll(RED ++ "error: " ++ BOLD),
-                .Note => try out_stream.writeAll(CYAN ++ "note: " ++ BOLD),
-                .Trace => {},
+                .err => try out_stream.writeAll(RED ++ "error: " ++ BOLD),
+                .note => try out_stream.writeAll(CYAN ++ "note: " ++ BOLD),
+                .trace => {},
             }
             try out_stream.print("{}\n" ++ RESET, .{e.msg});
 

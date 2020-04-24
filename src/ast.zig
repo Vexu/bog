@@ -68,7 +68,7 @@ pub const Node = struct {
             .Suffix => @fieldParentPtr(Node.Suffix, "base", node).l_tok,
             .Literal => {
                 const lit = @fieldParentPtr(Node.Literal, "base", node);
-                return if (lit.kind != .None) lit.tok else lit.tok - 1;
+                return if (lit.kind != .none) lit.tok else lit.tok - 1;
             },
             .Import => @fieldParentPtr(Node.Import, "base", node).tok,
             .Native => @fieldParentPtr(Node.Native, "base", node).tok,
@@ -167,10 +167,10 @@ pub const Node = struct {
         rhs: *Node,
 
         pub const Op = enum {
-            BoolNot,
-            BitNot,
-            Minus,
-            Plus,
+            boolNot,
+            bitNot,
+            minus,
+            plus,
             Try,
         };
     };
@@ -178,8 +178,8 @@ pub const Node = struct {
     pub const TypeInfix = struct {
         base: Node = Node{ .id = .TypeInfix },
         op: enum {
-            Is,
-            As,
+            is,
+            as,
         },
         lhs: *Node,
         tok: TokenIndex,
@@ -236,9 +236,9 @@ pub const Node = struct {
         base: Node = Node{ .id = .Suffix },
         lhs: *Node,
         op: union(enum) {
-            Call: List,
-            Subscript: *Node,
-            Member,
+            call: List,
+            subscript: *Node,
+            member,
         },
         l_tok: TokenIndex,
         r_tok: TokenIndex,
@@ -247,12 +247,12 @@ pub const Node = struct {
     pub const Literal = struct {
         base: Node = Node{ .id = .Literal },
         kind: enum {
-            Str,
-            Num,
-            Int,
+            str,
+            num,
+            int,
             True,
             False,
-            None,
+            none,
         },
         tok: TokenIndex,
     };

@@ -10,11 +10,11 @@ pub fn render(tree: *Tree, stream: var) @TypeOf(stream).Error!void {
         .source = tree.source,
         .tokens = &tree.tokens,
     };
-    try renderer.renderComments(0, stream, 0, .Newline);
+    try renderer.renderComments(0, stream, 0, .newline);
     {
         var it = tree.nodes.iterator(0);
         while (it.next()) |node| {
-            try renderer.renderNode(node.*, stream, 0, .Newline);
+            try renderer.renderNode(node.*, stream, 0, .newline);
 
             if (it.peek() == null) break;
             const last_token = node.*.lastToken();
@@ -73,8 +73,8 @@ const Renderer = struct {
         switch (node.id) {
             .Literal => {
                 const literal = @fieldParentPtr(Node.Literal, "base", node);
-                if (literal.kind == .None) {
-                    try self.renderToken(self.prevToken(literal.tok), stream, indent, .None);
+                if (literal.kind == .none) {
+                    try self.renderToken(self.prevToken(literal.tok), stream, indent, .none);
                 }
 
                 return self.renderToken(literal.tok, stream, indent, space);
@@ -82,7 +82,7 @@ const Renderer = struct {
             .Infix => {
                 const infix = @fieldParentPtr(Node.Infix, "base", node);
 
-                const after_tok_space = if (infix.op == .Range) .None else Space.Space;
+                const after_tok_space: Space = if (infix.op == .Range) .none else .space;
 
                 try self.renderNode(infix.lhs, stream, indent, after_tok_space);
                 try self.renderToken(infix.tok, stream, indent, after_tok_space);
@@ -92,14 +92,14 @@ const Renderer = struct {
                 const prefix = @fieldParentPtr(Node.Prefix, "base", node);
 
                 switch (prefix.op) {
-                    .BoolNot, .Try => try self.renderToken(prefix.tok, stream, indent, .Space),
-                    .BitNot, .Minus, .Plus => try self.renderToken(prefix.tok, stream, indent, .None),
+                    .boolNot, .Try => try self.renderToken(prefix.tok, stream, indent, .space),
+                    .bitNot, .minus, .plus => try self.renderToken(prefix.tok, stream, indent, .none),
                 }
                 return self.renderNode(prefix.rhs, stream, indent, space);
             },
             .Grouped => {
                 const grouped = @fieldParentPtr(Node.Grouped, "base", node);
-                const after_tok_space = if (self.tokens.at(grouped.l_tok).id == .LBrace) .Space else Space.None;
+                const after_tok_space: Space = if (self.tokens.at(grouped.l_tok).id == .LBrace) .space else .none;
 
                 try self.renderToken(grouped.l_tok, stream, indent, after_tok_space);
                 try self.renderNode(grouped.expr, stream, indent, after_tok_space);
@@ -108,8 +108,8 @@ const Renderer = struct {
             .TypeInfix => {
                 const type_infix = @fieldParentPtr(Node.TypeInfix, "base", node);
 
-                try self.renderNode(type_infix.lhs, stream, indent, .Space);
-                try self.renderToken(type_infix.tok, stream, indent, .Space);
+                try self.renderNode(type_infix.lhs, stream, indent, .space);
+                try self.renderToken(type_infix.tok, stream, indent, .space);
                 return self.renderToken(type_infix.type_tok, stream, indent, space);
             },
             .Discard, .Identifier => {
@@ -120,10 +120,10 @@ const Renderer = struct {
             .Suffix => {
                 const suffix = @fieldParentPtr(Node.Suffix, "base", node);
 
-                try self.renderNode(suffix.lhs, stream, indent, .None);
-                try self.renderToken(suffix.l_tok, stream, indent, .None);
+                try self.renderNode(suffix.lhs, stream, indent, .none);
+                try self.renderToken(suffix.l_tok, stream, indent, .none);
                 switch (suffix.op) {
-                    .Call => |*params| {
+                    .call => |*params| {
                         var it = params.iterator(0);
                         const prev = self.tokens.at(suffix.r_tok - 1).id;
                         if (prev == .Comma or prev == .Nl or prev == .End) {
@@ -131,59 +131,59 @@ const Renderer = struct {
                             const new_indet = indent + indent_delta;
                             while (it.next()) |param| {
                                 try stream.writeByteNTimes(' ', new_indet);
-                                try self.renderNode(param.*, stream, new_indet, .None);
+                                try self.renderNode(param.*, stream, new_indet, .none);
                                 const comma = self.nextToken(param.*.lastToken());
                                 if (self.tokens.at(comma).id == .Comma)
-                                    try self.renderToken(comma, stream, indent, .Newline)
+                                    try self.renderToken(comma, stream, indent, .newline)
                                 else
                                     try stream.writeAll(",\n");
                             }
                         } else {
                             while (it.next()) |param| {
                                 if (it.peek() == null) {
-                                    try self.renderNode(param.*, stream, indent, .None);
+                                    try self.renderNode(param.*, stream, indent, .none);
                                     break;
                                 }
-                                try self.renderNode(param.*, stream, indent, .None);
-                                try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .Space);
+                                try self.renderNode(param.*, stream, indent, .none);
+                                try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .space);
                             }
                         }
                     },
-                    .Subscript => |arr_node| try self.renderNode(arr_node, stream, indent, .None),
-                    .Member => {},
+                    .subscript => |arr_node| try self.renderNode(arr_node, stream, indent, .none),
+                    .member => {},
                 }
                 return self.renderToken(suffix.r_tok, stream, indent, space);
             },
             .Decl => {
                 const decl = @fieldParentPtr(Node.Decl, "base", node);
 
-                try self.renderToken(decl.let_const, stream, indent, .Space);
-                try self.renderNode(decl.capture, stream, indent, .Space);
-                try self.renderToken(decl.eq_tok, stream, indent, .Space);
+                try self.renderToken(decl.let_const, stream, indent, .space);
+                try self.renderNode(decl.capture, stream, indent, .space);
+                try self.renderToken(decl.eq_tok, stream, indent, .space);
                 return self.renderNode(decl.value, stream, indent, space);
             },
             .Import => {
                 const import = @fieldParentPtr(Node.Import, "base", node);
 
-                try self.renderToken(import.tok, stream, indent, .None);
-                try self.renderToken(self.nextToken(import.tok), stream, indent, .None);
-                try self.renderToken(import.str_tok, stream, indent, .None);
+                try self.renderToken(import.tok, stream, indent, .none);
+                try self.renderToken(self.nextToken(import.tok), stream, indent, .none);
+                try self.renderToken(import.str_tok, stream, indent, .none);
                 return self.renderToken(import.r_paren, stream, indent, space);
             },
             .Native => {
                 const native = @fieldParentPtr(Node.Native, "base", node);
 
-                try self.renderToken(native.tok, stream, indent, .None);
-                try self.renderToken(self.nextToken(native.tok), stream, indent, .None);
-                try self.renderToken(native.str_tok, stream, indent, .None);
+                try self.renderToken(native.tok, stream, indent, .none);
+                try self.renderToken(self.nextToken(native.tok), stream, indent, .none);
+                try self.renderToken(native.str_tok, stream, indent, .none);
                 return self.renderToken(native.r_paren, stream, indent, space);
             },
             .Error => {
                 const err = @fieldParentPtr(Node.Error, "base", node);
 
-                try self.renderToken(err.tok, stream, indent, .None);
-                try self.renderToken(self.nextToken(err.tok), stream, indent, .None);
-                try self.renderNode(err.value, stream, indent, .None);
+                try self.renderToken(err.tok, stream, indent, .none);
+                try self.renderToken(self.nextToken(err.tok), stream, indent, .none);
+                try self.renderNode(err.value, stream, indent, .none);
                 return self.renderToken(err.r_paren, stream, indent, space);
             },
             .Jump => {
@@ -191,7 +191,7 @@ const Renderer = struct {
 
                 switch (jump.op) {
                     .Return => |expr| {
-                        const after_tok_space = if (expr != null) .Space else space;
+                        const after_tok_space = if (expr != null) .space else space;
                         try self.renderToken(jump.tok, stream, indent, after_tok_space);
                         if (expr) |some| try self.renderNode(some, stream, indent, space);
                     },
@@ -201,38 +201,38 @@ const Renderer = struct {
             .While => {
                 const while_expr = @fieldParentPtr(Node.While, "base", node);
 
-                try self.renderToken(while_expr.while_tok, stream, indent, .Space);
-                try self.renderToken(self.nextToken(while_expr.while_tok), stream, indent, .None);
+                try self.renderToken(while_expr.while_tok, stream, indent, .space);
+                try self.renderToken(self.nextToken(while_expr.while_tok), stream, indent, .none);
                 if (while_expr.capture) |some| {
-                    try self.renderToken(while_expr.let_const.?, stream, indent, .Space);
-                    try self.renderNode(some, stream, indent, .Space);
-                    try self.renderToken(while_expr.eq_tok.?, stream, indent, .Space);
+                    try self.renderToken(while_expr.let_const.?, stream, indent, .space);
+                    try self.renderNode(some, stream, indent, .space);
+                    try self.renderToken(while_expr.eq_tok.?, stream, indent, .space);
                 }
-                try self.renderNode(while_expr.cond, stream, indent, .None);
-                try self.renderToken(while_expr.r_paren, stream, indent, .Space);
+                try self.renderNode(while_expr.cond, stream, indent, .none);
+                try self.renderToken(while_expr.r_paren, stream, indent, .space);
 
                 return self.renderNode(while_expr.body, stream, indent, space);
             },
             .For => {
                 const for_expr = @fieldParentPtr(Node.For, "base", node);
 
-                try self.renderToken(for_expr.for_tok, stream, indent, .Space);
-                try self.renderToken(self.nextToken(for_expr.for_tok), stream, indent, .None);
+                try self.renderToken(for_expr.for_tok, stream, indent, .space);
+                try self.renderToken(self.nextToken(for_expr.for_tok), stream, indent, .none);
                 if (for_expr.capture) |some| {
-                    try self.renderToken(for_expr.let_const.?, stream, indent, .Space);
-                    try self.renderNode(some, stream, indent, .Space);
-                    try self.renderToken(for_expr.in_tok.?, stream, indent, .Space);
+                    try self.renderToken(for_expr.let_const.?, stream, indent, .space);
+                    try self.renderNode(some, stream, indent, .space);
+                    try self.renderToken(for_expr.in_tok.?, stream, indent, .space);
                 }
-                try self.renderNode(for_expr.cond, stream, indent, .None);
-                try self.renderToken(for_expr.r_paren, stream, indent, .Space);
+                try self.renderNode(for_expr.cond, stream, indent, .none);
+                try self.renderToken(for_expr.r_paren, stream, indent, .space);
 
                 return self.renderNode(for_expr.body, stream, indent, space);
             },
             .Fn => {
                 const fn_expr = @fieldParentPtr(Node.Fn, "base", node);
 
-                try self.renderToken(fn_expr.fn_tok, stream, indent, .None);
-                try self.renderToken(self.nextToken(fn_expr.fn_tok), stream, indent, .None);
+                try self.renderToken(fn_expr.fn_tok, stream, indent, .none);
+                try self.renderToken(self.nextToken(fn_expr.fn_tok), stream, indent, .none);
 
                 var it = fn_expr.params.iterator(0);
                 const prev = self.tokens.at(fn_expr.r_paren - 1).id;
@@ -241,31 +241,31 @@ const Renderer = struct {
                     const new_indet = indent + indent_delta;
                     while (it.next()) |param| {
                         try stream.writeByteNTimes(' ', new_indet);
-                        try self.renderNode(param.*, stream, new_indet, .None);
+                        try self.renderNode(param.*, stream, new_indet, .none);
                         const comma = self.nextToken(param.*.lastToken());
                         if (self.tokens.at(comma).id == .Comma)
-                            try self.renderToken(comma, stream, indent, .Newline)
+                            try self.renderToken(comma, stream, indent, .newline)
                         else
                             try stream.writeAll(",\n");
                     }
                 } else {
                     while (it.next()) |param| {
                         if (it.peek() == null) {
-                            try self.renderNode(param.*, stream, indent, .None);
+                            try self.renderNode(param.*, stream, indent, .none);
                             break;
                         }
-                        try self.renderNode(param.*, stream, indent, .None);
-                        try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .Space);
+                        try self.renderNode(param.*, stream, indent, .none);
+                        try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .space);
                     }
                 }
 
-                try self.renderToken(fn_expr.r_paren, stream, indent, .Space);
+                try self.renderToken(fn_expr.r_paren, stream, indent, .space);
                 return self.renderNode(fn_expr.body, stream, indent, space);
             },
             .List, .Tuple, .Map => {
                 const ltm = @fieldParentPtr(Node.ListTupleMap, "base", node);
 
-                try self.renderToken(ltm.l_tok, stream, indent, .None);
+                try self.renderToken(ltm.l_tok, stream, indent, .none);
 
                 var it = ltm.values.iterator(0);
                 const prev = self.tokens.at(ltm.r_tok - 1).id;
@@ -274,10 +274,10 @@ const Renderer = struct {
                     const new_indet = indent + indent_delta;
                     while (it.next()) |param| {
                         try stream.writeByteNTimes(' ', new_indet);
-                        try self.renderNode(param.*, stream, new_indet, .None);
+                        try self.renderNode(param.*, stream, new_indet, .none);
                         const comma = self.nextToken(param.*.lastToken());
                         if (self.tokens.at(comma).id == .Comma)
-                            try self.renderToken(comma, stream, indent, .Newline)
+                            try self.renderToken(comma, stream, indent, .newline)
                         else
                             try stream.writeAll(",\n");
                     }
@@ -285,11 +285,11 @@ const Renderer = struct {
                 } else {
                     while (it.next()) |param| {
                         if (it.peek() == null) {
-                            try self.renderNode(param.*, stream, indent, .None);
+                            try self.renderNode(param.*, stream, indent, .none);
                             break;
                         }
-                        try self.renderNode(param.*, stream, indent, .None);
-                        try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .Space);
+                        try self.renderNode(param.*, stream, indent, .none);
+                        try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .space);
                     }
                 }
 
@@ -302,7 +302,7 @@ const Renderer = struct {
                 var it = blk.stmts.iterator(0);
                 while (it.next()) |stmt| {
                     try stream.writeByteNTimes(' ', new_indet);
-                    try self.renderNode(stmt.*, stream, new_indet, .Newline);
+                    try self.renderNode(stmt.*, stream, new_indet, .newline);
 
                     if (it.peek() == null) break;
                     const last_token = stmt.*.lastToken();
@@ -318,8 +318,8 @@ const Renderer = struct {
                 const item = @fieldParentPtr(Node.MapItem, "base", node);
 
                 if (item.key) |some| {
-                    try self.renderNode(some, stream, indent, .None);
-                    try self.renderToken(item.colon.?, stream, indent, .Space);
+                    try self.renderNode(some, stream, indent, .none);
+                    try self.renderToken(item.colon.?, stream, indent, .space);
                 }
 
                 return self.renderNode(item.value, stream, indent, space);
@@ -327,37 +327,37 @@ const Renderer = struct {
             .Catch => {
                 const catch_expr = @fieldParentPtr(Node.Catch, "base", node);
 
-                try self.renderNode(catch_expr.lhs, stream, indent, .Space);
-                try self.renderToken(catch_expr.tok, stream, indent, .Space);
+                try self.renderNode(catch_expr.lhs, stream, indent, .space);
+                try self.renderToken(catch_expr.tok, stream, indent, .space);
 
                 if (catch_expr.capture) |some| {
-                    try self.renderToken(self.nextToken(catch_expr.tok), stream, indent, .None);
-                    try self.renderToken(catch_expr.let_const.?, stream, indent, .Space);
-                    try self.renderNode(some, stream, indent, .None);
-                    try self.renderToken(self.nextToken(some.lastToken()), stream, indent, .Space);
+                    try self.renderToken(self.nextToken(catch_expr.tok), stream, indent, .none);
+                    try self.renderToken(catch_expr.let_const.?, stream, indent, .space);
+                    try self.renderNode(some, stream, indent, .none);
+                    try self.renderToken(self.nextToken(some.lastToken()), stream, indent, .space);
                 }
                 return self.renderNode(catch_expr.rhs, stream, indent, space);
             },
             .If => {
                 const if_expr = @fieldParentPtr(Node.If, "base", node);
 
-                try self.renderToken(if_expr.if_tok, stream, indent, .Space);
-                try self.renderToken(self.nextToken(if_expr.if_tok), stream, indent, .None);
+                try self.renderToken(if_expr.if_tok, stream, indent, .space);
+                try self.renderToken(self.nextToken(if_expr.if_tok), stream, indent, .none);
                 if (if_expr.capture) |some| {
-                    try self.renderToken(if_expr.let_const.?, stream, indent, .Space);
-                    try self.renderNode(some, stream, indent, .Space);
-                    try self.renderToken(if_expr.eq_tok.?, stream, indent, .Space);
+                    try self.renderToken(if_expr.let_const.?, stream, indent, .space);
+                    try self.renderNode(some, stream, indent, .space);
+                    try self.renderToken(if_expr.eq_tok.?, stream, indent, .space);
                 }
 
-                try self.renderNode(if_expr.cond, stream, indent, .None);
-                try self.renderToken(if_expr.r_paren, stream, indent, .Space);
+                try self.renderNode(if_expr.cond, stream, indent, .none);
+                try self.renderToken(if_expr.r_paren, stream, indent, .space);
 
                 if (if_expr.else_body) |some| {
-                    try self.renderNode(if_expr.if_body, stream, indent, .Space);
+                    try self.renderNode(if_expr.if_body, stream, indent, .space);
                     if (if_expr.if_body.id == .Block)
                         try stream.writeByteNTimes(' ', indent);
 
-                    try self.renderToken(if_expr.else_tok.?, stream, indent, .Space);
+                    try self.renderToken(if_expr.else_tok.?, stream, indent, .space);
                     return self.renderNode(some, stream, indent, space);
                 } else {
                     return self.renderNode(if_expr.if_body, stream, indent, space);
@@ -366,16 +366,16 @@ const Renderer = struct {
             .Match => {
                 const match_expr = @fieldParentPtr(Node.Match, "base", node);
 
-                try self.renderToken(match_expr.match_tok, stream, indent, .Space);
-                try self.renderToken(self.nextToken(match_expr.match_tok), stream, indent, .None);
-                try self.renderNode(match_expr.expr, stream, indent, .None);
-                try self.renderToken(match_expr.r_paren, stream, indent, .Newline);
+                try self.renderToken(match_expr.match_tok, stream, indent, .space);
+                try self.renderToken(self.nextToken(match_expr.match_tok), stream, indent, .none);
+                try self.renderNode(match_expr.expr, stream, indent, .none);
+                try self.renderToken(match_expr.r_paren, stream, indent, .newline);
 
                 const new_indet = indent + indent_delta;
                 var it = match_expr.body.iterator(0);
                 while (it.next()) |n| {
                     try stream.writeByteNTimes(' ', new_indet);
-                    try self.renderNode(n.*, stream, new_indet, .Newline);
+                    try self.renderNode(n.*, stream, new_indet, .newline);
                 }
                 try stream.writeByteNTimes(' ', indent);
             },
@@ -383,20 +383,20 @@ const Renderer = struct {
                 const case = @fieldParentPtr(Node.MatchCatchAll, "base", node);
 
                 if (self.tokens.at(case.tok).id != .Underscore) {
-                    try self.renderToken(case.tok, stream, indent, .Space);
-                    try self.renderToken(self.nextToken(case.tok), stream, indent, .None);
+                    try self.renderToken(case.tok, stream, indent, .space);
+                    try self.renderToken(self.nextToken(case.tok), stream, indent, .none);
                 } else {
-                    try self.renderToken(case.tok, stream, indent, .None);
+                    try self.renderToken(case.tok, stream, indent, .none);
                 }
-                try self.renderToken(case.colon, stream, indent, .Space);
+                try self.renderToken(case.colon, stream, indent, .space);
                 return self.renderNode(case.expr, stream, indent, space);
             },
             .MatchLet => {
                 const case = @fieldParentPtr(Node.MatchLet, "base", node);
 
-                try self.renderToken(case.let_const, stream, indent, .Space);
-                try self.renderNode(case.capture, stream, indent, .None);
-                try self.renderToken(case.colon, stream, indent, .Space);
+                try self.renderToken(case.let_const, stream, indent, .space);
+                try self.renderNode(case.capture, stream, indent, .none);
+                try self.renderToken(case.colon, stream, indent, .space);
                 return self.renderNode(case.expr, stream, indent, space);
             },
             .MatchCase => {
@@ -406,13 +406,13 @@ const Renderer = struct {
                 // TODO trailing comma
                 while (it.next()) |param| {
                     if (it.peek() == null) {
-                        try self.renderNode(param.*, stream, indent, .None);
+                        try self.renderNode(param.*, stream, indent, .none);
                         break;
                     }
-                    try self.renderNode(param.*, stream, indent, .None);
-                    try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .Space);
+                    try self.renderNode(param.*, stream, indent, .none);
+                    try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .space);
                 }
-                try self.renderToken(case.colon, stream, indent, .Space);
+                try self.renderToken(case.colon, stream, indent, .space);
 
                 return self.renderNode(case.expr, stream, indent, space);
             },
@@ -437,7 +437,7 @@ const Renderer = struct {
             try stream.writeByte('\n');
             try stream.writeByteNTimes(' ', indent);
 
-            if (space != .Newline)
+            if (space != .newline)
                 try stream.writeByteNTimes(' ', indent_delta);
         }
     }
@@ -476,18 +476,18 @@ const Renderer = struct {
     }
 
     const Space = enum {
-        None,
-        Newline,
-        Space,
+        none,
+        newline,
+        space,
     };
 
     fn renderToken(self: *Renderer, token: TokenIndex, stream: var, indent: u32, space: Space) !void {
         var tok = self.tokens.at(token);
         try stream.writeAll(self.source[tok.start..tok.end]);
         switch (space) {
-            .None => {},
-            .Newline => try stream.writeByte('\n'),
-            .Space => if (self.tokens.len > token + 2 and self.tokens.at(token + 2).id == .Begin) {
+            .none => {},
+            .newline => try stream.writeByte('\n'),
+            .space => if (self.tokens.len > token + 2 and self.tokens.at(token + 2).id == .Begin) {
                 try stream.writeByte('\n');
             } else {
                 try stream.writeByte(' ');

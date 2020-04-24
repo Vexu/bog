@@ -43,7 +43,7 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
             .arena = arena,
             .root_scope = .{
                 .base = .{
-                    .id = .Module,
+                    .id = .module,
                     .parent = null,
                     .syms = Compiler.Symbol.List.init(arena),
                 },
