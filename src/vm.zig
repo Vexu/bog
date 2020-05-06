@@ -34,6 +34,9 @@ pub const Vm = struct {
 
     options: Options,
 
+    // TODO gc can't see this and it will be invalidated on collect
+    this: ?*Value = null,
+
     const CallStack = std.SegmentedList(FunctionFrame, 16);
     const max_depth = 512;
 
@@ -57,6 +60,7 @@ pub const Vm = struct {
         line_loc: u32,
         ret_reg: RegRef,
         module: *Module,
+        // TODO gc can't see these and they will be invalidated on collect
         captures: []*Value,
     };
 
@@ -648,6 +652,9 @@ pub const Vm = struct {
                     const C_val = try vm.getVal(module);
 
                     try B_val.get(vm, C_val, A_ref);
+
+                    // set this on load
+                    vm.this = B_val;
                 },
                 .Set => {
                     const A_val = try vm.getVal(module);
@@ -794,6 +801,12 @@ pub const Vm = struct {
                     if (n >= func.captures.len) return error.MalformedByteCode;
 
                     func.captures[n] = B_val;
+                },
+                .LoadThis => {
+                    const A_ref = try vm.getRef(module);
+
+                    A_ref.* = vm.this orelse
+                        return vm.reportErr("this has not been set");
                 },
                 .LineInfo => {
                     const line = vm.getArg(module, u32);

@@ -434,7 +434,7 @@ pub const Tokenizer = struct {
                         // so we can stop asking for more input
                         .Comment,
                         .Identifier,
-                        .This,
+                        .Keyword_this,
                         .String,
                         .Integer,
                         .Number,

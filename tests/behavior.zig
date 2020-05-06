@@ -1,3 +1,16 @@
+test "this" {
+    try expectOutput(
+        \\let x = {
+        \\    a: 69,
+        \\    y: 420,
+        \\    foo: fn() this.a * this.y
+        \\}
+        \\return x.foo()
+    ,
+        \\28980
+    );
+}
+
 test "closures" {
     try expectOutput(
         \\let x = 2

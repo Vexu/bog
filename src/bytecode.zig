@@ -22,6 +22,9 @@ pub const Op = enum(u8) {
     /// CAPTURE(A, arg1) = B
     StoreCapture,
 
+    /// A = THIS
+    LoadThis,
+
     /// A = PRIMITIVE(arg1)
     /// 0 = ()
     /// 1 = false
@@ -466,7 +469,7 @@ pub const Module = struct {
                 },
 
                 // A
-                .Discard, .Return => {
+                .Discard, .Return, .LoadThis => {
                     const arg_1 = module.getArg(RegRef, &ip);
                     try stream.print(" #{}\n", .{arg_1});
                 },
@@ -582,7 +585,7 @@ pub const Module = struct {
                 .Is, .As => ip += @sizeOf(RegRef) * 2 + @sizeOf(TypeId),
 
                 // A
-                .Discard, .Return => ip += @sizeOf(RegRef),
+                .Discard, .Return, .LoadThis => ip += @sizeOf(RegRef),
 
                 .ReturnNone => {},
                 _ => unreachable,

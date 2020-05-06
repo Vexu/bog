@@ -477,6 +477,7 @@ pub const Compiler = struct {
             .For => return self.genFor(@fieldParentPtr(Node.For, "base", node), res),
             .Map => return self.genMap(@fieldParentPtr(Node.ListTupleMap, "base", node), res),
             .MapItem => unreachable,
+            .This => return self.genThis(@fieldParentPtr(Node.SingleToken, "base", node), res),
 
             .Match => return self.reportErr("TODO: Match", node.firstToken()),
             .MatchCatchAll => return self.reportErr("TODO: MatchCatchAll", node.firstToken()),
@@ -1741,6 +1742,15 @@ pub const Compiler = struct {
             return res.toVal();
         }
         return Value{ .ref = sym.reg };
+    }
+
+    fn genThis(self: *Compiler, node: *Node.SingleToken, res: Result) Error!Value {
+        // `this` cannot be assigned to
+        try res.notLval(self, node.tok);
+
+        const sub_res = res.toRt(self);
+        try self.emitInstruction(.LoadThis, .{sub_res.rt});
+        return sub_res.toVal();
     }
 
     fn genLiteral(self: *Compiler, node: *Node.Literal, res: Result) Error!Value {
