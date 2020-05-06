@@ -32,6 +32,7 @@ pub const Node = struct {
         Fn,
         Discard,
         Identifier,
+        This,
         Prefix,
         Infix,
         TypeInfix,
@@ -61,7 +62,7 @@ pub const Node = struct {
         return switch (node.id) {
             .Decl => @fieldParentPtr(Node.Decl, "base", node).let_const,
             .Fn => @fieldParentPtr(Node.Fn, "base", node).fn_tok,
-            .Identifier, .Discard => @fieldParentPtr(Node.SingleToken, "base", node).tok,
+            .Identifier, .Discard, .This => @fieldParentPtr(Node.SingleToken, "base", node).tok,
             .Prefix => @fieldParentPtr(Node.Prefix, "base", node).tok,
             .Infix => @fieldParentPtr(Node.Infix, "base", node).lhs.firstToken(),
             .TypeInfix => @fieldParentPtr(Node.TypeInfix, "base", node).lhs.firstToken(),
@@ -98,7 +99,7 @@ pub const Node = struct {
         return switch (node.id) {
             .Decl => @fieldParentPtr(Node.Decl, "base", node).value.lastToken(),
             .Fn => @fieldParentPtr(Node.Fn, "base", node).body.lastToken(),
-            .Identifier, .Discard => @fieldParentPtr(Node.SingleToken, "base", node).tok,
+            .Identifier, .Discard, .This => @fieldParentPtr(Node.SingleToken, "base", node).tok,
             .Prefix => @fieldParentPtr(Node.Prefix, "base", node).rhs.lastToken(),
             .Infix => @fieldParentPtr(Node.Infix, "base", node).rhs.lastToken(),
             .TypeInfix => @fieldParentPtr(Node.TypeInfix, "base", node).type_tok,

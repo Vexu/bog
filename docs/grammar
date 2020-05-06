@@ -59,6 +59,7 @@ primary_expr
     | NUMBER
     | "true"
     | "false"
+    | "this"
     | "(" expr ")"
     | "(" (expr ",")+ expr? ")"
     | "{" (expr ":" expr ",")* (expr ":" expr)? "}"

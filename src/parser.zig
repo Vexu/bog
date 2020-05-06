@@ -632,6 +632,14 @@ pub const Parser = struct {
             };
             return &node.base;
         }
+        if (parser.eatToken(.Keyword_this, skip_nl)) |tok| {
+            const node = try parser.arena.create(Node.SingleToken);
+            node.* = .{
+                .base = .{ .id = .This },
+                .tok = tok,
+            };
+            return &node.base;
+        }
         if (parser.eatToken(.Underscore, skip_nl)) |tok| {
             const node = try parser.arena.create(Node.SingleToken);
             node.* = .{

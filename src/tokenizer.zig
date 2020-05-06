@@ -195,6 +195,7 @@ pub const Token = struct {
         Keyword_as,
         Keyword_const,
         Keyword_native,
+        Keyword_this,
     };
 
     pub const Keyword = struct {
@@ -227,6 +228,7 @@ pub const Token = struct {
         .{ .bytes = "as", .id = .Keyword_as },
         .{ .bytes = "const", .id = .Keyword_const },
         .{ .bytes = "native", .id = .Keyword_native },
+        .{ .bytes = "this", .id = .Keyword_this },
         .{ .bytes = "_", .id = .Underscore },
     };
 
@@ -247,6 +249,7 @@ pub const Token = struct {
             .Begin => "<BEGIN>",
             .End => "<END>",
             .Identifier => "Identifier",
+            .This => "this",
             .String => "String",
             .Integer => "Integer",
             .Number => "Number",
@@ -431,6 +434,7 @@ pub const Tokenizer = struct {
                         // so we can stop asking for more input
                         .Comment,
                         .Identifier,
+                        .This,
                         .String,
                         .Integer,
                         .Number,
@@ -1241,8 +1245,8 @@ test "operators" {
 
 test "keywords" {
     expectTokens(
-        \\not　and or let continue break return if else false true
-        \\for while match catch try error import is in fn as const native
+        \\not　and or let continue break return if else false true for
+        \\while match catch try error import is in fn as const native this
     , &[_]Token.Id{
         .Keyword_not,
         .Keyword_and,
@@ -1255,8 +1259,8 @@ test "keywords" {
         .Keyword_else,
         .Keyword_false,
         .Keyword_true,
-        .Nl,
         .Keyword_for,
+        .Nl,
         .Keyword_while,
         .Keyword_match,
         .Keyword_catch,
@@ -1269,6 +1273,7 @@ test "keywords" {
         .Keyword_as,
         .Keyword_const,
         .Keyword_native,
+        .Keyword_this,
     });
 }
 

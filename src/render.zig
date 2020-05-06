@@ -112,7 +112,7 @@ const Renderer = struct {
                 try self.renderToken(type_infix.tok, stream, indent, .space);
                 return self.renderToken(type_infix.type_tok, stream, indent, space);
             },
-            .Discard, .Identifier => {
+            .Discard, .Identifier, .This => {
                 const single = @fieldParentPtr(Node.SingleToken, "base", node);
 
                 return self.renderToken(single.tok, stream, indent, space);
