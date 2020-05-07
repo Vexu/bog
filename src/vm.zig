@@ -35,7 +35,7 @@ pub const Vm = struct {
     options: Options,
 
     // TODO gc can't see this and it will be invalidated on collect
-    this: ?*Value = null,
+    last_get: ?*Value = null,
 
     const CallStack = std.SegmentedList(FunctionFrame, 16);
     const max_depth = 512;
@@ -60,8 +60,11 @@ pub const Vm = struct {
         line_loc: u32,
         ret_reg: RegRef,
         module: *Module,
-        // TODO gc can't see these and they will be invalidated on collect
+        // this points to the Fn values captures so the gc can see them
         captures: []*Value,
+
+        // TODO gc can't see this and it will be invalidated on collect
+        this: ?*Value = null,
     };
 
     pub const Error = error{
@@ -653,8 +656,8 @@ pub const Vm = struct {
 
                     try B_val.get(vm, C_val, A_ref);
 
-                    // set this on load
-                    vm.this = B_val;
+                    // this will become the value of `this` for the next function call
+                    vm.last_get = B_val;
                 },
                 .Set => {
                     const A_val = try vm.getVal(module);
@@ -737,6 +740,7 @@ pub const Vm = struct {
                         .ret_reg = A,
                         .module = mod,
                         .captures = func.captures,
+                        .this = vm.last_get,
                     });
                     vm.sp += C;
                     vm.ip = func.offset;
@@ -805,7 +809,8 @@ pub const Vm = struct {
                 .LoadThis => {
                     const A_ref = try vm.getRef(module);
 
-                    A_ref.* = vm.this orelse
+                    const frame = vm.call_stack.at(vm.call_stack.len - 1);
+                    A_ref.* = frame.this orelse
                         return vm.reportErr("this has not been set");
                 },
                 .LineInfo => {

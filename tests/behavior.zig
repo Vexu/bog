@@ -3,7 +3,10 @@ test "this" {
         \\let x = {
         \\    a: 69,
         \\    y: 420,
-        \\    foo: fn() this.a * this.y
+        \\    foo: fn()
+        \\        [0][0] # last_get is now referencing this list
+        \\        return this.a * this.y # TODO this return should not be needed
+        \\
         \\}
         \\return x.foo()
     ,
