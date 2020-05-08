@@ -955,7 +955,7 @@ pub const Vm = struct {
         };
     }
 
-    fn reportErr(vm: *Vm, msg: []const u8) Error {
+    pub fn reportErr(vm: *Vm, msg: []const u8) Error {
         @setCold(true);
         try vm.errors.add(msg, vm.line_loc, .err);
         var i: u8 = 0;
