@@ -198,48 +198,34 @@ pub const Token = struct {
         Keyword_this,
     };
 
-    pub const Keyword = struct {
-        bytes: []const u8,
-        id: Id,
-    };
-
-    pub const keywords = [_]Keyword{
-        .{ .bytes = "not", .id = .Keyword_not },
-        .{ .bytes = "and", .id = .Keyword_and },
-        .{ .bytes = "or", .id = .Keyword_or },
-        .{ .bytes = "let", .id = .Keyword_let },
-        .{ .bytes = "continue", .id = .Keyword_continue },
-        .{ .bytes = "break", .id = .Keyword_break },
-        .{ .bytes = "return", .id = .Keyword_return },
-        .{ .bytes = "if", .id = .Keyword_if },
-        .{ .bytes = "else", .id = .Keyword_else },
-        .{ .bytes = "false", .id = .Keyword_false },
-        .{ .bytes = "true", .id = .Keyword_true },
-        .{ .bytes = "for", .id = .Keyword_for },
-        .{ .bytes = "while", .id = .Keyword_while },
-        .{ .bytes = "match", .id = .Keyword_match },
-        .{ .bytes = "catch", .id = .Keyword_catch },
-        .{ .bytes = "try", .id = .Keyword_try },
-        .{ .bytes = "error", .id = .Keyword_error },
-        .{ .bytes = "import", .id = .Keyword_import },
-        .{ .bytes = "is", .id = .Keyword_is },
-        .{ .bytes = "in", .id = .Keyword_in },
-        .{ .bytes = "fn", .id = .Keyword_fn },
-        .{ .bytes = "as", .id = .Keyword_as },
-        .{ .bytes = "const", .id = .Keyword_const },
-        .{ .bytes = "native", .id = .Keyword_native },
-        .{ .bytes = "this", .id = .Keyword_this },
-        .{ .bytes = "_", .id = .Underscore },
-    };
-
-    pub fn getKeyword(bytes: []const u8) ?Token.Id {
-        for (keywords) |kw| {
-            if (mem.eql(u8, kw.bytes, bytes)) {
-                return kw.id;
-            }
-        }
-        return null;
-    }
+    pub const keywords = std.ComptimeStringMap(Id, .{
+        .{ "not", .Keyword_not },
+        .{ "and", .Keyword_and },
+        .{ "or", .Keyword_or },
+        .{ "let", .Keyword_let },
+        .{ "continue", .Keyword_continue },
+        .{ "break", .Keyword_break },
+        .{ "return", .Keyword_return },
+        .{ "if", .Keyword_if },
+        .{ "else", .Keyword_else },
+        .{ "false", .Keyword_false },
+        .{ "true", .Keyword_true },
+        .{ "for", .Keyword_for },
+        .{ "while", .Keyword_while },
+        .{ "match", .Keyword_match },
+        .{ "catch", .Keyword_catch },
+        .{ "try", .Keyword_try },
+        .{ "error", .Keyword_error },
+        .{ "import", .Keyword_import },
+        .{ "is", .Keyword_is },
+        .{ "in", .Keyword_in },
+        .{ "fn", .Keyword_fn },
+        .{ "as", .Keyword_as },
+        .{ "const", .Keyword_const },
+        .{ "native", .Keyword_native },
+        .{ "this", .Keyword_this },
+        .{ "_", .Underscore },
+    });
 
     pub fn string(id: Id) []const u8 {
         return switch (id) {
@@ -763,7 +749,7 @@ pub const Tokenizer = struct {
                     if (!isIdentifier(c)) {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         const slice = self.it.bytes[self.start_index..self.it.i];
-                        res = Token.getKeyword(slice) orelse .Identifier;
+                        res = Token.keywords.get(slice) orelse .Identifier;
                         break;
                     }
                 },
@@ -1115,7 +1101,7 @@ pub const Tokenizer = struct {
                 .Start => {},
                 .Identifier => {
                     const slice = self.it.bytes[self.start_index..];
-                    res = Token.getKeyword(slice) orelse .Identifier;
+                    res = Token.keywords.get(slice) orelse .Identifier;
                 },
                 .BinaryNumber,
                 .OctalNumber,
