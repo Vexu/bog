@@ -192,6 +192,7 @@ pub const Op = enum(u8) {
 // TODO optimize size of this
 pub const RegRef = u16;
 
+/// A self contained Bog module with its code and strings.
 pub const Module = struct {
     name: []const u8,
     code: []const u8,
@@ -206,31 +207,43 @@ pub const Module = struct {
         alloc.destroy(module);
     }
 
+    /// The magic number for a Bog bytecode file.
     pub const magic = "\x7fbog";
-    pub const header_version = 1;
-    pub const bog_version = @bitCast(u32, packed struct {
-        _pad: u8 = 0,
-        major: u8 = @truncate(u8, bog.version.major),
-        minor: u8 = @truncate(u8, bog.version.minor),
-        patch: u8 = @truncate(u8, bog.version.patch),
-    }{});
 
-    /// all integer values are little-endian
+    /// Current bytecode version.
+    pub const bytecode_version = 1;
+
+    /// The header of a Bog bytecode file.
+    /// All integer values are little-endian.
     pub const Header = packed struct {
+        /// A magic number, must be `\x7fbog`.
         magic: [4]u8,
-        header_version: u32,
-        bog_version: u32,
+
+        /// Version of this header.
+        version: u32,
+
+        /// Offset to the string table.
         strings: u32,
+
+        /// Offset to the bytecode.
         code: u32,
+
+        /// Offset to the module entry point.
         entry: u32,
     };
 
     pub const ReadError = error{
+        /// Source did not start with a correct magic number.
         InvalidMagic,
+
+        /// Header was malformed.
         InvalidHeader,
+
+        /// This version of Bog cannot execute this bytecode.
         UnsupportedVersion,
     };
 
+    /// Reads a module from memory.
     pub fn read(src: []const u8) ReadError!Module {
         if (!mem.startsWith(u8, src, magic))
             return error.InvalidMagic;
@@ -241,13 +254,15 @@ pub const Module = struct {
             @ptrCast(*const Header, src.ptr).*
         else
             Header{
-                .magic = @ptrCast(*const [4]u8, src.ptr).*,
-                .header_version = mem.readIntLittle(u32, @ptrCast(*const [4]u8, src.ptr + 4)),
-                .bog_version = mem.readIntLittle(u32, @ptrCast(*const [4]u8, src.ptr + 8)),
-                .strings = mem.readIntLittle(u32, @ptrCast(*const [4]u8, src.ptr + 12)),
-                .code = mem.readIntLittle(u32, @ptrCast(*const [4]u8, src.ptr + 16)),
-                .entry = mem.readIntLittle(u32, @ptrCast(*const [4]u8, src.ptr + 20)),
+                .magic = src[0..4].*,
+                .version = mem.readIntLittle(u32, src[4..8]),
+                .strings = mem.readIntLittle(u32, src[8..12]),
+                .code = mem.readIntLittle(u32, src[12..16]),
+                .entry = mem.readIntLittle(u32, src[16..20]),
             };
+
+        if (header.version != bytecode_version)
+            return error.UnsupportedVersion;
 
         // strings must come before code
         if (header.strings > header.code)
@@ -265,10 +280,10 @@ pub const Module = struct {
         };
     }
 
+    /// Writes a module to a stream.
     pub fn write(module: Module, stream: var) @TypeOf(stream).Error!void {
         try stream.writeAll(magic);
-        try stream.writeIntLittle(u32, header_version);
-        try stream.writeIntLittle(u32, bog_version);
+        try stream.writeIntLittle(u32, bytecode_version);
 
         // strings come immediately after header
         const strings_offset = @intCast(u32, @sizeOf(Header));
@@ -289,6 +304,7 @@ pub const Module = struct {
         try stream.writeAll(module.code);
     }
 
+    /// Pretty prints debug info about the module.
     pub fn dump(module: Module, allocator: *Allocator, stream: var) (@TypeOf(stream).Error || Allocator.Error)!void {
         var arena_allocator = std.heap.ArenaAllocator.init(allocator);
         defer arena_allocator.deinit();
@@ -480,9 +496,9 @@ pub const Module = struct {
         }
     }
 
-    pub const JumpMap = std.AutoHashMap(usize, []const u8);
+    const JumpMap = std.AutoHashMap(usize, []const u8);
 
-    pub fn mapJumpTargets(module: Module, arena: *Allocator) Allocator.Error!JumpMap {
+    fn mapJumpTargets(module: Module, arena: *Allocator) Allocator.Error!JumpMap {
         var map = JumpMap.init(arena);
         var ip: usize = 0;
         var mangle: u32 = 0;

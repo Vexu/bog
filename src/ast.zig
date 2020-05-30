@@ -1,6 +1,5 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const TypeId = @import("value.zig").TypeId;
 
 const bog = @import("bog.zig");
 const Token = bog.Token;
