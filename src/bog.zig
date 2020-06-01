@@ -24,8 +24,7 @@ pub const Value = value.Value;
 const vm = @import("vm.zig");
 pub const Vm = vm.Vm;
 
-const gc = @import("gc.zig");
-pub const Gc = gc.Gc;
+pub const Gc = @import("Gc.zig");
 
 const bytecode = @import("bytecode.zig");
 pub const Op = bytecode.Op;

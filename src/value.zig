@@ -34,9 +34,6 @@ pub const Value = struct {
 
     marked: bool = false,
 
-    /// TODO https://github.com/ziglang/zig/issues/4295
-    __padding: u32 = 0,
-
     kind: union(TypeId) {
         Tuple: struct {
             values: []*Value,
