@@ -7,141 +7,129 @@ const Module = bog.Module;
 const NativeFn = bog.NativeFn;
 const util = @import("util.zig");
 
-pub const Value = struct {
-    pub const TypeId = enum(u8) {
-        None,
-        Int,
-        Num,
-        Bool,
-        Str,
-        Tuple,
-        Map,
-        List,
-        Error,
-        Range,
-        Fn,
+pub const Type = enum(u8) {
+    none,
+    int,
+    num,
+    bool,
+    str,
+    tuple,
+    map,
+    list,
+    err,
+    range,
+    func,
 
-        /// pseudo type user should not have access to via valid bytecode
-        Iterator,
+    /// pseudo type user should not have access to via valid bytecode
+    iterator,
 
-        /// Native being separate from .Fn is an implementation detail
-        Native,
-        _,
-    };
+    /// native being separate from .func is an implementation detail
+    native,
+    _,
+};
+
+pub const Value = union(Type) {
+    tuple: struct {
+        values: []*Value,
+        allocator: *Allocator,
+    },
+    map: Map,
+    list: List,
+    err: *Value,
+    int: i64,
+    num: f64,
+    range: struct {
+        begin: *Value,
+        end: *Value,
+    },
+    str: []const u8,
+    func: struct {
+        /// offset to the functions first instruction
+        offset: u32,
+        arg_count: u8,
+
+        /// module in which this function exists
+        module: *Module,
+
+        captures: []*Value,
+        allocator: *Allocator,
+    },
+    native: bog.native.Native,
+    iterator: struct {
+        value: *Value,
+        index: usize,
+
+        // TODO protect against concurrent modification
+        pub fn next(iter: *@This(), vm: *Vm, res: *?*Value) !void {
+            switch (iter.value.*) {
+                .tuple => |tuple| {
+                    if (iter.index == tuple.values.len) {
+                        res.* = &Value.None;
+                        return;
+                    }
+
+                    res.* = tuple.values[iter.index];
+                    iter.index += 1;
+                },
+                .list => |list| {
+                    if (iter.index == list.items.len) {
+                        res.* = &Value.None;
+                        return;
+                    }
+
+                    res.* = list.items[iter.index];
+                    iter.index += 1;
+                },
+                .str => |str| {
+                    if (iter.index == str.len) {
+                        res.* = &Value.None;
+                        return;
+                    }
+                    if (res.* == null)
+                        res.* = try vm.gc.alloc();
+
+                    const cp_len = std.unicode.utf8ByteSequenceLength(str[iter.index]) catch
+                        return vm.reportErr("invalid utf-8 sequence");
+                    iter.index += cp_len;
+
+                    res.*.?.* = .{
+                        .str = str[iter.index - cp_len .. iter.index],
+                    };
+                },
+                .map => @panic("TODO: map iterator"),
+                .range => @panic("TODO: range iterator"),
+                else => unreachable,
+            }
+        }
+    },
+
+    /// always memoized
+    bool: bool,
+    none,
 
     pub const Map = std.HashMap(*Value, *Value, hash, eql);
     pub const List = std.ArrayList(*Value);
 
-    marked: bool = false,
-
-    kind: union(TypeId) {
-        Tuple: struct {
-            values: []*Value,
-            allocator: *Allocator,
-        },
-        Map: Map,
-        List: List,
-        Error: *Value,
-        Int: i64,
-        Num: f64,
-        Range: struct {
-            begin: *Value,
-            end: *Value,
-        },
-        Str: []const u8,
-        Fn: struct {
-            /// offset to the functions first instruction
-            offset: u32,
-            arg_count: u8,
-
-            /// module in which this function exists
-            module: *Module,
-
-            captures: []*Value,
-            allocator: *Allocator,
-        },
-        Native: bog.native.Native,
-        Iterator: struct {
-            value: *Value,
-            index: usize,
-
-            // TODO protect against concurrent modification
-            pub fn next(iter: *@This(), vm: *Vm, res: *?*Value) !void {
-                switch (iter.value.kind) {
-                    .Tuple => |tuple| {
-                        if (iter.index == tuple.values.len) {
-                            res.* = &Value.None;
-                            return;
-                        }
-
-                        res.* = tuple.values[iter.index];
-                        iter.index += 1;
-                    },
-                    .List => |list| {
-                        if (iter.index == list.items.len) {
-                            res.* = &Value.None;
-                            return;
-                        }
-
-                        res.* = list.items[iter.index];
-                        iter.index += 1;
-                    },
-                    .Str => |str| {
-                        if (iter.index == str.len) {
-                            res.* = &Value.None;
-                            return;
-                        }
-                        if (res.* == null)
-                            res.* = try vm.gc.alloc();
-
-                        const cp_len = std.unicode.utf8ByteSequenceLength(str[iter.index]) catch
-                            return vm.reportErr("invalid utf-8 sequence");
-                        iter.index += cp_len;
-
-                        res.*.?.* = .{
-                            .kind = .{
-                                .Str = str[iter.index - cp_len .. iter.index],
-                            },
-                        };
-                    },
-                    .Map => @panic("TODO: map iterator"),
-                    .Range => @panic("TODO: range iterator"),
-                    else => unreachable,
-                }
-            }
-        },
-
-        /// always memoized
-        Bool: bool,
-        None,
-    },
-
-    pub var None = Value{
-        .kind = .None,
-    };
-    pub var True = Value{
-        .kind = .{ .Bool = true },
-    };
-    pub var False = Value{
-        .kind = .{ .Bool = false },
-    };
+    pub var None = Value{ .none = {} };
+    pub var True = Value{ .bool = true };
+    pub var False = Value{ .bool = false };
 
     pub fn deinit(value: *Value) void {
-        switch (value.kind) {
-            .Int, .Num, .None, .Bool, .Native => {},
-            .Tuple => |t| t.allocator.free(t.values),
-            .Map => |m| m.deinit(),
-            .List => |l| l.deinit(),
-            .Error => |e| e.deinit(),
-            .Range => |r| {
+        switch (value.*) {
+            .int, .num, .none, .bool, .native => {},
+            .tuple => |*t| t.allocator.free(t.values),
+            .map => |*m| m.deinit(),
+            .list => |*l| l.deinit(),
+            .err => |*e| e.deinit(),
+            .range => |*r| {
                 r.begin.deinit();
                 r.end.deinit();
             },
-            .Str => {
+            .str => {
                 // TODO string memory management
             },
-            .Fn => |f| f.allocator.free(f.captures),
-            .Iterator => |i| i.value.deinit(),
+            .func => |*f| f.allocator.free(f.captures),
+            .iterator => |*i| i.value.deinit(),
             _ => unreachable,
         }
     }
@@ -150,39 +138,39 @@ pub const Value = struct {
         const autoHash = std.hash.autoHash;
 
         var hasher = std.hash.Wyhash.init(0);
-        autoHash(&hasher, @as(TypeId, key.kind));
-        switch (key.kind) {
-            .Iterator => unreachable,
-            .None => {},
-            .Int => |int| autoHash(&hasher, int),
-            .Num => |num| autoHash(&hasher, num),
-            .Bool => |b| autoHash(&hasher, b),
-            .Str => |str| hasher.update(str),
-            .Tuple => |tuple| {
+        autoHash(&hasher, @as(Type, key.*));
+        switch (key.*) {
+            .iterator => unreachable,
+            .none => {},
+            .int => |int| autoHash(&hasher, int),
+            .num => |num| autoHash(&hasher, num),
+            .bool => |b| autoHash(&hasher, b),
+            .str => |str| hasher.update(str),
+            .tuple => |*tuple| {
                 autoHash(&hasher, tuple.values.len);
                 autoHash(&hasher, tuple.values.ptr);
             },
-            .Map => |map| {
+            .map => |*map| {
                 autoHash(&hasher, map.size);
                 autoHash(&hasher, map.entries.len);
                 autoHash(&hasher, map.entries.ptr);
                 autoHash(&hasher, map.max_distance_from_start_index);
             },
-            .List => |list| {
+            .list => |*list| {
                 autoHash(&hasher, list.items.len);
                 autoHash(&hasher, list.items.ptr);
             },
-            .Error => |err| autoHash(&hasher, @as(TypeId, err.kind)),
-            .Range => |range| {
-                autoHash(&hasher, @as(TypeId, range.begin.kind));
-                autoHash(&hasher, @as(TypeId, range.end.kind));
+            .err => |err| autoHash(&hasher, @as(Type, err.*)),
+            .range => |*range| {
+                autoHash(&hasher, @as(Type, range.begin.*));
+                autoHash(&hasher, @as(Type, range.end.*));
             },
-            .Fn => |func| {
+            .func => |*func| {
                 autoHash(&hasher, func.offset);
                 autoHash(&hasher, func.arg_count);
                 autoHash(&hasher, func.module);
             },
-            .Native => |func| {
+            .native => |*func| {
                 autoHash(&hasher, func.arg_count);
                 autoHash(&hasher, func.func);
             },
@@ -192,65 +180,62 @@ pub const Value = struct {
     }
 
     pub fn eql(a: *Value, b: *Value) bool {
-        switch (a.kind) {
-            .Int => |i| return switch (b.kind) {
-                .Int => |b_val| i == b_val,
-                .Num => |b_val| @intToFloat(f64, i) == b_val,
+        switch (a.*) {
+            .int => |i| return switch (b.*) {
+                .int => |b_val| i == b_val,
+                .num => |b_val| @intToFloat(f64, i) == b_val,
                 else => false,
             },
-            .Num => |n| return switch (b.kind) {
-                .Int => |b_val| n == @intToFloat(f64, b_val),
-                .Num => |b_val| n == b_val,
+            .num => |n| return switch (b.*) {
+                .int => |b_val| n == @intToFloat(f64, b_val),
+                .num => |b_val| n == b_val,
                 else => false,
             },
-            else => if (a.kind != @as(@TagType(@TypeOf(b.kind)), b.kind)) return false,
+            else => if (a.* != @as(@TagType(@TypeOf(b.*)), b.*)) return false,
         }
-        return switch (a.kind) {
-            .Iterator, .Int, .Num => unreachable,
-            .None => true,
-            .Bool => |bool_val| bool_val == b.kind.Bool,
-            .Str => |s| {
-                const b_val = b.kind.Str;
-                return std.mem.eql(u8, s, b_val);
+        return switch (a.*) {
+            .iterator, .int, .num => unreachable,
+            .none => true,
+            .bool => |bool_val| bool_val == b.bool,
+            .str => |s| {
+                return std.mem.eql(u8, s, b.str);
             },
-            .Tuple => |t| {
-                const b_val = b.kind.Tuple.values;
+            .tuple => |t| {
+                const b_val = b.tuple.values;
                 if (t.values.len != b_val.len) return false;
                 for (t.values) |v, i| {
                     if (!v.eql(b_val[i])) return false;
                 }
                 return true;
             },
-            .Map => |m| @panic("TODO eql for maps"),
-            .List => |l| {
-                const b_val = b.kind.List;
-                if (l.items.len != b_val.items.len) return false;
+            .map => |m| @panic("TODO eql for maps"),
+            .list => |l| {
+                if (l.items.len != b.list.items.len) return false;
                 for (l.items) |v, i| {
-                    if (!v.eql(b_val.items[i])) return false;
+                    if (!v.eql(b.list.items[i])) return false;
                 }
                 return true;
             },
-            .Error => |e| e.eql(b.kind.Error),
-            .Range => |r| @panic("TODO eql for ranges"),
-            .Fn => |f| {
-                const b_val = b.kind.Fn;
-                return f.offset == b_val.offset and
-                    f.arg_count == b_val.arg_count and
-                    f.module == b_val.module;
+            .err => |e| e.eql(b.err),
+            .range => |r| @panic("TODO eql for ranges"),
+            .func => |f| {
+                return f.offset == b.func.offset and
+                    f.arg_count == b.func.arg_count and
+                    f.module == b.func.module;
             },
-            .Native => |n| n.func == b.kind.Native.func,
+            .native => |n| n.func == b.native.func,
             _ => unreachable,
         };
     }
 
     pub fn dump(value: Value, stream: var, level: u32) @TypeOf(stream).Error!void {
-        switch (value.kind) {
-            .Iterator => unreachable,
-            .Int => |i| try stream.print("{}", .{i}),
-            .Num => |n| try stream.print("{d}", .{n}),
-            .Bool => |b| try stream.writeAll(if (b) "true" else "false"),
-            .None => try stream.writeAll("()"),
-            .Range => |r| {
+        switch (value) {
+            .iterator => unreachable,
+            .int => |i| try stream.print("{}", .{i}),
+            .num => |n| try stream.print("{d}", .{n}),
+            .bool => |b| try stream.writeAll(if (b) "true" else "false"),
+            .none => try stream.writeAll("()"),
+            .range => |r| {
                 if (level == 0) {
                     try stream.writeAll("(range)");
                 } else {
@@ -259,7 +244,7 @@ pub const Value = struct {
                     try r.end.dump(stream, level - 1);
                 }
             },
-            .Tuple => |t| {
+            .tuple => |t| {
                 if (level == 0) {
                     try stream.writeAll("(...)");
                 } else {
@@ -271,7 +256,7 @@ pub const Value = struct {
                     try stream.writeByte(')');
                 }
             },
-            .Map => |m| {
+            .map => |m| {
                 if (level == 0) {
                     try stream.writeAll("{...}");
                 } else {
@@ -287,7 +272,7 @@ pub const Value = struct {
                     try stream.writeByte('}');
                 }
             },
-            .List => |l| {
+            .list => |l| {
                 if (level == 0) {
                     try stream.writeAll("[...]");
                 } else {
@@ -299,7 +284,7 @@ pub const Value = struct {
                     try stream.writeByte(']');
                 }
             },
-            .Error => |e| {
+            .err => |e| {
                 if (level == 0) {
                     try stream.writeAll("error(...)");
                 } else {
@@ -308,7 +293,7 @@ pub const Value = struct {
                     try stream.writeByte(')');
                 }
             },
-            .Str => |s| {
+            .str => |s| {
                 try stream.writeByte('"');
                 for (s) |c| {
                     switch (c) {
@@ -325,44 +310,21 @@ pub const Value = struct {
                 }
                 try stream.writeByte('"');
             },
-            .Fn => |f| {
+            .func => |f| {
                 try stream.print("fn({})@0x{X}[{}]", .{ f.arg_count, f.offset, f.captures.len });
             },
-            .Native => |n| {
+            .native => |n| {
                 try stream.print("native({})@0x{}", .{ n.arg_count, @ptrToInt(n.func) });
             },
             _ => unreachable,
         }
     }
 
-    pub fn mark(value: *Value) void {
-        if (value.marked) return;
-        value.marked = true;
-        switch (value.kind) {
-            .None, .Int, .Num, .Bool, .Str, .Native => {},
-
-            .Fn => |f| for (f.captures) |v| v.mark(),
-            .Iterator => |i| i.value.mark(),
-            .Tuple => |t| for (t.values) |v| v.mark(),
-            .Map => |m| {
-                var it = m.iterator();
-                while (it.next()) |kv| kv.value.mark();
-            },
-            .List => |l| for (l.items) |v| v.mark(),
-            .Error => |e| e.mark(),
-            .Range => |r| {
-                r.begin.mark();
-                r.end.mark();
-            },
-            _ => unreachable,
-        }
-    }
-
     pub fn get(val: *Value, vm: *Vm, index: *Value, res: *?*Value) !void {
-        switch (val.kind) {
-            .Tuple => |tuple| switch (index.kind) {
-                .Int => {
-                    var i = index.kind.Int;
+        switch (val.*) {
+            .tuple => |tuple| switch (index.*) {
+                .int => {
+                    var i = index.int;
                     if (i < 0)
                         i += @intCast(i64, tuple.values.len);
                     if (i < 0 or i >= tuple.values.len)
@@ -370,25 +332,23 @@ pub const Value = struct {
 
                     res.* = tuple.values[@intCast(u32, i)];
                 },
-                .Range => return vm.reportErr("TODO get with ranges"),
-                .Str => |s| {
+                .range => return vm.reportErr("TODO get with ranges"),
+                .str => |s| {
                     if (res.* == null) {
                         res.* = try vm.gc.alloc();
                     }
 
                     if (mem.eql(u8, s, "len")) {
-                        res.*.?.* = .{
-                            .kind = .{ .Int = @intCast(i64, tuple.values.len) },
-                        };
+                        res.*.?.* = .{ .int = @intCast(i64, tuple.values.len) };
                     } else {
                         return vm.reportErr("no such property");
                     }
                 },
                 else => return vm.reportErr("invalid index type"),
             },
-            .List => |list| switch (index.kind) {
-                .Int => {
-                    var i = index.kind.Int;
+            .list => |list| switch (index.*) {
+                .int => {
+                    var i = index.int;
                     if (i < 0)
                         i += @intCast(i64, list.items.len);
                     if (i < 0 or i >= list.items.len)
@@ -396,53 +356,49 @@ pub const Value = struct {
 
                     res.* = list.items[@intCast(u32, i)];
                 },
-                .Range => return vm.reportErr("TODO get with ranges"),
-                .Str => |s| {
+                .range => return vm.reportErr("TODO get with ranges"),
+                .str => |s| {
                     if (res.* == null) {
                         res.* = try vm.gc.alloc();
                     }
 
                     if (mem.eql(u8, s, "len")) {
-                        res.*.?.* = .{
-                            .kind = .{ .Int = @intCast(i64, list.items.len) },
-                        };
+                        res.*.?.* = .{ .int = @intCast(i64, list.items.len) };
                     } else {
                         return vm.reportErr("no such property");
                     }
                 },
                 else => return vm.reportErr("invalid index type"),
             },
-            .Map => |map| {
+            .map => |map| {
                 res.* = map.getValue(index) orelse
                     return vm.reportErr("TODO better handling undefined key");
             },
-            .Str => |str| switch (index.kind) {
-                .Int => return vm.reportErr("TODO get str"),
-                .Range => return vm.reportErr("TODO get with ranges"),
-                .Str => |s| {
+            .str => |str| switch (index.*) {
+                .int => return vm.reportErr("TODO get str"),
+                .range => return vm.reportErr("TODO get with ranges"),
+                .str => |s| {
                     if (res.* == null) {
                         res.* = try vm.gc.alloc();
                     }
 
                     if (mem.eql(u8, s, "len")) {
-                        res.*.?.* = .{
-                            .kind = .{ .Int = @intCast(i64, str.len) },
-                        };
+                        res.*.?.* = .{ .int = @intCast(i64, str.len) };
                     } else {
                         return vm.reportErr("no such property");
                     }
                 },
                 else => return vm.reportErr("invalid index type"),
             },
-            .Iterator => unreachable,
+            .iterator => unreachable,
             else => return vm.reportErr("invalid subscript type"),
         }
     }
 
     pub fn set(val: *Value, vm: *Vm, index: *Value, new_val: *Value) !void {
-        switch (val.kind) {
-            .Tuple => |tuple| if (index.kind == .Int) {
-                var i = index.kind.Int;
+        switch (val.*) {
+            .tuple => |tuple| if (index.* == .int) {
+                var i = index.int;
                 if (i < 0)
                     i += @intCast(i64, tuple.values.len);
                 if (i < 0 or i >= tuple.values.len)
@@ -452,11 +408,11 @@ pub const Value = struct {
             } else {
                 return vm.reportErr("TODO set with ranges");
             },
-            .Map => |*map| {
+            .map => |*map| {
                 _ = try map.put(index, new_val);
             },
-            .List => |list| if (index.kind == .Int) {
-                var i = index.kind.Int;
+            .list => |list| if (index.* == .int) {
+                var i = index.int;
                 if (i < 0)
                     i += @intCast(i64, list.items.len);
                 if (i < 0 or i >= list.items.len)
@@ -466,29 +422,29 @@ pub const Value = struct {
             } else {
                 return vm.reportErr("TODO set with ranges");
             },
-            .Str => |str| {
+            .str => |str| {
                 return vm.reportErr("TODO set string");
             },
-            .Iterator => unreachable,
+            .iterator => unreachable,
             else => return vm.reportErr("invalid subscript type"),
         }
     }
 
-    /// `type_id` must be valid and cannot be .Error, .Range, .Fn or .Native
-    pub fn as(val: *Value, vm: *Vm, type_id: TypeId) !*Value {
-        if (type_id == .None) {
+    /// `type_id` must be valid and cannot be .err, .range, .func or .native
+    pub fn as(val: *Value, vm: *Vm, type_id: Type) !*Value {
+        if (type_id == .none) {
             return &Value.None;
         }
-        if (type_id == val.kind) {
+        if (val.* == type_id) {
             return val;
         }
 
-        if (type_id == .Bool) {
-            const bool_res = switch (val.kind) {
-                .Int => |int| int != 0,
-                .Num => |num| num != 0,
-                .Bool => unreachable,
-                .Str => |str| if (mem.eql(u8, str, "true"))
+        if (type_id == .bool) {
+            const bool_res = switch (val.*) {
+                .int => |int| int != 0,
+                .num => |num| num != 0,
+                .bool => unreachable,
+                .str => |str| if (mem.eql(u8, str, "true"))
                     true
                 else if (mem.eql(u8, str, "false"))
                     false
@@ -502,87 +458,81 @@ pub const Value = struct {
 
         const new_val = try vm.gc.alloc();
         new_val.* = switch (type_id) {
-            .Bool, .None, .Error, .Range, .Fn, .Native, .Iterator => unreachable,
-            .Int => .{
-                .kind = .{
-                    .Int = switch (val.kind) {
-                        .Int => unreachable,
-                        .Num => |num| @floatToInt(i64, num),
-                        .Bool => |b| @boolToInt(b),
-                        .Str => |str| util.parseInt(str) catch
-                            return vm.reportErr("invalid cast to int"),
-                        else => return vm.reportErr("invalid cast to int"),
-                    },
+            .bool, .none, .err, .range, .func, .native, .iterator => unreachable,
+            .int => .{
+                .int = switch (val.*) {
+                    .int => unreachable,
+                    .num => |num| @floatToInt(i64, num),
+                    .bool => |b| @boolToInt(b),
+                    .str => |str| util.parseInt(str) catch
+                        return vm.reportErr("invalid cast to int"),
+                    else => return vm.reportErr("invalid cast to int"),
                 },
             },
-            .Num => .{
-                .kind = .{
-                    .Num = switch (val.kind) {
-                        .Num => unreachable,
-                        .Int => |int| @intToFloat(f64, int),
-                        .Bool => |b| @intToFloat(f64, @boolToInt(b)),
-                        .Str => |str| util.parseNum(str) catch
-                            return vm.reportErr("invalid cast to num"),
-                        else => return vm.reportErr("invalid cast to num"),
-                    },
+            .num => .{
+                .num = switch (val.*) {
+                    .num => unreachable,
+                    .int => |int| @intToFloat(f64, int),
+                    .bool => |b| @intToFloat(f64, @boolToInt(b)),
+                    .str => |str| util.parseNum(str) catch
+                        return vm.reportErr("invalid cast to num"),
+                    else => return vm.reportErr("invalid cast to num"),
                 },
             },
-            .Str,
-            .Tuple,
-            .Map,
-            .List,
+            .str,
+            .tuple,
+            .map,
+            .list,
             => return vm.reportErr("TODO more casts"),
             _ => unreachable,
         };
         return new_val;
     }
 
-    pub fn is(val: *Value, type_id: TypeId) bool {
-        if (val.kind == type_id) return true;
-        if (type_id == .Fn and val.kind == .Native) return true;
+    pub fn is(val: *Value, type_id: Type) bool {
+        if (val.* == type_id) return true;
+        if (type_id == .func and val.* == .native) return true;
         return false;
     }
 
     pub fn in(val: *Value, container: *Value) bool {
-        switch (container.kind) {
-            .Str => |str| {
-                if (val.kind != .Str) return false;
-                return mem.indexOf(u8, str, val.kind.Str) != null;
+        switch (container.*) {
+            .str => |str| {
+                if (val.* != .str) return false;
+                return mem.indexOf(u8, str, val.str) != null;
             },
-            .Tuple => |tuple| {
+            .tuple => |*tuple| {
                 for (tuple.values) |v| {
                     if (v.eql(val)) return true;
                 }
                 return false;
             },
-            .List => |list| {
+            .list => |*list| {
                 for (list.items) |v| {
                     if (v.eql(val)) return true;
                 }
                 return false;
             },
-            .Map => @panic("TODO in map"),
-            .Range => @panic("TODO in range"),
-            .Iterator => unreachable,
+            .map => @panic("TODO in map"),
+            .range => @panic("TODO in range"),
+            .iterator => unreachable,
             else => unreachable,
         }
     }
 
     pub fn iterator(val: *Value, vm: *Vm) !*Value {
-        switch (val.kind) {
-            .Map => return vm.reportErr("TODO: map iterator"),
-            .Range => return vm.reportErr("TODO: range iterator"),
-            .Str, .Tuple, .List => {},
-            .Iterator => unreachable,
+        switch (val.*) {
+            .map => return vm.reportErr("TODO: map iterator"),
+            .range => return vm.reportErr("TODO: range iterator"),
+            .str, .tuple, .list => {},
+            .iterator => unreachable,
             else => return vm.reportErr("invalid type for iteration"),
         }
         const iter = try vm.gc.alloc();
         iter.* = .{
-            .kind = .{
-                .Iterator = .{
-                    .value = val,
-                    .index = 0,
-                },
+            .iterator = .{
+                .value = val,
+                .index = 0,
             },
         };
         return iter;
@@ -611,23 +561,21 @@ fn testDump(val: Value, expected: []const u8) !void {
 // https://github.com/ziglang/zig/issues/4562
 // test "dump int/num" {
 //     var int = Value{
-//         .kind = .{ .Int = 2 },
+//         .int = 2,
 //     };
 //     try testDump(int, "2");
 //     var num = Value{
-//         .kind = .{ .Num = 2.5 },
+//         .num = 2.5,
 //     };
 //     try testDump(num, "2.5");
 // }
 
 // test "dump error" {
 //     var int = Value{
-//         .kind = .{ .Int = 2 },
+//         .int = 2,
 //     };
 //     var err = Value{
-//         .kind = .{
-//             .Error = &int,
-//         },
+//         .err = &int,
 //     };
 //     try testDump(err, "error(2)");
 // }

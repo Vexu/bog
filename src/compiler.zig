@@ -1133,27 +1133,27 @@ pub const Compiler = struct {
 
         const type_str = self.tokenSlice(node.type_tok);
         const type_id = if (mem.eql(u8, type_str, "none"))
-            .None
+            .none
         else if (mem.eql(u8, type_str, "int"))
-            .Int
+            .int
         else if (mem.eql(u8, type_str, "num"))
-            .Num
+            .num
         else if (mem.eql(u8, type_str, "bool"))
-            .Bool
+            .bool
         else if (mem.eql(u8, type_str, "str"))
-            .Str
+            .str
         else if (mem.eql(u8, type_str, "tuple"))
-            .Tuple
+            .tuple
         else if (mem.eql(u8, type_str, "map"))
-            .Map
+            .map
         else if (mem.eql(u8, type_str, "list"))
-            .List
+            .list
         else if (mem.eql(u8, type_str, "error"))
-            .Error
+            .err
         else if (mem.eql(u8, type_str, "range"))
-            .Range
+            .range
         else if (mem.eql(u8, type_str, "fn"))
-            bog.Value.TypeId.Fn
+            bog.Type.func
         else
             return self.reportErr("expected a type name", node.type_tok);
 
@@ -1169,8 +1169,8 @@ pub const Compiler = struct {
 
         const ret_val = switch (node.op) {
             .as => switch (type_id) {
-                .None => Value{ .none = {} },
-                .Int => Value{
+                .none => Value{ .none = {} },
+                .int => Value{
                     .int = switch (l_val) {
                         .int => |val| val,
                         .num => |val| @floatToInt(i64, val),
@@ -1180,7 +1180,7 @@ pub const Compiler = struct {
                         else => return self.reportErr("invalid cast to int", node.lhs.firstToken()),
                     },
                 },
-                .Num => Value{
+                .num => Value{
                     .num = switch (l_val) {
                         .num => |val| val,
                         .int => |val| @intToFloat(f64, val),
@@ -1190,7 +1190,7 @@ pub const Compiler = struct {
                         else => return self.reportErr("invalid cast to num", node.lhs.firstToken()),
                     },
                 },
-                .Bool => Value{
+                .bool => Value{
                     .Bool = switch (l_val) {
                         .int => |val| val != 0,
                         .num => |val| val != 0,
@@ -1204,7 +1204,7 @@ pub const Compiler = struct {
                         else => return self.reportErr("invalid cast to bool", node.lhs.firstToken()),
                     },
                 },
-                .Str => Value{
+                .str => Value{
                     .str = switch (l_val) {
                         .int => |val| try std.fmt.allocPrint(self.arena, "{}", .{val}),
                         .num => |val| try std.fmt.allocPrint(self.arena, "{d}", .{val}),
@@ -1213,20 +1213,20 @@ pub const Compiler = struct {
                         else => return self.reportErr("invalid cast to string", node.lhs.firstToken()),
                     },
                 },
-                .Fn => return self.reportErr("cannot cast to function", node.type_tok),
-                .Error => return self.reportErr("cannot cast to error", node.type_tok),
-                .Range => return self.reportErr("cannot cast to range", node.type_tok),
-                .Tuple, .Map, .List => return self.reportErr("invalid cast", node.type_tok),
-                .Native, .Iterator => unreachable,
+                .func => return self.reportErr("cannot cast to function", node.type_tok),
+                .err => return self.reportErr("cannot cast to error", node.type_tok),
+                .range => return self.reportErr("cannot cast to range", node.type_tok),
+                .tuple, .map, .list => return self.reportErr("invalid cast", node.type_tok),
+                .native, .iterator => unreachable,
                 _ => unreachable,
             },
             .is => Value{
                 .Bool = switch (type_id) {
-                    .None => l_val == .none,
-                    .Int => l_val == .int,
-                    .Num => l_val == .num,
-                    .Bool => l_val == .Bool,
-                    .Str => l_val == .str,
+                    .none => l_val == .none,
+                    .int => l_val == .int,
+                    .num => l_val == .num,
+                    .bool => l_val == .Bool,
+                    .str => l_val == .str,
                     else => false,
                 },
             },

@@ -20,6 +20,7 @@ pub const compile = Compiler.compile;
 
 const value = @import("value.zig");
 pub const Value = value.Value;
+pub const Type = value.Type;
 
 const vm = @import("vm.zig");
 pub const Vm = vm.Vm;

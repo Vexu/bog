@@ -110,9 +110,7 @@ pub const Vm = struct {
                     const val = vm.getArg(module, i8);
 
                     A_val.* = .{
-                        .kind = .{
-                            .Int = val,
-                        },
+                        .int = val,
                     };
                 },
                 .ConstInt32 => {
@@ -120,9 +118,7 @@ pub const Vm = struct {
                     const val = vm.getArg(module, i32);
 
                     A_val.* = .{
-                        .kind = .{
-                            .Int = val,
-                        },
+                        .int = val,
                     };
                 },
                 .ConstInt64 => {
@@ -130,9 +126,7 @@ pub const Vm = struct {
                     const val = vm.getArg(module, i64);
 
                     A_val.* = .{
-                        .kind = .{
-                            .Int = val,
-                        },
+                        .int = val,
                     };
                 },
                 .ConstNum => {
@@ -140,9 +134,7 @@ pub const Vm = struct {
                     const val = vm.getArg(module, f64);
 
                     A_val.* = .{
-                        .kind = .{
-                            .Num = val,
-                        },
+                        .num = val,
                     };
                 },
                 .ConstPrimitive => {
@@ -160,9 +152,7 @@ pub const Vm = struct {
                     const str = try vm.getString(module);
 
                     A_val.* = .{
-                        .kind = .{
-                            .Str = str,
-                        },
+                        .str = str,
                     };
                 },
                 .Add => {
@@ -171,12 +161,10 @@ pub const Vm = struct {
                     const C_val = try vm.getNum(module);
 
                     // TODO https://github.com/ziglang/zig/issues/3234 on all of these
-                    const copy = Value{
-                        .kind = if (needNum(B_val, C_val))
-                            .{ .Num = asNum(B_val) + asNum(C_val) }
-                        else
-                            .{ .Int = B_val.kind.Int + C_val.kind.Int },
-                    };
+                    const copy: Value = if (needNum(B_val, C_val))
+                        .{ .num = asNum(B_val) + asNum(C_val) }
+                    else
+                        .{ .int = B_val.int + C_val.int };
                     A_val.* = copy;
                 },
                 .Sub => {
@@ -184,12 +172,10 @@ pub const Vm = struct {
                     const B_val = try vm.getNum(module);
                     const C_val = try vm.getNum(module);
 
-                    const copy = Value{
-                        .kind = if (needNum(B_val, C_val))
-                            .{ .Num = asNum(B_val) - asNum(C_val) }
-                        else
-                            .{ .Int = B_val.kind.Int - C_val.kind.Int },
-                    };
+                    const copy: Value = if (needNum(B_val, C_val))
+                        .{ .num = asNum(B_val) - asNum(C_val) }
+                    else
+                        .{ .int = B_val.int - C_val.int };
                     A_val.* = copy;
                 },
                 .Mul => {
@@ -197,12 +183,10 @@ pub const Vm = struct {
                     const B_val = try vm.getNum(module);
                     const C_val = try vm.getNum(module);
 
-                    const copy = Value{
-                        .kind = if (needNum(B_val, C_val))
-                            .{ .Num = asNum(B_val) * asNum(C_val) }
-                        else
-                            .{ .Int = B_val.kind.Int * C_val.kind.Int },
-                    };
+                    const copy: Value = if (needNum(B_val, C_val))
+                        .{ .num = asNum(B_val) * asNum(C_val) }
+                    else
+                        .{ .int = B_val.int * C_val.int };
                     A_val.* = copy;
                 },
                 .Pow => {
@@ -210,12 +194,10 @@ pub const Vm = struct {
                     const B_val = try vm.getNum(module);
                     const C_val = try vm.getNum(module);
 
-                    const copy = Value{
-                        .kind = if (needNum(B_val, C_val))
-                            .{ .Num = std.math.pow(f64, asNum(B_val), asNum(C_val)) }
-                        else
-                            .{ .Int = std.math.powi(i64, B_val.kind.Int, C_val.kind.Int) catch @panic("TODO: overflow") },
-                    };
+                    const copy: Value = if (needNum(B_val, C_val))
+                        .{ .num = std.math.pow(f64, asNum(B_val), asNum(C_val)) }
+                    else
+                        .{ .int = std.math.powi(i64, B_val.int, C_val.int) catch @panic("TODO: overflow") };
                     A_val.* = copy;
                 },
                 .DivFloor => {
@@ -223,12 +205,10 @@ pub const Vm = struct {
                     const B_val = try vm.getNum(module);
                     const C_val = try vm.getNum(module);
 
-                    const copy = Value{
-                        .kind = if (needNum(B_val, C_val))
-                            .{ .Int = @floatToInt(i64, @divFloor(asNum(B_val), asNum(C_val))) }
-                        else
-                            .{ .Int = @divFloor(B_val.kind.Int, C_val.kind.Int) },
-                    };
+                    const copy: Value = if (needNum(B_val, C_val))
+                        .{ .int = @floatToInt(i64, @divFloor(asNum(B_val), asNum(C_val))) }
+                    else
+                        .{ .int = @divFloor(B_val.int, C_val.int) };
                     A_val.* = copy;
                 },
                 .Div => {
@@ -236,9 +216,7 @@ pub const Vm = struct {
                     const B_val = try vm.getNum(module);
                     const C_val = try vm.getNum(module);
 
-                    const copy = Value{
-                        .kind = .{ .Num = asNum(B_val) / asNum(C_val) },
-                    };
+                    const copy = Value{ .num = asNum(B_val) / asNum(C_val) };
                     A_val.* = copy;
                 },
                 .Mod => {
@@ -246,12 +224,10 @@ pub const Vm = struct {
                     const B_val = try vm.getNum(module);
                     const C_val = try vm.getNum(module);
 
-                    const copy = Value{
-                        .kind = if (needNum(B_val, C_val))
-                            .{ .Num = @rem(asNum(B_val), asNum(C_val)) }
-                        else
-                            .{ .Int = std.math.rem(i64, B_val.kind.Int, C_val.kind.Int) catch @panic("TODO: overflow") },
-                    };
+                    const copy: Value = if (needNum(B_val, C_val))
+                        .{ .num = @rem(asNum(B_val), asNum(C_val)) }
+                    else
+                        .{ .int = std.math.rem(i64, B_val.int, C_val.int) catch @panic("TODO: overflow") };
                     A_val.* = copy;
                 },
                 .BoolAnd => {
@@ -291,9 +267,7 @@ pub const Vm = struct {
                     const B_val = try vm.getInt(module);
 
                     A_val.* = .{
-                        .kind = .{
-                            .Int = ~B_val,
-                        },
+                        .int = ~B_val,
                     };
                 },
                 .BitAnd => {
@@ -302,9 +276,7 @@ pub const Vm = struct {
                     const C_val = try vm.getInt(module);
 
                     A_val.* = .{
-                        .kind = .{
-                            .Int = B_val & C_val,
-                        },
+                        .int = B_val & C_val,
                     };
                 },
                 .BitOr => {
@@ -313,9 +285,7 @@ pub const Vm = struct {
                     const C_val = try vm.getInt(module);
 
                     A_val.* = .{
-                        .kind = .{
-                            .Int = B_val | C_val,
-                        },
+                        .int = B_val | C_val,
                     };
                 },
                 .BitXor => {
@@ -324,9 +294,7 @@ pub const Vm = struct {
                     const C_val = try vm.getInt(module);
 
                     A_val.* = .{
-                        .kind = .{
-                            .Int = B_val ^ C_val,
-                        },
+                        .int = B_val ^ C_val,
                     };
                 },
                 .Equal => {
@@ -351,7 +319,7 @@ pub const Vm = struct {
                     const bool_val = if (needNum(B_val, C_val))
                         asNum(B_val) < asNum(C_val)
                     else
-                        B_val.kind.Int < C_val.kind.Int;
+                        B_val.int < C_val.int;
 
                     A_ref.* = if (bool_val) &Value.True else &Value.False;
                 },
@@ -363,7 +331,7 @@ pub const Vm = struct {
                     const bool_val = if (needNum(B_val, C_val))
                         asNum(B_val) <= asNum(C_val)
                     else
-                        B_val.kind.Int <= C_val.kind.Int;
+                        B_val.int <= C_val.int;
 
                     A_ref.* = if (bool_val) &Value.True else &Value.False;
                 },
@@ -375,7 +343,7 @@ pub const Vm = struct {
                     const bool_val = if (needNum(B_val, C_val))
                         asNum(B_val) > asNum(C_val)
                     else
-                        B_val.kind.Int > C_val.kind.Int;
+                        B_val.int > C_val.int;
 
                     A_ref.* = if (bool_val) &Value.True else &Value.False;
                 },
@@ -387,7 +355,7 @@ pub const Vm = struct {
                     const bool_val = if (needNum(B_val, C_val))
                         asNum(B_val) >= asNum(C_val)
                     else
-                        B_val.kind.Int >= C_val.kind.Int;
+                        B_val.int >= C_val.int;
 
                     A_ref.* = if (bool_val) &Value.True else &Value.False;
                 },
@@ -396,8 +364,8 @@ pub const Vm = struct {
                     const B_val = try vm.getVal(module);
                     const C_val = try vm.getVal(module);
 
-                    switch (C_val.kind) {
-                        .Str, .Tuple, .List, .Map, .Range => {},
+                    switch (C_val.*) {
+                        .str, .tuple, .list, .map, .range => {},
                         else => return vm.reportErr("invalid type for 'in'"),
                     }
 
@@ -412,9 +380,7 @@ pub const Vm = struct {
                         return vm.reportErr("shift by negative amount");
                     const val = if (C_val > std.math.maxInt(u6)) 0 else B_val << @intCast(u6, C_val);
                     A_val.* = .{
-                        .kind = .{
-                            .Int = val,
-                        },
+                        .int = val,
                     };
                 },
                 .RShift => {
@@ -426,28 +392,24 @@ pub const Vm = struct {
                         return vm.reportErr("shift by negative amount");
                     const val = if (C_val > std.math.maxInt(u6)) 0 else B_val >> @intCast(u6, C_val);
                     A_val.* = .{
-                        .kind = .{
-                            .Int = val,
-                        },
+                        .int = val,
                     };
                 },
                 .Negate => {
                     const A_val = try vm.getNewVal(module);
                     const B_val = try vm.getNum(module);
 
-                    const copy = Value{
-                        .kind = if (B_val.kind == .Num)
-                            .{ .Num = -B_val.kind.Num }
-                        else
-                            .{ .Int = -B_val.kind.Int },
-                    };
+                    const copy: Value = if (B_val.* == .num)
+                        .{ .num = -B_val.num }
+                    else
+                        .{ .int = -B_val.int };
                     A_val.* = copy;
                 },
                 .Try => {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getVal(module);
 
-                    if (B_val.kind != .Error) {
+                    if (B_val.* != .err) {
                         A_ref.* = B_val;
                         continue;
                     }
@@ -495,7 +457,7 @@ pub const Vm = struct {
                     const A_val = try vm.getVal(module);
                     const addr = vm.getArg(module, u32);
 
-                    if (A_val.kind != .Error) {
+                    if (A_val.* != .err) {
                         vm.ip += addr;
                     }
                 },
@@ -503,7 +465,7 @@ pub const Vm = struct {
                     const A_val = try vm.getVal(module);
                     const addr = vm.getArg(module, u32);
 
-                    if (A_val.kind == .None) {
+                    if (A_val.* == .none) {
                         vm.ip += addr;
                     }
                 },
@@ -511,24 +473,24 @@ pub const Vm = struct {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getVal(module);
 
-                    A_ref.* = try B_val.iterator(vm);
+                    A_ref.* = try Value.iterator(B_val, vm);
                 },
                 .IterNext => {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getVal(module);
 
-                    if (B_val.kind != .Iterator)
+                    if (B_val.* != .iterator)
                         return error.MalformedByteCode;
 
-                    try B_val.kind.Iterator.next(vm, A_ref);
+                    try B_val.iterator.next(vm, A_ref);
                 },
                 .UnwrapError => {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getVal(module);
 
-                    if (B_val.kind != .Error)
+                    if (B_val.* != .err)
                         return vm.reportErr("expected an error");
-                    A_ref.* = B_val.kind.Error;
+                    A_ref.* = B_val.err;
                 },
                 .Import => {
                     const A_ref = try vm.getRef(module);
@@ -541,16 +503,14 @@ pub const Vm = struct {
                     const str = try vm.getString(module);
 
                     A_val.* = .{
-                        .kind = .{
-                            .Native = vm.native_registry.map.getValue(str) orelse
-                                return vm.reportErr("native function not registered"),
-                        },
+                        .native = vm.native_registry.map.getValue(str) orelse
+                            return vm.reportErr("native function not registered"),
                     };
                 },
                 .Discard => {
                     const A_val = try vm.getVal(module);
 
-                    if (A_val.kind == .Error) {
+                    if (A_val.* == .err) {
                         return vm.reportErr("error discarded");
                     }
                     if (vm.options.repl and vm.call_stack.len == 0) {
@@ -570,11 +530,9 @@ pub const Vm = struct {
                     }
 
                     A_val.* = .{
-                        .kind = .{
-                            .Tuple = .{
-                                .values = vals,
-                                .allocator = vm.allocator,
-                            },
+                        .tuple = .{
+                            .values = vals,
+                            .allocator = vm.allocator,
                         },
                     };
                 },
@@ -584,14 +542,12 @@ pub const Vm = struct {
                     const arg_count = vm.getArg(module, u16);
 
                     A_val.* = .{
-                        .kind = .{
-                            .List = try Value.List.initCapacity(vm.allocator, arg_count),
-                        },
+                        .list = try Value.List.initCapacity(vm.allocator, arg_count),
                     };
 
                     var i: u32 = 0;
                     while (i < arg_count) : (i += 1) {
-                        A_val.kind.List.append(vm.gc.stackGet(B + vm.sp + i) catch
+                        A_val.list.append(vm.gc.stackGet(B + vm.sp + i) catch
                             return error.MalformedByteCode) catch unreachable;
                     }
                 },
@@ -602,13 +558,10 @@ pub const Vm = struct {
 
                     if (arg_count & 1 != 0) return error.MalformedByteCode;
                     A_val.* = .{
-                        .kind = .{
-                            .Map = Value.Map.init(vm.allocator),
-                        },
+                        .map = Value.Map.init(vm.allocator),
                     };
 
-                    const map = &A_val.kind.Map;
-                    try map.ensureCapacity(arg_count);
+                    try A_val.map.ensureCapacity(arg_count);
 
                     // TODO maps lists and tuples need to be initialized differently or
                     // we'll quickly run out of registers.
@@ -618,7 +571,7 @@ pub const Vm = struct {
                             return error.MalformedByteCode;
                         const val = vm.gc.stackGet(B + vm.sp + i + 1) catch
                             return error.MalformedByteCode;
-                        _ = try map.put(key, val);
+                        _ = try A_val.map.put(key, val);
                     }
                 },
                 .BuildError => {
@@ -626,9 +579,7 @@ pub const Vm = struct {
                     const B_val = try vm.getVal(module);
 
                     A_val.* = .{
-                        .kind = .{
-                            .Error = B_val,
-                        },
+                        .err = B_val,
                     };
                 },
                 .BuildFn => {
@@ -638,14 +589,12 @@ pub const Vm = struct {
                     const offset = vm.getArg(module, u32);
 
                     A_val.* = .{
-                        .kind = .{
-                            .Fn = .{
-                                .arg_count = arg_count,
-                                .offset = offset,
-                                .module = module,
-                                .allocator = vm.allocator,
-                                .captures = try vm.allocator.alloc(*Value, captures),
-                            },
+                        .func = .{
+                            .arg_count = arg_count,
+                            .offset = offset,
+                            .module = module,
+                            .allocator = vm.allocator,
+                            .captures = try vm.allocator.alloc(*Value, captures),
                         },
                     };
                 },
@@ -669,12 +618,12 @@ pub const Vm = struct {
                 .As => {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getVal(module);
-                    const type_id = vm.getArg(module, Value.TypeId);
+                    const type_id = vm.getArg(module, bog.Type);
 
                     // Value.as will hit unreachable on invalid type_id
                     switch (type_id) {
-                        .None, .Int, .Num, .Bool, .Str, .Tuple, .Map, .List => {},
-                        .Error, .Range, .Fn, .Native, .Iterator => return error.MalformedByteCode,
+                        .none, .int, .num, .bool, .str, .tuple, .map, .list => {},
+                        .err, .range, .func, .native, .iterator => return error.MalformedByteCode,
                         _ => return error.MalformedByteCode,
                     }
 
@@ -683,11 +632,11 @@ pub const Vm = struct {
                 .Is => {
                     const A_ref = try vm.getRef(module);
                     const B_val = try vm.getVal(module);
-                    const type_id = vm.getArg(module, Value.TypeId);
+                    const type_id = vm.getArg(module, bog.Type);
 
                     switch (type_id) {
-                        .None, .Int, .Num, .Bool, .Str, .Tuple, .Map, .List, .Error, .Range, .Fn => {},
-                        .Iterator, .Native => return error.MalformedByteCode,
+                        .none, .int, .num, .bool, .str, .tuple, .map, .list, .err, .range, .func => {},
+                        .iterator, .native => return error.MalformedByteCode,
                         _ => return error.MalformedByteCode,
                     }
 
@@ -699,32 +648,30 @@ pub const Vm = struct {
                     const C = vm.getArg(module, RegRef);
                     const arg_count = vm.getArg(module, u16);
 
-                    if (B_val.kind == .Native) {
-                        const native = B_val.kind.Native;
+                    if (B_val.* == .native) {
                         // TODO see note comment in native.zig
-                        // if (native.arg_count != arg_count) {
+                        // if (B_val.native.arg_count != arg_count) {
                         //     // TODO improve this error message to tell the expected and given counts
                         //     return vm.reportErr("unexpected arg count");
                         // }
 
-                        const args = vm.gc.stack.span()[vm.sp + C ..][0..arg_count];
+                        const args = vm.gc.stack.items[vm.sp + C ..][0..arg_count];
                         for (args) |arg| {
                             if (arg == null)
                                 return error.MalformedByteCode;
                         }
 
-                        const ret_val = try native.func(vm, @bitCast([]*Value, args));
+                        const ret_val = try B_val.native.func(vm, @bitCast([]*Value, args));
                         const ret_ref = try vm.gc.stackRef(vm.sp + A);
                         ret_ref.* = ret_val;
                         continue;
                     }
 
-                    if (B_val.kind != .Fn) {
+                    if (B_val.* != .func) {
                         return vm.reportErr("attempt to call non function type");
                     }
-                    const func = B_val.kind.Fn;
 
-                    if (func.arg_count != arg_count) {
+                    if (B_val.func.arg_count != arg_count) {
                         // TODO improve this error message to tell the expected and given counts
                         return vm.reportErr("unexpected arg count");
                     }
@@ -739,12 +686,12 @@ pub const Vm = struct {
                         .line_loc = vm.line_loc,
                         .ret_reg = A,
                         .module = mod,
-                        .captures = func.captures,
+                        .captures = B_val.func.captures,
                         .this = vm.last_get,
                     });
                     vm.sp += C;
-                    vm.ip = func.offset;
-                    module = func.module;
+                    vm.ip = B_val.func.offset;
+                    module = B_val.func.module;
                 },
                 .Return => {
                     const A_val = try vm.getVal(module);
@@ -800,11 +747,10 @@ pub const Vm = struct {
                     const B_val = try vm.getVal(module);
                     const n = vm.getArg(module, u8);
 
-                    if (A_val.kind != .Fn) return error.MalformedByteCode;
-                    const func = A_val.kind.Fn;
-                    if (n >= func.captures.len) return error.MalformedByteCode;
+                    if (A_val.* != .func) return error.MalformedByteCode;
+                    if (n >= A_val.func.captures.len) return error.MalformedByteCode;
 
-                    func.captures[n] = B_val;
+                    A_val.func.captures[n] = B_val;
                 },
                 .LoadThis => {
                     const A_ref = try vm.getRef(module);
@@ -910,25 +856,25 @@ pub const Vm = struct {
     fn getBool(vm: *Vm, module: *Module) !bool {
         const val = try vm.getVal(module);
 
-        if (val.kind != .Bool) {
+        if (val.* != .bool) {
             return vm.reportErr("expected a boolean");
         }
-        return val.kind.Bool;
+        return val.bool;
     }
 
     fn getInt(vm: *Vm, module: *Module) !i64 {
         const val = try vm.getVal(module);
 
-        if (val.kind != .Int) {
+        if (val.* != .int) {
             return vm.reportErr("expected an integer");
         }
-        return val.kind.Int;
+        return val.int;
     }
 
     fn getIntRef(vm: *Vm, module: *Module) !*Value {
         const val = try vm.getVal(module);
 
-        if (val.kind != .Int) {
+        if (val.* != .int) {
             return vm.reportErr("expected an integer");
         }
         return val;
@@ -937,20 +883,20 @@ pub const Vm = struct {
     fn getNum(vm: *Vm, module: *Module) !*Value {
         const val = try vm.getVal(module);
 
-        if (val.kind != .Int and val.kind != .Num) {
+        if (val.* != .int and val.* != .num) {
             return vm.reportErr("expected a number");
         }
         return val;
     }
 
     fn needNum(a: *Value, b: *Value) bool {
-        return a.kind == .Num or b.kind == .Num;
+        return a.* == .num or b.* == .num;
     }
 
     fn asNum(val: *Value) f64 {
-        return switch (val.kind) {
-            .Int => |v| @intToFloat(f64, v),
-            .Num => |v| v,
+        return switch (val.*) {
+            .int => |v| @intToFloat(f64, v),
+            .num => |v| v,
             else => unreachable,
         };
     }

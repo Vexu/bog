@@ -3,7 +3,7 @@ const mem = std.mem;
 const Allocator = mem.Allocator;
 const bog = @import("bog.zig");
 const Node = bog.Node;
-const TypeId = bog.Value.TypeId;
+const Type = bog.Type;
 
 // TODO give these numbers once they are more stable
 pub const Op = enum(u8) {
@@ -480,7 +480,7 @@ pub const Module = struct {
                 .Is, .As => {
                     const arg_1 = module.getArg(RegRef, &ip);
                     const arg_2 = module.getArg(RegRef, &ip);
-                    const arg_3 = module.getArg(TypeId, &ip);
+                    const arg_3 = module.getArg(Type, &ip);
                     try stream.print(" #{} #{} id:{}\n", .{ arg_1, arg_2, @tagName(arg_3) });
                 },
 
@@ -598,7 +598,7 @@ pub const Module = struct {
                 .LineInfo => ip += @sizeOf(u32),
 
                 // A B TYPEID
-                .Is, .As => ip += @sizeOf(RegRef) * 2 + @sizeOf(TypeId),
+                .Is, .As => ip += @sizeOf(RegRef) * 2 + @sizeOf(Type),
 
                 // A
                 .Discard, .Return, .LoadThis => ip += @sizeOf(RegRef),

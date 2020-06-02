@@ -79,9 +79,7 @@ fn getRet(vm: *Vm, val: var) Vm.Error!*Value {
             // assume val was allocated with vm.gc
             const str = try vm.gc.alloc();
             str.* = .{
-                .kind = .{
-                    .Str = val,
-                },
+                .str = val,
             };
             return str;
         },
@@ -92,15 +90,11 @@ fn getRet(vm: *Vm, val: var) Vm.Error!*Value {
                 // wrap error string
                 const str = try vm.gc.alloc();
                 str.* = .{
-                    .kind = .{
-                        .Str = @errorName(e),
-                    },
+                    .str = @errorName(e),
                 };
                 const err = try vm.gc.alloc();
                 err.* = .{
-                    .kind = .{
-                        .Error = str,
-                    },
+                    .err = str,
                 };
                 return err;
             },
@@ -112,43 +106,43 @@ fn getRet(vm: *Vm, val: var) Vm.Error!*Value {
 fn getArg(comptime T: type, vm: *Vm, val: *Value) Vm.Error!T {
     return switch (T) {
         void => {
-            if (val.kind != .None)
+            if (val.* != .none)
                 return vm.reportErr("expected none");
         },
         bool => blk: {
-            if (val.kind != .Bool)
+            if (val.* != .bool)
                 return vm.reportErr("expected bool");
-            break :blk val.kind.Bool;
+            break :blk val.bool;
         },
         []const u8 => blk: {
-            if (val.kind != .Str)
+            if (val.* != .str)
                 return vm.reportErr("expected num");
-            break :blk val.kind.Str;
+            break :blk val.str;
         },
         *Vm => vm,
         *Value, *const Value => val,
         else => blk: {
             switch (@typeInfo(T)) {
-                .Int => if (val.kind == .Int) {
+                .Int => if (val.* == .int) {
                     // TODO make this safe
-                    break :blk @intCast(T, val.kind.Int);
-                } else if (val.kind == .Num) {
-                    break :blk @intCast(T, @floatToInt(i64, val.kind.Num));
+                    break :blk @intCast(T, val.int);
+                } else if (val.* == .num) {
+                    break :blk @intCast(T, @floatToInt(i64, val.num));
                 } else {
                     return vm.reportErr("expected int");
                 },
                 .Float => |info| switch (info.bits) {
-                    32 => if (val.kind == .Num) {
-                        break :blk @floatCast(f32, val.kind.Num);
-                    } else if (val.kind == .Int) {
-                        break :blk @intToFloat(f32, val.kind.Int);
+                    32 => if (val.* == .num) {
+                        break :blk @floatCast(f32, val.num);
+                    } else if (val.* == .int) {
+                        break :blk @intToFloat(f32, val.int);
                     } else {
                         return vm.reportErr("expected num");
                     },
-                    64 => if (val.kind == .Num) {
-                        break :blk val.kind.Num;
-                    } else if (val.kind == .Int) {
-                        break :blk @intToFloat(f64, val.kind.Int);
+                    64 => if (val.* == .num) {
+                        break :blk val.num;
+                    } else if (val.* == .int) {
+                        break :blk @intToFloat(f64, val.int);
                     } else {
                         return vm.reportErr("expected num");
                     },

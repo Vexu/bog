@@ -99,7 +99,7 @@ const Repl = struct {
 
         const res = try repl.vm.exec(&repl.module);
         if (res) |some| {
-            if (some.kind == .None) return;
+            if (some.* == .none) return;
             try some.dump(out_stream, 2);
             try out_stream.writeByte('\n');
         }
