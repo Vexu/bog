@@ -71,5 +71,42 @@ const Page = struct {
     old: BitMap(bit_map_size),
     young: BitMap(bit_map_size),
 
-    vals: [val_count]Value,
+    values: [val_count]Value,
+
+    fn create(allocator: *Allocator) !*Page {
+        const page = try allocator.create(Page);
+        mem.set(usize, mem.asBytes(page));
+        return page;
+    }
+
+    fn deinit(page: *Page, allocator: *Allocator) void {
+        allocator.destroy(page);
+    }
 };
+
+const Gc = @This();
+
+pages: std.ArrayList(*Page),
+
+const PageAndIndex = struct {
+    page: *Page,
+    index: usize,
+};
+
+fn findInPage(gc: *Gc, value: *Value) PageAndIndex {
+    for (gc.pages.items) |page| {
+        // is the value before this page
+        if (@ptrToInt(value) < @ptrToInt(page)) continue;
+        // is the value after this page
+        if (@ptrToInt(value) > @ptrToInt(page) + @sizeOf(Page)) continue;
+
+        // value is in this page
+        return .{
+            .page = page,
+            // calculate index from offset from `Page.values`
+            .index = (@ptrToInt(value) - (@ptrToInt(page) + @byteOffsetOf(Page, values))) / @sizeOf(Value),
+        };
+    }
+
+    unreachable; // value was not allocated by the gc.
+}
