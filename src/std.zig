@@ -16,7 +16,7 @@ pub const io = struct {
         try std.io.getStdOut().outStream().writeAll(prompt);
 
         // TODO properly gc this
-        return try std.io.getStdIn().inStream().readUntilDelimiterAlloc(vm.gc.stack.allocator, '\n', 1024 * 1024);
+        return try std.io.getStdIn().inStream().readUntilDelimiterAlloc(vm.gc.gpa, '\n', 1024 * 1024);
     }
 
     pub fn register(reg: *Registry) !void {

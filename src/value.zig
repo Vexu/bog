@@ -114,13 +114,15 @@ pub const Value = union(Type) {
     pub var True = Value{ .bool = true };
     pub var False = Value{ .bool = false };
 
+    /// Frees any extra memory allocated by value.
+    /// Does not free values recursively.
     pub fn deinit(value: *Value) void {
         switch (value.*) {
             .int, .num, .none, .bool, .native => {},
             .tuple => |*t| t.allocator.free(t.values),
             .map => |*m| m.deinit(),
             .list => |*l| l.deinit(),
-            .err => |*e| e.deinit(),
+            .err => |e| e.deinit(),
             .range => |*r| {
                 r.begin.deinit();
                 r.end.deinit();

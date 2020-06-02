@@ -44,9 +44,6 @@ pub const Vm = struct {
         /// can files be imported
         import_files: bool = false,
 
-        /// Should gc default to using page_allocator
-        gc_page_allocator: bool = true,
-
         /// run vm in repl mode
         repl: bool = false,
 
@@ -72,16 +69,16 @@ pub const Vm = struct {
         MalformedByteCode,
     } || Allocator.Error;
 
-    pub fn init(allocator: *Allocator, options: Options) !Vm {
-        return Vm{
+    pub fn init(allocator: *Allocator, options: Options) Vm {
+        return .{
             .ip = 0,
             .sp = 0,
-            .gc = try Gc.init(if (options.gc_page_allocator) std.heap.page_allocator else allocator),
+            .gc = Gc.init(allocator),
             .call_stack = CallStack.init(allocator),
             .errors = Errors.init(allocator),
             .options = options,
             .allocator = allocator,
-            .native_registry = try bog.native.Registry.init(allocator),
+            .native_registry = bog.native.Registry.init(allocator),
             .imported_modules = std.StringHashMap(*Module).init(allocator),
         };
     }

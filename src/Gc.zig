@@ -79,14 +79,19 @@ const Page = struct {
         return page;
     }
 
-    fn deinit(page: *Page, allocator: *Allocator) void {
-        allocator.destroy(page);
+    fn deinit(page: *Page, gc: *Gc) void {
+        for (page.values) |*val| {
+            val.deinit();
+        }
+        std.heap.page_allocator.destroy(page);
     }
 };
 
 const Gc = @This();
 
-pages: std.ArrayList(*Page),
+pages: std.ArrayListUnmanaged(*Page),
+stack: std.ArrayListUnmanaged(?*Value),
+gpa: *Allocator,
 
 const PageAndIndex = struct {
     page: *Page,
@@ -109,4 +114,60 @@ fn findInPage(gc: *Gc, value: *Value) PageAndIndex {
     }
 
     unreachable; // value was not allocated by the gc.
+}
+
+pub fn init(allocator: *Allocator) Gc {
+    return .{
+        .pages = .{},
+        .stack = .{},
+        .gpa = allocator,
+    };
+}
+
+/// Frees all values and their allocations.
+pub fn deinit(gc: *Gc) void {
+    for (gc.pages.items) |page| page.deinit(gc);
+    gc.pages.deinit(gc.gpa);
+    gc.stack.deinit(gc.gpa);
+}
+
+/// Allocate a new Value on the heap.
+pub fn alloc(gc: *Gc) !*Value {
+    @panic("TODO");
+}
+
+/// Get value from stack at `index`.
+/// Returns `error.NullPtrDeref` if stack has no value at `index`.
+pub fn stackGet(gc: *Gc, index: usize) !*Value {
+    if (index > gc.stack.items.len)
+        return error.NullPtrDeref;
+
+    return gc.stack.items[index] orelse
+        error.NullPtrDeref;
+}
+
+/// Only valid until next `stackAlloc` call.
+pub fn stackRef(gc: *Gc, index: usize) !*?*Value {
+    while (index >= gc.stack.items.len) {
+        try gc.stack.append(gc.gpa, null);
+    }
+    return &gc.stack.items[index];
+}
+
+/// Allocates new value on stack, invalidates all references to stack values.
+pub fn stackAlloc(gc: *Gc, index: usize) !*Value {
+    const val = try gc.stackRef(index);
+    if (val.* == null or
+        val.*.?.* == .none or
+        val.*.?.* == .bool)
+    {
+        val.* = try gc.alloc();
+    }
+    return val.*.?;
+}
+
+/// Shrinks stack to `size`, doesn't free any memory.
+pub fn stackShrink(gc: *Gc, size: usize) void {
+    if (size > gc.stack.items.len) return;
+    gc.stack.items = gc.stack.items[0..size];
 }

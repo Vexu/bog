@@ -9,11 +9,10 @@ pub const Registry = struct {
     map: std.StringHashMap(Native),
 
     // initializes registry and registers all builtin functions
-    pub fn init(allocator: *Allocator) Allocator.Error!Registry {
-        var reg = Registry{
+    pub fn init(allocator: *Allocator) Registry {
+        return .{
             .map = std.StringHashMap(Native).init(allocator),
         };
-        return reg;
     }
 
     pub fn deinit(self: *Registry) void {

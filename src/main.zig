@@ -67,7 +67,7 @@ fn run(alloc: *std.mem.Allocator, args: [][]const u8) !void {
         bytecode = true;
     }
 
-    var vm = try bog.Vm.init(alloc, .{ .import_files = true });
+    var vm = bog.Vm.init(alloc, .{ .import_files = true });
     defer vm.deinit();
     try bog.std.registerAll(&vm.native_registry);
 
