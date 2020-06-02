@@ -7,190 +7,210 @@ const Type = bog.Type;
 
 // TODO give these numbers once they are more stable
 pub const Op = enum(u8) {
-    /// A <- B
-    Move,
+    move_double,
+    copy_double,
 
-    /// A = COPY(B)
-    Copy,
-
-    /// DISCARD(A)
-    Discard,
+    discard_single,
 
     /// A = CAPTURE(arg1)
-    LoadCapture,
+    load_capture_double,
 
     /// CAPTURE(A, arg1) = B
-    StoreCapture,
+    store_capture_double,
 
-    /// A = THIS
-    LoadThis,
+    load_this_single,
 
-    /// A = PRIMITIVE(arg1)
-    /// 0 = ()
-    /// 1 = false
-    /// 2 = true
-    ConstPrimitive,
+    const_primitive,
 
     /// A = INT(arg1)
-    ConstInt8,
-    ConstInt32,
-    ConstInt64,
+    const_int,
 
-    /// A = STRING(arg1)
-    ConstString,
+    /// A = NUM(arg1, arg2)
+    const_num,
+    const_string_off,
+    import_off,
 
-    /// A = NUM(arg1)
-    ConstNum,
+    div_floor_triple,
+    div_triple,
+    mul_triple,
+    pow_triple,
+    mod_triple,
+    add_triple,
+    sub_triple,
 
-    /// A = B // C
-    DivFloor,
+    l_shift_triple,
+    r_shift_triple,
+    bit_and_triple,
+    bit_or_triple,
+    bit_xor_triple,
+    bit_not_double,
 
-    /// A = B / C
-    Div,
+    equal_triple,
+    not_equal_triple,
+    less_than_triple,
+    less_than_equal_triple,
+    greater_than_triple,
+    greater_than_equal_triple,
+    in_triple,
 
-    /// A = B * C
-    Mul,
+    bool_and_triple,
+    bool_or_triple,
+    bool_not_double,
 
-    /// A = B ** C
-    Pow,
-
-    /// A = B % C
-    Mod,
-
-    /// A = B + C
-    Add,
-
-    /// A = B - C
-    Sub,
-
-    /// A = B << C
-    LShift,
-
-    /// A = B << C
-    RShift,
-
-    /// A = B & C
-    BitAnd,
-
-    /// A = B | C
-    BitOr,
-
-    /// A = B ^ C
-    BitXor,
-
-    /// A = B == C
-    Equal,
-
-    /// A = B != C
-    NotEqual,
-
-    /// A = B < C
-    LessThan,
-
-    /// A = B <= C
-    LessThanEqual,
-
-    /// A = B > C
-    GreaterThan,
-
-    /// A = B >= C
-    GreaterThanEqual,
-
-    /// A = B in C
-    In,
-
-    /// A = B and C
-    BoolAnd,
-
-    /// A = B or C
-    BoolOr,
-
-    /// A = not B
-    BoolNot,
-
-    /// A = ~B
-    BitNot,
-
-    /// A = -B
-    Negate,
-
+    negate_double,
+    iter_init_double,
+    iter_next_double,
+    unwrap_error_double,
     /// IF (B==error) RET B ELSE A = B
-    Try,
+    try_double,
 
-    /// A = B[C]
-    Get,
+    /// res = lhs[rhs]
+    get_triple,
 
-    /// A[B] = C
-    Set,
-
-    /// A = error(B)
-    BuildError,
-
-    /// A = (B, B + 1, ... B + N)
-    BuildTuple,
-
-    /// A = [B, B + 1, ... B + N]
-    BuildList,
-
-    /// A = Fn(arg_count, captures, offset)
-    BuildFn,
-
-    /// A = NATIVE(arg1)
-    BuildNative,
-
-    /// A = {B: B + 1, B + 2: ... N - 1: N}
-    BuildMap,
+    /// res[lhs] = rhs
+    set_triple,
+    build_error_double,
+    build_tuple_off,
+    build_list_off,
+    build_map_off,
+    build_native_off,
+    build_func,
 
     /// ip = arg1
-    Jump,
+    jump,
 
     /// if (A) ip = arg1
-    JumpTrue,
+    jump_true,
 
     /// if (not A) ip = arg1
-    JumpFalse,
+    jump_false,
 
     /// if (not A is error) ip = arg1
-    JumpNotError,
+    jump_not_error,
 
     /// if (A is none) ip = arg1
-    JumpNone,
+    jump_none,
 
-    /// A = B.iterator()
-    IterInit,
+    is_type_id,
+    as_type_id,
 
-    /// A = B.next()
-    IterNext,
+    call,
 
-    /// error(A) = B
-    UnwrapError,
+    /// RETURN(arg)
+    return_single,
 
-    /// A = IMPORT(arg1)
-    Import,
-
-    /// A = B is TYPEID
-    Is,
-
-    /// A = B as TYPEID
-    As,
-
-    /// A = B(C, C + 1, ... C + N)
-    Call,
-
-    /// 0 = A
-    Return,
-
-    /// 0 = ()
-    ReturnNone,
+    /// RETURN(())
+    return_none,
 
     /// TODO better debug info
-    LineInfo,
+    line_info,
 
     _,
 };
 
-// TODO optimize size of this
-pub const RegRef = u16;
+/// All integers are little endian
+pub const Instruction = packed union {
+    bare: u32,
+    bare_signed: i32,
+    op: packed struct {
+        op: Op,
+        __pad1: u8,
+        __pad2: u8,
+        __pad3: u8,
+    },
+    single: packed struct {
+        op: Op,
+        arg: RegRef,
+        __pad: u16 = 0,
+    },
+    double: packed struct {
+        op: Op,
+        res: RegRef,
+        arg: RegRef,
+        __pad: u8 = 0,
+    },
+    triple: packed struct {
+        op: Op,
+        res: RegRef,
+        lhs: RegRef,
+        rhs: RegRef,
+    },
+    type_id: packed struct {
+        op: Op,
+        res: RegRef,
+        b: RegRef,
+        type_id: Type,
+    },
+    off: packed struct {
+        op: Op,
+        res: RegRef,
+        off: u16,
+
+        inline fn isArg(self: *@This()) bool {
+            return self.off == 0xFFFF;
+        }
+    },
+    primitive: packed struct {
+        op: Op,
+        res: u8,
+        primitive: packed enum(u8) {
+            none = 0,
+            True = 1,
+            False = 2,
+            _,
+        },
+        __pad: u8 = 0,
+    },
+    int: packed struct {
+        op: Op,
+        res: RegRef,
+        /// if true arg is given as two instructions
+        long: bool,
+        arg: u15,
+    },
+    func: packed struct {
+        op: Op,
+        res: RegRef,
+        arg_count: u8,
+        capture_count: u8,
+
+        // followed by an offset
+    },
+    jump: packed struct {
+        op: Op,
+        kind: packed enum(u8) {
+            immediate = 0,
+            bare = 1,
+            _,
+        },
+        off: i16,
+    },
+    jump_arg: packed struct {
+        op: Op,
+        arg: RegRef,
+        off: u16,
+
+        inline fn isArg(self: *@This()) bool {
+            return self.off == 0xFFFF;
+        }
+    },
+    call: packed struct {
+        /// A = B(C, C + 1, ... C + N)
+        op: Op,
+        res: RegRef,
+        func: RegRef,
+        first: RegRef,
+
+        // followed by a bare instruction with arg count
+        // TODO max 32 args, reduce waste of space
+    },
+
+    comptime {
+        std.debug.assert(@sizeOf(Instruction) == @sizeOf(u32));
+    }
+};
+
+pub const RegRef = u8;
 
 /// A self contained Bog module with its code and strings.
 pub const Module = struct {
