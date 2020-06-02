@@ -8,82 +8,72 @@ const Value = bog.Value;
 //! A generational non-moving garbage collector.
 //! Inspired by https://www.pllab.riec.tohoku.ac.jp/papers/icfp2011UenoOhoriOtomoAuthorVersion.pdf
 
-/// Simple bit map, `size` bytes big, has set and get,
-fn BitMap(comptime size: usize) type {
-    return struct {
-        bytes: [size]u8,
-
-        const Self = @This();
-
-        fn get(self: Self, index: usize) bool {
-            return self.bytes[index / 8] >> @truncate(u3, index % 8) & 1 != 0;
-        }
-
-        fn set(self: *Self, index: usize, val: bool) void {
-            if (val) {
-                self.bytes[index / 8] |= (@as(u8, 1) << @truncate(u3, index % 8));
-            } else {
-                self.bytes[index / 8] &= ~(@as(u8, 1) << @truncate(u3, index % 8));
-            }
-        }
-    };
-}
-
-test "bitmap" {
-    var map: BitMap(64) = undefined;
-    mem.set(u8, mem.asBytes(&map), 0);
-
-    const max = 64 * 8;
-
-    var i: usize = 0;
-    while (i < max) : (i += 1) {
-        std.testing.expect(map.get(i) == false);
-        if (i & 1 == 0) map.set(i, true);
-    }
-
-    i = 0;
-    while (i < max) : (i += 1) {
-        const expect = i & 1 == 0;
-        std.testing.expect(map.get(i) == expect);
-    }
-}
-
 /// A pool of values prefixed with a header containing two bitmaps for
 /// the old and young generation.
 const Page = struct {
+    const max_size = 1_048_576;
     comptime {
         // 2^20, 1 MiB
-        assert(@sizeOf(Page) == 1_048_576);
+        assert(@sizeOf(Page) == max_size);
     }
-
-    const bit_map_size = blk: {
+    const val_count = blk: {
         const v = @sizeOf(Value);
-        const max_size = 1_048_576;
 
-        var n = 2000;
-        while (n * 3 + n * 8 * v < max_size) : (n += 1) {}
+        var n = 18300;
+        @setEvalBranchQuota(4000);
+        while (n + n * v < max_size) : (n += 1) {}
 
         break :blk n - 1;
     };
-    const val_count = bit_map_size * 8;
+    const pad_size = std.math.clamp(max_size - (@sizeOf(Value) + 1) * val_count - @sizeOf(u32) * 2, 0, max_size);
 
-    free: BitMap(bit_map_size),
-    old: BitMap(bit_map_size),
-    young: BitMap(bit_map_size),
+    const State = enum(u8) {
+        empty,
+        white,
+        gray,
+        black,
+    };
 
+    /// States of all values.
+    meta: [val_count]State,
+    /// Number of free slots in this page.
+    free: u32,
+
+    /// Padding to ensure size is 1 MiB.
+    __padding: [pad_size]u8 = @compileError("do not initiate directly"),
+
+    /// Actual values, all pointers will stay valid as long as they are
+    /// referenced from a root.
     values: [val_count]Value,
 
-    fn create(allocator: *Allocator) !*Page {
-        const page = try allocator.create(Page);
-        mem.set(usize, mem.asBytes(page));
+    fn create() !*Page {
+        const page = try std.heap.page_allocator.create(Page);
+        mem.set(usize, mem.bytesAsSlice(usize, mem.asBytes(page)), 0);
+        page.free = val_count;
         return page;
     }
 
     fn deinit(page: *Page, gc: *Gc) void {
-        for (page.values) |*val| {
-            val.deinit();
+        for (page.meta) |s, i| {
+            if (s == .empty) continue;
+            page.values[i].deinit();
         }
         std.heap.page_allocator.destroy(page);
+    }
+
+    fn alloc(page: *Page) ?*Value {
+        if (page.free < 0) return null;
+
+        for (page.meta) |s, i| {
+            if (s != .empty) continue;
+
+            page.meta[i] = .white;
+            page.free -= 1;
+            return &page.values[i];
+        }
+
+        // checked at start
+        unreachable;
     }
 };
 
@@ -133,7 +123,20 @@ pub fn deinit(gc: *Gc) void {
 
 /// Allocate a new Value on the heap.
 pub fn alloc(gc: *Gc) !*Value {
-    @panic("TODO");
+    if (gc.pages.items.len == 0) {
+        const page = try Page.create();
+        errdefer page.deinit(gc);
+        try gc.pages.append(gc.gpa, page);
+
+        // we just created this page so it is empty.
+        return page.alloc() orelse unreachable;
+    }
+
+    for (gc.pages.items) |page| {
+        if (page.alloc()) |some| return some;
+    }
+
+    @panic("TODO collect");
 }
 
 /// Get value from stack at `index`.

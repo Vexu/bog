@@ -651,7 +651,6 @@ pub const Vm = struct {
                         //     // TODO improve this error message to tell the expected and given counts
                         //     return vm.reportErr("unexpected arg count");
                         // }
-
                         const args = vm.gc.stack.items[vm.sp + C ..][0..arg_count];
                         for (args) |arg| {
                             if (arg == null)
