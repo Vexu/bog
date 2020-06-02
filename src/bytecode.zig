@@ -12,11 +12,11 @@ pub const Op = enum(u8) {
 
     discard_single,
 
-    /// A = CAPTURE(arg1)
+    /// res = CAPTURE(arg)
     load_capture_double,
 
-    /// CAPTURE(A, arg1) = B
-    store_capture_double,
+    /// CAPTURE(res, lhs) = rhs
+    store_capture_triple,
 
     load_this_single,
 
@@ -138,7 +138,7 @@ pub const Instruction = packed union {
     type_id: packed struct {
         op: Op,
         res: RegRef,
-        b: RegRef,
+        arg: RegRef,
         type_id: Type,
     },
     off: packed struct {
@@ -153,7 +153,7 @@ pub const Instruction = packed union {
     primitive: packed struct {
         op: Op,
         res: u8,
-        primitive: packed enum(u8) {
+        kind: packed enum(u8) {
             none = 0,
             True = 1,
             False = 2,
@@ -180,7 +180,7 @@ pub const Instruction = packed union {
         op: Op,
         kind: packed enum(u8) {
             immediate = 0,
-            bare = 1,
+            arg = 1,
             _,
         },
         off: i16,
@@ -215,7 +215,7 @@ pub const RegRef = u8;
 /// A self contained Bog module with its code and strings.
 pub const Module = struct {
     name: []const u8,
-    code: []const u8,
+    code: []const Instruction,
     strings: []const u8,
     entry: u32,
     // debug_info,
@@ -231,7 +231,7 @@ pub const Module = struct {
     pub const magic = "\x7fbog";
 
     /// Current bytecode version.
-    pub const bytecode_version = 1;
+    pub const bytecode_version = 2;
 
     /// The header of a Bog bytecode file.
     /// All integer values are little-endian.
@@ -261,6 +261,9 @@ pub const Module = struct {
 
         /// This version of Bog cannot execute this bytecode.
         UnsupportedVersion,
+
+        /// Code sections length is not a multiple of 4.
+        MalformedCode,
     };
 
     /// Reads a module from memory.
@@ -291,10 +294,14 @@ pub const Module = struct {
         if (src.len < header.code)
             return error.InvalidHeader;
 
+        const code = src[header.code..];
+        if (code.len % @sizeOf(Instruction) != 0)
+            return error.InvalidHeader;
+
         return Module{
             .name = "",
             .strings = src[header.strings..header.code],
-            .code = src[header.code..],
+            .code = mem.bytesAsSlice(Instruction, code),
             // entry is offset to to the beginning of code
             .entry = header.entry - header.code,
         };
@@ -321,7 +328,7 @@ pub const Module = struct {
         try stream.writeAll(module.strings);
 
         // write code
-        try stream.writeAll(module.code);
+        try stream.writeAll(mem.sliceAsBytes(module.code));
     }
 
     /// Pretty prints debug info about the module.

@@ -9,6 +9,9 @@ const Module = bog.Module;
 const Gc = bog.Gc;
 const Errors = bog.Errors;
 
+// TODO move this constant to a more appropriate place
+const max_args_call = 32;
+
 pub const Vm = struct {
     /// Instruction pointer
     ip: usize,
@@ -100,314 +103,301 @@ pub const Vm = struct {
         const start_len = vm.call_stack.len;
         var module = mod;
         while (vm.ip < module.code.len) {
-            const op = @intToEnum(Op, vm.getArg(module, u8));
-            switch (op) {
-                .ConstInt8 => {
-                    const A_val = try vm.getNewVal(module);
-                    const val = vm.getArg(module, i8);
+            const inst = module.code[vm.ip];
+            vm.ip += 1;
 
-                    A_val.* = .{
-                        .int = val,
+            switch (inst.op.op) {
+                .const_int => {
+                    const res = try vm.getNewVal(module, inst.int.res);
+
+                    res.* = if (inst.int.long).{
+                        .int = try vm.getLong(module, i64),
+                    } else .{
+                        .int = inst.int.arg,
+                    };
+
+                },
+                .const_num => {
+                    const res = try vm.getNewVal(module, inst.op.res);
+
+                    res.* = .{
+                        .num = try vm.getLong(module, f64),
                     };
                 },
-                .ConstInt32 => {
-                    const A_val = try vm.getNewVal(module);
-                    const val = vm.getArg(module, i32);
-
-                    A_val.* = .{
-                        .int = val,
+                .const_primitive => {
+                    const res = try vm.getRef(module, inst.primitive.res);
+                    
+                    res.* = switch (inst.primitive.kind) {
+                        .none => &Value.None,
+                        .True => &Value.True,
+                        .False => &Value.False,
+                        _ => return error.MalformedByteCode,
                     };
                 },
-                .ConstInt64 => {
-                    const A_val = try vm.getNewVal(module);
-                    const val = vm.getArg(module, i64);
+                .const_string_off => {
+                    const res = try vm.getNewVal(module, inst.off.res);
+                    const str = try vm.getString(module, inst);
 
-                    A_val.* = .{
-                        .int = val,
-                    };
-                },
-                .ConstNum => {
-                    const A_val = try vm.getNewVal(module);
-                    const val = vm.getArg(module, f64);
-
-                    A_val.* = .{
-                        .num = val,
-                    };
-                },
-                .ConstPrimitive => {
-                    const A_ref = try vm.getRef(module);
-                    const val = vm.getArg(module, u8);
-
-                    if (val == 0) {
-                        A_ref.* = &Value.None;
-                    } else {
-                        A_ref.* = if (val == 2) &Value.True else &Value.False;
-                    }
-                },
-                .ConstString => {
-                    const A_val = try vm.getNewVal(module);
-                    const str = try vm.getString(module);
-
-                    A_val.* = .{
+                    res.* = .{
                         .str = str,
                     };
                 },
-                .Add => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getNum(module);
-                    const C_val = try vm.getNum(module);
+                .add_triple => {
+                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const lhs = try vm.getNum(module, inst.triple.lhs);
+                    const rhs = try vm.getNum(module, inst.triple.rhs);
 
                     // TODO https://github.com/ziglang/zig/issues/3234 on all of these
-                    const copy: Value = if (needNum(B_val, C_val))
-                        .{ .num = asNum(B_val) + asNum(C_val) }
+                    const copy: Value = if (needNum(lhs, rhs))
+                        .{ .num = asNum(lhs) + asNum(rhs) }
                     else
-                        .{ .int = B_val.int + C_val.int };
-                    A_val.* = copy;
+                        .{ .int = lhs.int + rhs.int };
+                    res.* = copy;
                 },
-                .Sub => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getNum(module);
-                    const C_val = try vm.getNum(module);
+                .sub_triple => {
+                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const lhs = try vm.getNum(module, inst.triple.lhs);
+                    const rhs = try vm.getNum(module, inst.triple.rhs);
 
-                    const copy: Value = if (needNum(B_val, C_val))
-                        .{ .num = asNum(B_val) - asNum(C_val) }
+                    const copy: Value = if (needNum(lhs, rhs))
+                        .{ .num = asNum(lhs) - asNum(rhs) }
                     else
-                        .{ .int = B_val.int - C_val.int };
-                    A_val.* = copy;
+                        .{ .int = lhs.int - rhs.int };
+                    res.* = copy;
                 },
-                .Mul => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getNum(module);
-                    const C_val = try vm.getNum(module);
+                .mul_triple => {
+                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const lhs = try vm.getNum(module, inst.triple.lhs);
+                    const rhs = try vm.getNum(module, inst.triple.rhs);
 
-                    const copy: Value = if (needNum(B_val, C_val))
-                        .{ .num = asNum(B_val) * asNum(C_val) }
+                    const copy: Value = if (needNum(lhs, rhs))
+                        .{ .num = asNum(lhs) * asNum(rhs) }
                     else
-                        .{ .int = B_val.int * C_val.int };
-                    A_val.* = copy;
+                        .{ .int = lhs.int * rhs.int };
+                    res.* = copy;
                 },
-                .Pow => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getNum(module);
-                    const C_val = try vm.getNum(module);
+                .pow_triple => {
+                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const lhs = try vm.getNum(module, inst.triple.lhs);
+                    const rhs = try vm.getNum(module, inst.triple.rhs);
 
-                    const copy: Value = if (needNum(B_val, C_val))
-                        .{ .num = std.math.pow(f64, asNum(B_val), asNum(C_val)) }
+                    const copy: Value = if (needNum(lhs, rhs))
+                        .{ .num = std.math.pow(f64, asNum(lhs), asNum(rhs)) }
                     else
-                        .{ .int = std.math.powi(i64, B_val.int, C_val.int) catch @panic("TODO: overflow") };
-                    A_val.* = copy;
+                        .{ .int = std.math.powi(i64, lhs.int, rhs.int) catch @panic("TODO: overflow") };
+                    res.* = copy;
                 },
-                .DivFloor => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getNum(module);
-                    const C_val = try vm.getNum(module);
+                .div_floor_triple => {
+                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const lhs = try vm.getNum(module, inst.triple.lhs);
+                    const rhs = try vm.getNum(module, inst.triple.rhs);
 
-                    const copy: Value = if (needNum(B_val, C_val))
-                        .{ .int = @floatToInt(i64, @divFloor(asNum(B_val), asNum(C_val))) }
+                    const copy: Value = if (needNum(lhs, rhs))
+                        .{ .int = @floatToInt(i64, @divFloor(asNum(lhs), asNum(rhs))) }
                     else
-                        .{ .int = @divFloor(B_val.int, C_val.int) };
-                    A_val.* = copy;
+                        .{ .int = @divFloor(lhs.int, rhs.int) };
+                    res.* = copy;
                 },
-                .Div => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getNum(module);
-                    const C_val = try vm.getNum(module);
+                .div_triple => {
+                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const lhs = try vm.getNum(module, inst.triple.lhs);
+                    const rhs = try vm.getNum(module, inst.triple.rhs);
 
-                    const copy = Value{ .num = asNum(B_val) / asNum(C_val) };
-                    A_val.* = copy;
+                    const copy = Value{ .num = asNum(lhs) / asNum(rhs) };
+                    res.* = copy;
                 },
-                .Mod => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getNum(module);
-                    const C_val = try vm.getNum(module);
+                .mod_triple => {
+                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const lhs = try vm.getNum(module, inst.triple.lhs);
+                    const rhs = try vm.getNum(module, inst.triple.rhs);
 
-                    const copy: Value = if (needNum(B_val, C_val))
-                        .{ .num = @rem(asNum(B_val), asNum(C_val)) }
+                    const copy: Value = if (needNum(lhs, rhs))
+                        .{ .num = @rem(asNum(lhs), asNum(rhs)) }
                     else
-                        .{ .int = std.math.rem(i64, B_val.int, C_val.int) catch @panic("TODO: overflow") };
-                    A_val.* = copy;
+                        .{ .int = std.math.rem(i64, lhs.int, rhs.int) catch @panic("TODO: overflow") };
+                    res.* = copy;
                 },
-                .BoolAnd => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getBool(module);
-                    const C_val = try vm.getBool(module);
+                .bool_and_triple => {
+                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const lhs = try vm.getBool(module, inst.triple.lhs);
+                    const rhs = try vm.getBool(module, inst.triple.rhs);
 
-                    A_ref.* = if (B_val and C_val) &Value.True else &Value.False;
+                    res.* = if (lhs and rhs) &Value.True else &Value.False;
                 },
-                .BoolOr => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getBool(module);
-                    const C_val = try vm.getBool(module);
+                .bool_or_triple => {
+                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const lhs = try vm.getBool(module, inst.triple.lhs);
+                    const rhs = try vm.getBool(module, inst.triple.rhs);
 
-                    A_ref.* = if (B_val or C_val) &Value.True else &Value.False;
+                    res.* = if (lhs or rhs) &Value.True else &Value.False;
                 },
-                .Move => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getVal(module);
+                .move_double => {
+                    const res = try vm.getRef(module, inst.double.res);
+                    const arg = try vm.getVal(module, inst.double.arg);
 
-                    A_ref.* = B_val;
+                    res.* = arg;
                 },
-                .Copy => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getVal(module);
+                .copy_double => {
+                    const res = try vm.getNewVal(module, inst.double.res);
+                    const arg = try vm.getVal(module, inst.double.arg);
 
-                    A_val.* = B_val.*;
+                    res.* = arg.*;
                 },
-                .BoolNot => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getBool(module);
+                .bool_not_double => {
+                    const res = try vm.getRef(module, inst.double.res);
+                    const arg = try vm.getBool(module, inst.double.arg);
 
-                    A_ref.* = if (B_val) &Value.False else &Value.True;
+                    res.* = if (arg) &Value.False else &Value.True;
                 },
-                .BitNot => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getInt(module);
+                .bit_not_double => {
+                    const res = try vm.getNewVal(module, inst.double.res);
+                    const arg = try vm.getInt(module, inst.double.arg);
 
-                    A_val.* = .{
-                        .int = ~B_val,
+                    res.* = .{
+                        .int = ~arg,
                     };
                 },
-                .BitAnd => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getInt(module);
-                    const C_val = try vm.getInt(module);
+                .bit_and_triple => {
+                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const lhs = try vm.getInt(module, inst.triple.lhs);
+                    const rhs = try vm.getInt(module, inst.triple.rhs);
 
-                    A_val.* = .{
-                        .int = B_val & C_val,
+                    res.* = .{
+                        .int = lhs & rhs,
                     };
                 },
-                .BitOr => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getInt(module);
-                    const C_val = try vm.getInt(module);
+                .bit_or_triple => {
+                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const lhs = try vm.getInt(module, inst.triple.lhs);
+                    const rhs = try vm.getInt(module, inst.triple.rhs);
 
-                    A_val.* = .{
-                        .int = B_val | C_val,
+                    res.* = .{
+                        .int = lhs | rhs,
                     };
                 },
-                .BitXor => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getInt(module);
-                    const C_val = try vm.getInt(module);
+                .bit_xor_triple => {
+                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const lhs = try vm.getInt(module, inst.triple.lhs);
+                    const rhs = try vm.getInt(module, inst.triple.rhs);
 
-                    A_val.* = .{
-                        .int = B_val ^ C_val,
+                    res.* = .{
+                        .int = lhs ^ rhs,
                     };
                 },
-                .Equal => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getVal(module);
-                    const C_val = try vm.getVal(module);
+                .equal_triple => {
+                    const res = try vm.getRef(module, inst.triple.res);
+                    const lhs = try vm.getVal(module, inst.triple.lhs);
+                    const rhs = try vm.getVal(module, inst.triple.rhs);
 
-                    A_ref.* = if (B_val.eql(C_val)) &Value.True else &Value.False;
+                    res.* = if (lhs.eql(rhs)) &Value.True else &Value.False;
                 },
-                .NotEqual => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getVal(module);
-                    const C_val = try vm.getVal(module);
+                .not_equal_triple => {
+                    const res = try vm.getRef(module, inst.triple.res);
+                    const lhs = try vm.getVal(module, inst.triple.lhs);
+                    const rhs = try vm.getVal(module, inst.triple.rhs);
 
-                    A_ref.* = if (B_val.eql(C_val)) &Value.False else &Value.True;
+                    res.* = if (lhs.eql(rhs)) &Value.False else &Value.True;
                 },
-                .LessThan => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getNum(module);
-                    const C_val = try vm.getNum(module);
+                .less_than_triple => {
+                    const res = try vm.getRef(module, inst.triple.res);
+                    const lhs = try vm.getNum(module, inst.triple.lhs);
+                    const rhs = try vm.getNum(module, inst.triple.rhs);
 
-                    const bool_val = if (needNum(B_val, C_val))
-                        asNum(B_val) < asNum(C_val)
+                    const bool_val = if (needNum(lhs, rhs))
+                        asNum(lhs) < asNum(rhs)
                     else
-                        B_val.int < C_val.int;
+                        lhs.int < rhs.int;
 
-                    A_ref.* = if (bool_val) &Value.True else &Value.False;
+                    res.* = if (bool_val) &Value.True else &Value.False;
                 },
-                .LessThanEqual => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getNum(module);
-                    const C_val = try vm.getNum(module);
+                .less_than_equal_triple => {
+                    const res = try vm.getRef(module, inst.triple.res);
+                    const lhs = try vm.getNum(module, inst.triple.lhs);
+                    const rhs = try vm.getNum(module, inst.triple.rhs);
 
-                    const bool_val = if (needNum(B_val, C_val))
-                        asNum(B_val) <= asNum(C_val)
+                    const bool_val = if (needNum(lhs, rhs))
+                        asNum(lhs) <= asNum(rhs)
                     else
-                        B_val.int <= C_val.int;
+                        lhs.int <= rhs.int;
 
-                    A_ref.* = if (bool_val) &Value.True else &Value.False;
+                    res.* = if (bool_val) &Value.True else &Value.False;
                 },
-                .GreaterThan => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getNum(module);
-                    const C_val = try vm.getNum(module);
+                .greater_than_triple => {
+                    const res = try vm.getRef(module, inst.triple.res);
+                    const lhs = try vm.getNum(module, inst.triple.lhs);
+                    const rhs = try vm.getNum(module, inst.triple.rhs);
 
-                    const bool_val = if (needNum(B_val, C_val))
-                        asNum(B_val) > asNum(C_val)
+                    const bool_val = if (needNum(lhs, rhs))
+                        asNum(lhs) > asNum(rhs)
                     else
-                        B_val.int > C_val.int;
+                        lhs.int > rhs.int;
 
-                    A_ref.* = if (bool_val) &Value.True else &Value.False;
+                    res.* = if (bool_val) &Value.True else &Value.False;
                 },
-                .GreaterThanEqual => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getNum(module);
-                    const C_val = try vm.getNum(module);
+                .greater_than_equal_triple => {
+                    const res = try vm.getRef(module, inst.triple.res);
+                    const lhs = try vm.getNum(module, inst.triple.lhs);
+                    const rhs = try vm.getNum(module, inst.triple.rhs);
 
-                    const bool_val = if (needNum(B_val, C_val))
-                        asNum(B_val) >= asNum(C_val)
+                    const bool_val = if (needNum(lhs, rhs))
+                        asNum(lhs) >= asNum(rhs)
                     else
-                        B_val.int >= C_val.int;
+                        lhs.int >= rhs.int;
 
-                    A_ref.* = if (bool_val) &Value.True else &Value.False;
+                    res.* = if (bool_val) &Value.True else &Value.False;
                 },
-                .In => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getVal(module);
-                    const C_val = try vm.getVal(module);
+                .in_triple => {
+                    const res = try vm.getRef(module, inst.triple.res);
+                    const lhs = try vm.getVal(module, inst.triple.lhs);
+                    const rhs = try vm.getVal(module, inst.triple.rhs);
 
-                    switch (C_val.*) {
+                    switch (rhs.*) {
                         .str, .tuple, .list, .map, .range => {},
                         else => return vm.reportErr("invalid type for 'in'"),
                     }
 
-                    A_ref.* = if (B_val.in(C_val)) &Value.True else &Value.False;
+                    res.* = if (lhs.in(rhs)) &Value.True else &Value.False;
                 },
-                .LShift => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getInt(module);
-                    const C_val = try vm.getInt(module);
+                .l_shift_triple => {
+                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const lhs = try vm.getInt(module, inst.triple.lhs);
+                    const rhs = try vm.getInt(module, inst.triple.rhs);
 
-                    if (C_val < 0)
+                    if (rhs < 0)
                         return vm.reportErr("shift by negative amount");
-                    const val = if (C_val > std.math.maxInt(u6)) 0 else B_val << @intCast(u6, C_val);
-                    A_val.* = .{
+                    const val = if (rhs > std.math.maxInt(u6)) 0 else lhs << @intCast(u6, rhs);
+                    res.* = .{
                         .int = val,
                     };
                 },
-                .RShift => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getInt(module);
-                    const C_val = try vm.getInt(module);
+                .r_shift_triple => {
+                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const lhs = try vm.getInt(module, inst.triple.lhs);
+                    const rhs = try vm.getInt(module, inst.triple.rhs);
 
-                    if (C_val < 0)
+                    if (rhs < 0)
                         return vm.reportErr("shift by negative amount");
-                    const val = if (C_val > std.math.maxInt(u6)) 0 else B_val >> @intCast(u6, C_val);
-                    A_val.* = .{
+                    const val = if (rhs > std.math.maxInt(u6)) 0 else lhs >> @intCast(u6, rhs);
+                    res.* = .{
                         .int = val,
                     };
                 },
-                .Negate => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getNum(module);
+                .negate_double => {
+                    const res = try vm.getNewVal(module, inst.double.res);
+                    const arg = try vm.getNum(module, inst.double.arg);
 
-                    const copy: Value = if (B_val.* == .num)
-                        .{ .num = -B_val.num }
+                    const copy: Value = if (arg.* == .num)
+                        .{ .num = -arg.num }
                     else
-                        .{ .int = -B_val.int };
-                    A_val.* = copy;
+                        .{ .int = -arg.int };
+                    res.* = copy;
                 },
-                .Try => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getVal(module);
+                .try_double => {
+                    const res = try vm.getRef(module, inst.double.res);
+                    const arg = try vm.getVal(module, inst.double.arg);
 
-                    if (B_val.* != .err) {
-                        A_ref.* = B_val;
+                    if (arg.* != .err) {
+                        res.* = arg;
                         continue;
                     }
 
@@ -416,7 +406,7 @@ pub const Vm = struct {
                             vm.gc.stackShrink(0);
                         }
                         // module result
-                        return B_val;
+                        return arg;
                     }
 
                     const frame = vm.call_stack.pop() orelse unreachable;
@@ -428,246 +418,241 @@ pub const Vm = struct {
                     vm.line_loc = frame.line_loc;
 
                     const ret_val = try vm.gc.stackAlloc(vm.sp + frame.ret_reg);
-                    ret_val.* = B_val.*;
+                    ret_val.* = arg.*;
                 },
-                .JumpFalse => {
-                    const A_val = try vm.getBool(module);
-                    const addr = vm.getArg(module, u32);
+                .jump => {
+                    const offset = switch (inst.jump.kind) {
+                        .immediate => inst.jump.off,
+                        .arg => @bitCast(i32, try vm.getSingle(module))
+                        _ => return error.MalformedByteCode,
+                    };
+                    vm.ip = @intCast(usize, @intCast(isize, vm.ip) + offset);
+                },
+                .jump_false => {
+                    const arg = try vm.getBool(module, inst.jump_arg.arg);
+                    const offset = if (inst.jump_arg.isArg())
+                        try vm.getSingle(module)
+                    else
+                        inst.off.off;
 
-                    if (A_val == false) {
+                    if (arg == false) {
                         vm.ip += addr;
                     }
                 },
-                .Jump => {
-                    const addr = vm.getArg(module, i32);
-                    vm.ip = @intCast(usize, @intCast(isize, vm.ip) + addr);
-                },
-                .JumpTrue => {
-                    const A_val = try vm.getBool(module);
-                    const addr = vm.getArg(module, u32);
+                .jump_true => {
+                    const arg = try vm.getBool(module, inst.jump_arg.arg);
+                    const offset = if (inst.jump_arg.isArg())
+                        try vm.getSingle(module)
+                    else
+                        inst.off.off;
 
-                    if (A_val == true) {
+                    if (res == true) {
                         vm.ip += addr;
                     }
                 },
-                .JumpNotError => {
-                    const A_val = try vm.getVal(module);
-                    const addr = vm.getArg(module, u32);
+                .jump_not_error => {
+                    const arg = try vm.getVal(module, inst.jump_arg.arg);
+                    const offset = if (inst.jump_arg.isArg())
+                        try vm.getSingle(module)
+                    else
+                        inst.off.off;
 
-                    if (A_val.* != .err) {
+                    if (arg.* != .err) {
+                        vm.ip += offset;
+                    }
+                },
+                .jump_none => {
+                    const arg = try vm.getVal(module, inst.jump_arg.arg);
+                    const offset = if (inst.jump_arg.isArg())
+                        try vm.getSingle(module)
+                    else
+                        inst.off.off;
+
+                    if (arg.* == .none) {
                         vm.ip += addr;
                     }
                 },
-                .JumpNone => {
-                    const A_val = try vm.getVal(module);
-                    const addr = vm.getArg(module, u32);
+                .iter_init_double => {
+                    const res = try vm.getRef(module, inst.double.res);
+                    const arg = try vm.getVal(module, inst.double.arg);
 
-                    if (A_val.* == .none) {
-                        vm.ip += addr;
-                    }
+                    res.* = try Value.iterator(arg, vm);
                 },
-                .IterInit => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getVal(module);
+                .iter_next_double => {
+                    const res = try vm.getRef(module, inst.double.res);
+                    const arg = try vm.getVal(module, inst.double.arg);
 
-                    A_ref.* = try Value.iterator(B_val, vm);
-                },
-                .IterNext => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getVal(module);
-
-                    if (B_val.* != .iterator)
+                    if (arg.* != .iterator)
                         return error.MalformedByteCode;
 
-                    try B_val.iterator.next(vm, A_ref);
+                    try arg.iterator.next(vm, res);
                 },
-                .UnwrapError => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getVal(module);
+                .unwrap_error_double => {
+                    const res = try vm.getRef(module, inst.double.res);
+                    const arg = try vm.getVal(module, inst.double.arg);
 
-                    if (B_val.* != .err)
+                    if (arg.* != .err)
                         return vm.reportErr("expected an error");
-                    A_ref.* = B_val.err;
+                    res.* = arg.err;
                 },
-                .Import => {
-                    const A_ref = try vm.getRef(module);
-                    const str = try vm.getString(module);
+                .import_off => {
+                    const res = try vm.getNewVal(module, inst.off.res);
+                    const str = try vm.getString(module, inst);
 
-                    A_ref.* = try vm.import(str);
+                    res.* = try vm.import(str);
                 },
-                .BuildNative => {
-                    const A_val = try vm.getNewVal(module);
-                    const str = try vm.getString(module);
+                .discard_single => {
+                    const arg = try vm.getVal(module, inst.single.arg);
 
-                    A_val.* = .{
+                    if (arg.* == .err) {
+                        return vm.reportErr("error discarded");
+                    }
+                    if (vm.options.repl and vm.call_stack.len == 0) {
+                        return arg;
+                    }
+                },
+                .build_native_off => {
+                    const res = try vm.getNewVal(module, inst.off.res);
+                    const str = try vm.getString(module, inst);
+
+                    res.* = .{
                         .native = vm.native_registry.map.getValue(str) orelse
                             return vm.reportErr("native function not registered"),
                     };
                 },
-                .Discard => {
-                    const A_val = try vm.getVal(module);
+                .build_tuple_off => {
+                    const res = try vm.getNewVal(module, inst.off.res);
+                    const size = if (inst.off.isArg())
+                        try vm.getSingle(module)
+                    else
+                        inst.off.off;
 
-                    if (A_val.* == .err) {
-                        return vm.reportErr("error discarded");
-                    }
-                    if (vm.options.repl and vm.call_stack.len == 0) {
-                        return A_val;
-                    }
-                },
-                .BuildTuple => {
-                    const A_val = try vm.getNewVal(module);
-                    const B = vm.getArg(module, RegRef);
-                    const arg_count = vm.getArg(module, u16);
-
-                    const vals = try vm.allocator.alloc(*Value, arg_count);
-                    var i: u32 = 0;
-                    while (i < arg_count) : (i += 1) {
-                        vals[i] = vm.gc.stackGet(B + vm.sp + i) catch
-                            return error.MalformedByteCode;
-                    }
-
-                    A_val.* = .{
+                    res.* = .{
                         .tuple = .{
-                            .values = vals,
-                            .allocator = vm.allocator,
+                            .values = try vm.gc.gpa.alloc(*Value, size),
+                            .allocator = vm.gc.gpa,
                         },
                     };
                 },
-                .BuildList => {
-                    const A_val = try vm.getNewVal(module);
-                    const B = vm.getArg(module, RegRef);
-                    const arg_count = vm.getArg(module, u16);
+                .build_list_off => {
+                    const res = try vm.getNewVal(module, inst.off.res);
+                    const size = if (inst.off.isArg())
+                        try vm.getSingle(module)
+                    else
+                        inst.off.off;
 
-                    A_val.* = .{
-                        .list = try Value.List.initCapacity(vm.allocator, arg_count),
-                    };
-
-                    var i: u32 = 0;
-                    while (i < arg_count) : (i += 1) {
-                        A_val.list.append(vm.gc.stackGet(B + vm.sp + i) catch
-                            return error.MalformedByteCode) catch unreachable;
-                    }
-                },
-                .BuildMap => {
-                    const A_val = try vm.getNewVal(module);
-                    const B = vm.getArg(module, RegRef);
-                    const arg_count = vm.getArg(module, u16);
-
-                    if (arg_count & 1 != 0) return error.MalformedByteCode;
-                    A_val.* = .{
-                        .map = Value.Map.init(vm.allocator),
-                    };
-
-                    try A_val.map.ensureCapacity(arg_count);
-
-                    // TODO maps lists and tuples need to be initialized differently or
-                    // we'll quickly run out of registers.
-                    var i: u32 = 0;
-                    while (i < arg_count) : (i += 2) {
-                        const key = vm.gc.stackGet(B + vm.sp + i) catch
-                            return error.MalformedByteCode;
-                        const val = vm.gc.stackGet(B + vm.sp + i + 1) catch
-                            return error.MalformedByteCode;
-                        _ = try A_val.map.put(key, val);
-                    }
-                },
-                .BuildError => {
-                    const A_val = try vm.getNewVal(module);
-                    const B_val = try vm.getVal(module);
-
-                    A_val.* = .{
-                        .err = B_val,
+                    res.* = .{
+                        .list = Value.List.initCapacity(vm.gc.gpa, size),
                     };
                 },
-                .BuildFn => {
-                    const A_val = try vm.getNewVal(module);
-                    const arg_count = vm.getArg(module, u8);
-                    const captures = vm.getArg(module, u8);
-                    const offset = vm.getArg(module, u32);
+                .build_map_off => {
+                    const res = try vm.getNewVal(module, inst.off.res);
+                    const size = if (inst.off.isArg())
+                        try vm.getSingle(module)
+                    else
+                        inst.off.off;
 
-                    A_val.* = .{
+                    res.* = .{
+                        .map = Value.Map.init(vm.gc.gpa),
+                    };
+                    try res.map.ensureCapacity(size);
+                },
+                .build_error_double => {
+                    const res = try vm.getNewVal(module, inst.double.res);
+                    const arg = try vm.getVal(module, inst.double.arg);
+
+                    res.* = .{
+                        .err = arg,
+                    };
+                },
+                .build_func => {
+                    const res = try vm.getNewVal(module, inst.func.res);
+                    if (inst.func.arg_count > max_args_call)
+                        return error.MalformedByteCode;
+
+                    res.* = .{
                         .func = .{
-                            .arg_count = arg_count,
-                            .offset = offset,
+                            .arg_count = inst.func.arg_count,
+                            .offset = try vm.getSingle(module),
                             .module = module,
                             .allocator = vm.allocator,
-                            .captures = try vm.allocator.alloc(*Value, captures),
+                            .captures = try vm.allocator.alloc(*Value, inst.func.capture_count),
                         },
                     };
                 },
-                .Get => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getVal(module);
-                    const C_val = try vm.getVal(module);
+                .get_triple => {
+                    const res = try vm.getRef(module, inst.triple.res);
+                    const lhs = try vm.getVal(module, inst.triple.lhs);
+                    const rhs = try vm.getVal(module, inst.triple.rhs);
 
-                    try B_val.get(vm, C_val, A_ref);
+                    try lhs.get(vm, rhs, res);
 
                     // this will become the value of `this` for the next function call
-                    vm.last_get = B_val;
+                    vm.last_get = lhs;
                 },
-                .Set => {
-                    const A_val = try vm.getVal(module);
-                    const B_val = try vm.getVal(module);
-                    const C_val = try vm.getVal(module);
+                .set_triple => {
+                    const res = try vm.getVal(module, inst.triple.res);
+                    const lhs = try vm.getVal(module, inst.triple.lhs);
+                    const rhs = try vm.getVal(module, inst.triple.rhs);
 
-                    try A_val.set(vm, B_val, C_val);
+                    try res.set(vm, lhs, rhs);
                 },
-                .As => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getVal(module);
-                    const type_id = vm.getArg(module, bog.Type);
+                .as_type_id => {
+                    const res = try vm.getRef(module, inst.type_id.res);
+                    const arg = try vm.getVal(module, inst.type_id.arg);
 
                     // Value.as will hit unreachable on invalid type_id
-                    switch (type_id) {
+                    switch (inst.type_id.type_id) {
                         .none, .int, .num, .bool, .str, .tuple, .map, .list => {},
                         .err, .range, .func, .native, .iterator => return error.MalformedByteCode,
                         _ => return error.MalformedByteCode,
                     }
 
-                    A_ref.* = try B_val.as(vm, type_id);
+                    res.* = try arg.as(vm, type_id);
                 },
-                .Is => {
-                    const A_ref = try vm.getRef(module);
-                    const B_val = try vm.getVal(module);
-                    const type_id = vm.getArg(module, bog.Type);
+                .is_type_id => {
+                    const res = try vm.getRef(module, inst.type_id.res);
+                    const arg = try vm.getVal(module, inst.type_id.arg);
 
-                    switch (type_id) {
+                    switch (inst.type_id.type_id) {
                         .none, .int, .num, .bool, .str, .tuple, .map, .list, .err, .range, .func => {},
                         .iterator, .native => return error.MalformedByteCode,
                         _ => return error.MalformedByteCode,
                     }
 
-                    A_ref.* = if (B_val.is(type_id)) &Value.True else &Value.False;
+                    res.* = if (arg.is(inst.type_id.type_id)) &Value.True else &Value.False;
                 },
-                .Call => {
-                    const A = vm.getArg(module, RegRef);
-                    const B_val = try vm.getVal(module);
-                    const C = vm.getArg(module, RegRef);
-                    const arg_count = vm.getArg(module, u16);
+                .call => {
+                    const res = inst.call.res;
+                    const func = try vm.getVal(module, inst.call.func);
+                    const first = inst.call.first;
+                    const arg_count = try vm.getSingle(module);
+                    if (arg_count > max_args_call)
+                        return error.MalformedByteCode;
 
-                    if (B_val.* == .native) {
+                    if (func.* == .native) {
                         // TODO see note comment in native.zig
-                        // if (B_val.native.arg_count != arg_count) {
+                        // if (func.native.arg_count != arg_count) {
                         //     // TODO improve this error message to tell the expected and given counts
                         //     return vm.reportErr("unexpected arg count");
                         // }
-                        const args = vm.gc.stack.items[vm.sp + C ..][0..arg_count];
+                        const args = vm.gc.stack.items[vm.sp + first ..][0..arg_count];
                         for (args) |arg| {
                             if (arg == null)
                                 return error.MalformedByteCode;
                         }
 
-                        const ret_val = try B_val.native.func(vm, @bitCast([]*Value, args));
-                        const ret_ref = try vm.gc.stackRef(vm.sp + A);
+                        const ret_val = try func.native.func(vm, @bitCast([]*Value, args));
+                        const ret_ref = try vm.gc.stackRef(vm.sp + res);
                         ret_ref.* = ret_val;
                         continue;
                     }
 
-                    if (B_val.* != .func) {
+                    if (func.* != .func) {
                         return vm.reportErr("attempt to call non function type");
                     }
 
-                    if (B_val.func.arg_count != arg_count) {
+                    if (func.func.arg_count != arg_count) {
                         // TODO improve this error message to tell the expected and given counts
                         return vm.reportErr("unexpected arg count");
                     }
@@ -680,24 +665,24 @@ pub const Vm = struct {
                         .sp = vm.sp,
                         .ip = vm.ip,
                         .line_loc = vm.line_loc,
-                        .ret_reg = A,
+                        .ret_reg = res,
                         .module = mod,
-                        .captures = B_val.func.captures,
+                        .captures = func.func.captures,
                         .this = vm.last_get,
                     });
-                    vm.sp += C;
-                    vm.ip = B_val.func.offset;
-                    module = B_val.func.module;
+                    vm.sp += first;
+                    vm.ip = func.func.offset;
+                    module = func.func.module;
                 },
-                .Return => {
-                    const A_val = try vm.getVal(module);
+                .return_single => {
+                    const arg = try vm.getVal(module, inst.single.arg);
 
                     if (vm.call_stack.len == start_len) {
                         if (start_len == 0) {
                             vm.gc.stackShrink(0);
                         }
                         // module result
-                        return A_val;
+                        return arg;
                     }
 
                     const frame = vm.call_stack.pop() orelse unreachable;
@@ -708,9 +693,9 @@ pub const Vm = struct {
                     vm.line_loc = frame.line_loc;
 
                     const ret_val = try vm.gc.stackAlloc(vm.sp + frame.ret_reg);
-                    ret_val.* = A_val.*;
+                    ret_val.* = arg.*;
                 },
-                .ReturnNone => {
+                .return_none => {
                     if (vm.call_stack.len == start_len) {
                         if (start_len == 0) {
                             vm.gc.stackShrink(0);
@@ -729,35 +714,34 @@ pub const Vm = struct {
                     const ret_val = try vm.gc.stackRef(vm.sp + frame.ret_reg);
                     ret_val.* = &Value.None;
                 },
-                .LoadCapture => {
-                    const A_ref = try vm.getRef(module);
-                    const n = vm.getArg(module, u8);
+                .load_capture_double => {
+                    const res = try vm.getRef(module, inst.double.res);
+                    const arg = inst.double.arg;
 
                     const frame = vm.call_stack.at(vm.call_stack.len - 1);
-                    if (n >= frame.captures.len) return error.MalformedByteCode;
+                    if (arg >= frame.captures.len) return error.MalformedByteCode;
 
-                    A_ref.* = frame.captures[n];
+                    res.* = frame.captures[arg];
                 },
-                .StoreCapture => {
-                    const A_val = try vm.getVal(module);
-                    const B_val = try vm.getVal(module);
-                    const n = vm.getArg(module, u8);
+                .store_capture_double => {
+                    const res = try vm.getVal(module, inst.triple.res);
+                    const lhs = try vm.getVal(module, inst.triple.lhs);
+                    const rhs = inst.triple.rhs;
 
-                    if (A_val.* != .func) return error.MalformedByteCode;
-                    if (n >= A_val.func.captures.len) return error.MalformedByteCode;
+                    if (res.* != .func) return error.MalformedByteCode;
+                    if (rhsn >= res.func.captures.len) return error.MalformedByteCode;
 
-                    A_val.func.captures[n] = B_val;
+                    res.func.captures[rhs] = lhs;
                 },
-                .LoadThis => {
-                    const A_ref = try vm.getRef(module);
+                .load_this_single => {
+                    const res = try vm.getRef(module, inst.single.arg);
 
                     const frame = vm.call_stack.at(vm.call_stack.len - 1);
-                    A_ref.* = frame.this orelse
+                    res.* = frame.this orelse
                         return vm.reportErr("this has not been set");
                 },
-                .LineInfo => {
-                    const line = vm.getArg(module, u32);
-                    vm.line_loc = line;
+                .line_info => {
+                    vm.line_loc = try vm.getSingle(module);
                 },
                 _ => {
                     return error.MalformedByteCode;
@@ -823,34 +807,51 @@ pub const Vm = struct {
         return res orelse &Value.None;
     }
 
-    fn getArg(vm: *Vm, module: *Module, comptime T: type) T {
-        const val = @ptrCast(*align(1) const T, module.code[vm.ip..].ptr).*;
-        vm.ip += @sizeOf(T);
-        return val;
+    fn getSingle(vm: *Vm, module: *Module) !u32 {
+        if (vm.ip + 1 > module.code.len)
+            return error.MalformedByteCode;
+
+        vm.ip += 1;
+        return module.code[vm.ip].bare;
     }
 
-    fn getVal(vm: *Vm, module: *Module) !*Value {
-        return vm.gc.stackGet(vm.getArg(module, RegRef) + vm.sp) catch
+    fn getLong(vm: *Vm, module: *Module, comptime T: type) !T {
+        if (vm.ip + 2 > module.code.len)
+            return error.MalformedByteCode;
+        
+        var arr: [2]u32 = undefined;
+        arr[0] = module.code[vm.ip];
+        arr[1] = module.code[vm.ip + 1];
+        vm.ip += 2;
+        
+        return @ptrCast(*T, &arr).*;
+    }
+
+    fn getVal(vm: *Vm, module: *Module, reg: RegRef) !*Value {
+        return vm.gc.stackGet(vm.sp + reg) catch
             return error.MalformedByteCode;
     }
 
-    fn getRef(vm: *Vm, module: *Module) !*?*Value {
-        return try vm.gc.stackRef(vm.getArg(module, RegRef) + vm.sp);
+    fn getRef(vm: *Vm, module: *Module, reg: RegRef) !*?*Value {
+        return try vm.gc.stackRef(vm.sp + reg);
     }
 
-    fn getNewVal(vm: *Vm, module: *Module) !*Value {
-        return try vm.gc.stackAlloc(vm.getArg(module, RegRef) + vm.sp);
+    fn getNewVal(vm: *Vm, module: *Module, reg: RegRef) !*Value {
+        return try vm.gc.stackAlloc(vm.sp + reg);
     }
 
-    fn getString(vm: *Vm, module: *Module) ![]const u8 {
-        const offset = vm.getArg(module, u32);
+    fn getString(vm: *Vm, module: *Module, inst: bog.Instruction) ![]const u8 {
+        const offset = if (inst.off.isArg())
+            try vm.getSingle(module)
+        else
+            inst.off.off;
 
         const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
         return module.strings[offset + @sizeOf(u32) ..][0..len];
     }
 
-    fn getBool(vm: *Vm, module: *Module) !bool {
-        const val = try vm.getVal(module);
+    fn getBool(vm: *Vm, module: *Module, reg: RegRef) !bool {
+        const val = try vm.getVal(module, reg);
 
         if (val.* != .bool) {
             return vm.reportErr("expected a boolean");
@@ -858,8 +859,8 @@ pub const Vm = struct {
         return val.bool;
     }
 
-    fn getInt(vm: *Vm, module: *Module) !i64 {
-        const val = try vm.getVal(module);
+    fn getInt(vm: *Vm, module: *Module, reg: RegRef) !i64 {
+        const val = try vm.getVal(module, reg);
 
         if (val.* != .int) {
             return vm.reportErr("expected an integer");
@@ -867,8 +868,8 @@ pub const Vm = struct {
         return val.int;
     }
 
-    fn getIntRef(vm: *Vm, module: *Module) !*Value {
-        const val = try vm.getVal(module);
+    fn getIntRef(vm: *Vm, module: *Module, reg: RegRef) !*Value {
+        const val = try vm.getVal(module, reg);
 
         if (val.* != .int) {
             return vm.reportErr("expected an integer");
@@ -876,8 +877,8 @@ pub const Vm = struct {
         return val;
     }
 
-    fn getNum(vm: *Vm, module: *Module) !*Value {
-        const val = try vm.getVal(module);
+    fn getNum(vm: *Vm, module: *Module, reg: RegRef) !*Value {
+        const val = try vm.getVal(module, reg);
 
         if (val.* != .int and val.* != .num) {
             return vm.reportErr("expected a number");
@@ -885,11 +886,11 @@ pub const Vm = struct {
         return val;
     }
 
-    fn needNum(a: *Value, b: *Value) bool {
+    inline fn needNum(a: *Value, b: *Value) bool {
         return a.* == .num or b.* == .num;
     }
 
-    fn asNum(val: *Value) f64 {
+    inline fn asNum(val: *Value) f64 {
         return switch (val.*) {
             .int => |v| @intToFloat(f64, v),
             .num => |v| v,
