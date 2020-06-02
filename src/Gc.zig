@@ -36,7 +36,7 @@ const Page = struct {
 
     /// States of all values.
     meta: [val_count]State,
-    /// Number of free slots in this page.
+    /// Index to the first free slot.
     free: u32,
 
     /// Padding to ensure size is 1 MiB.
@@ -49,7 +49,6 @@ const Page = struct {
     fn create() !*Page {
         const page = try std.heap.page_allocator.create(Page);
         mem.set(usize, mem.bytesAsSlice(usize, mem.asBytes(page)), 0);
-        page.free = val_count;
         return page;
     }
 
@@ -62,18 +61,13 @@ const Page = struct {
     }
 
     fn alloc(page: *Page) ?*Value {
-        if (page.free < 0) return null;
+        while (page.free < page.values.len) {
+            defer page.free += 1;
 
-        for (page.meta) |s, i| {
-            if (s != .empty) continue;
-
-            page.meta[i] = .white;
-            page.free -= 1;
-            return &page.values[i];
+            if (page.meta[page.free] == .empty)
+                return &page.values[page.free];
         }
-
-        // checked at start
-        unreachable;
+        return null;
     }
 };
 
@@ -136,7 +130,8 @@ pub fn alloc(gc: *Gc) !*Value {
         if (page.alloc()) |some| return some;
     }
 
-    @panic("TODO collect");
+    // TODO collect
+    return error.OutOfMemory;
 }
 
 /// Get value from stack at `index`.
