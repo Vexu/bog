@@ -177,22 +177,11 @@ pub const Instruction = packed union {
         // followed by an offset
     },
     jump: packed struct {
-        op: Op = .jump,
-        kind: packed enum(u8) {
-            immediate = 0,
-            arg = 1,
-            _,
-        },
-        off: i16,
-    },
-    jump_arg: packed struct {
         op: Op,
         arg: RegRef,
-        off: u16,
+        __pad: u16 = 0,
 
-        pub inline fn isArg(self: @This()) bool {
-            return self.off == 0xFFFF;
-        }
+        // followed by an offset
     },
     call: packed struct {
         /// A = B(C, C + 1, ... C + N)
@@ -346,178 +335,126 @@ pub const Module = struct {
             if (jumps.getValue(ip)) |label| {
                 try stream.print("\n{}:", .{label});
             }
-            const this_offset = ip;
-            const op = module.getArg(Op, &ip);
-            if (op != .LineInfo) {
-                try stream.print("\n {: <5} {} ", .{ this_offset, @tagName(op) });
+            const inst = module.code[ip];
+            ip += 1;
+            if (inst.op.op != .line_info) {
+                try stream.print("\n {: <5} {: <20} ", .{ ip, @tagName(inst.op.op) });
             }
-            switch (op) {
-                // A i8
-                .ConstPrimitive, .ConstInt8 => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const arg_2 = module.getArg(i8, &ip);
-                    try stream.print(" #{} {}\n", .{ arg_1, arg_2 });
+            switch (inst.op.op) {
+                .const_primitive => {
+                    try stream.print("{} <- ({})\n", .{ inst.primitive.res, inst.primitive.kind });
                 },
-
-                // A u32
-                .JumpTrue, .JumpFalse, .JumpNotError, .JumpNone => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const arg_2 = module.getArg(u32, &ip);
-                    const label = jumps.getValue(ip + arg_2) orelse unreachable;
-                    try stream.print(" #{} {}\n", .{ arg_1, label });
+                .const_int => {
+                    const val = if (inst.int.long) blk: {
+                        ip += 1;
+                        break :blk module.code[ip - 1].bare_signed;
+                    } else inst.int.arg;
+                    try stream.print("{} <- ({})\n", .{ inst.int.res, val });
                 },
-
-                // i32
-                .Jump => {
-                    const arg_1 = module.getArg(i32, &ip);
-                    const label = jumps.getValue(@intCast(usize, @intCast(isize, ip) + arg_1)) orelse unreachable;
-                    try stream.print(" {}\n", .{label});
+                .const_num => {
+                    try stream.print("{} <- ({})\n", .{ inst.op.op, @ptrCast(*align(@alignOf(Instruction)) const f64, &module.code[ip]).* });
+                    ip += 2;
                 },
-
-                // A = Fn(arg_count, captures, offset)
-                .BuildFn => {
-                    const res = module.getArg(RegRef, &ip);
-                    const arg_count = module.getArg(u8, &ip);
-                    const captures = module.getArg(u8, &ip);
-                    const offset = module.getArg(u32, &ip);
-                    const label = jumps.getValue(offset) orelse unreachable;
-                    try stream.print(" #{} {}({})[{}]\n", .{ res, label, arg_count, captures });
-                },
-
-                // A i32
-                .ConstInt32 => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const arg_2 = module.getArg(i32, &ip);
-                    try stream.print(" #{} {}\n", .{ arg_1, arg_2 });
-                },
-
-                // A i64
-                .ConstInt64 => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const arg_2 = module.getArg(i64, &ip);
-                    try stream.print(" #{} {}\n", .{ arg_1, arg_2 });
-                },
-
-                // A STRING(arg1)
-                .Import, .BuildNative, .ConstString => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const offset = module.getArg(u32, &ip);
+                .const_string_off, .build_native_off, .import_off => {
+                    const offset = if (inst.off.isArg()) blk: {
+                        ip += 1;
+                        break :blk module.code[ip - 1].bare;
+                    } else inst.off.off;
 
                     const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
                     const slice = module.strings[offset + @sizeOf(u32) ..][0..len];
-                    try stream.print(" #{} \"{}\"\n", .{ arg_1, slice });
+                    try stream.print("{} <- \"{}\"\n", .{ inst.off.res, slice });
                 },
 
-                // A f64
-                .ConstNum => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const arg_2 = module.getArg(f64, &ip);
-                    try stream.print(" #{} {}\n", .{ arg_1, arg_2 });
+                .jump, .jump_false, .jump_true, .jump_none, .jump_not_error => {
+                    const jump_target = if (inst.jump.op == .jump)
+                        @intCast(usize, @intCast(isize, ip) + module.code[ip].bare_signed)
+                    else
+                        ip + module.code[ip].bare;
+                    ip += 1;
+                    const label = jumps.getValue(jump_target) orelse unreachable;
+
+                    if (inst.jump.op == .jump)
+                        try stream.print("to {}\n", .{label})
+                    else
+                        try stream.print("to {}, cond {}\n", .{ label, inst.jump.arg });
                 },
 
-                // A B C
-                .DivFloor,
-                .Div,
-                .Mul,
-                .Pow,
-                .Mod,
-                .Add,
-                .Sub,
-                .LShift,
-                .RShift,
-                .BitAnd,
-                .BitOr,
-                .BitXor,
-                .Equal,
-                .NotEqual,
-                .LessThan,
-                .LessThanEqual,
-                .GreaterThan,
-                .GreaterThanEqual,
-                .In,
-                .BoolAnd,
-                .BoolOr,
-                .Get,
-                .Set,
+                .build_func => {
+                    const offset = module.code[ip].bare;
+                    ip += 1;
+                    const label = jumps.getValue(offset) orelse unreachable;
+                    try stream.print("{} <- {}({})[{}]\n", .{ inst.func.res, label, inst.func.arg_count, inst.func.capture_count });
+                },
+
+                .div_floor_triple,
+                .div_triple,
+                .mul_triple,
+                .pow_triple,
+                .mod_triple,
+                .add_triple,
+                .sub_triple,
+                .l_shift_triple,
+                .r_shift_triple,
+                .bit_and_triple,
+                .bit_or_triple,
+                .bit_xor_triple,
+                .equal_triple,
+                .not_equal_triple,
+                .less_than_triple,
+                .less_than_equal_triple,
+                .greater_than_triple,
+                .greater_than_equal_triple,
+                .in_triple,
+                .bool_and_triple,
+                .bool_or_triple,
+                .get_triple,
+                .set_triple,
                 => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const arg_2 = module.getArg(RegRef, &ip);
-                    const arg_3 = module.getArg(RegRef, &ip);
-                    try stream.print(" #{} #{} #{}\n", .{ arg_1, arg_2, arg_3 });
+                    try stream.print("{} <- {} op {}\n", .{ inst.triple.res, inst.triple.lhs, inst.triple.rhs });
                 },
 
-                // A B
-                .Move,
-                .Copy,
-                .BoolNot,
-                .BitNot,
-                .Negate,
-                .Try,
-                .BuildError,
-                .UnwrapError,
-                .IterInit,
-                .IterNext,
+                .move_double,
+                .copy_double,
+                .bool_not_double,
+                .bit_not_double,
+                .negate_double,
+                .try_double,
+                .build_error_double,
+                .unwrap_error_double,
+                .iter_init_double,
+                .iter_next_double,
                 => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const arg_2 = module.getArg(RegRef, &ip);
-                    try stream.print(" #{} #{}\n", .{ arg_1, arg_2 });
+                    try stream.print("{} <- op {}\n", .{ inst.double.res, inst.double.arg });
                 },
 
-                // A B u8
-                .StoreCapture => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const arg_2 = module.getArg(RegRef, &ip);
-                    const arg_3 = module.getArg(u8, &ip);
-                    try stream.print(" #{}[{}] = #{}\n", .{ arg_1, arg_3, arg_2 });
+                .store_capture_triple => {
+                    try stream.print("{}[{}] <- {}\n", .{ inst.triple.res, inst.triple.lhs, inst.triple.rhs });
+                },
+                .load_capture_double => {
+                    try stream.print("{} <- [{}]\n", .{ inst.double.res, inst.double.arg });
+                },
+                .build_tuple_off, .build_list_off, .build_map_off => {
+                    const size = if (inst.off.isArg()) blk: {
+                        ip += 1;
+                        break :blk module.code[ip - 1].bare;
+                    } else inst.off.off;
+                    try stream.print("{} <- size:{}\n", .{ inst.off.op, size });
                 },
 
-                // A u8
-                .LoadCapture => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const arg_2 = module.getArg(u8, &ip);
-                    try stream.print(" #{} = [{}]\n", .{ arg_1, arg_2 });
+                .call => {
+                    try stream.print("{} <- {}({}..N:{})\n", .{ inst.call.res, inst.call.func, inst.call.first, module.code[ip] });
+                    ip += 1;
                 },
 
-                // A = (B, B + 1, ... B + N)
-                .BuildTuple,
-                .BuildList,
-                .BuildMap,
-                => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const arg_2 = module.getArg(RegRef, &ip);
-                    const arg_3 = module.getArg(u16, &ip);
-                    try stream.print(" #{} #{} arg_count:{}\n", .{ arg_1, arg_2, arg_3 });
+                .line_info => ip += 1,
+                .is_type_id, .as_type_id => {
+                    try stream.print("{} <- {} op {}\n", .{ inst.type_id.res, inst.type_id.arg, @tagName(inst.type_id.type_id) });
                 },
-
-                // A = B(C, C + 1, ... C + N)
-                .Call => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const arg_2 = module.getArg(RegRef, &ip);
-                    const arg_3 = module.getArg(RegRef, &ip);
-                    const arg_4 = module.getArg(u16, &ip);
-                    try stream.print(" #{} #{} #{} arg_count:{}\n", .{ arg_1, arg_2, arg_3, arg_4 });
+                .discard_single, .return_single, .load_this_single => {
+                    try stream.print("{}\n", .{inst.single.arg});
                 },
-
-                // u32
-                .LineInfo => {
-                    const arg_1 = module.getArg(u32, &ip);
-                },
-
-                // A B TYPEID
-                .Is, .As => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    const arg_2 = module.getArg(RegRef, &ip);
-                    const arg_3 = module.getArg(Type, &ip);
-                    try stream.print(" #{} #{} id:{}\n", .{ arg_1, arg_2, @tagName(arg_3) });
-                },
-
-                // A
-                .Discard, .Return, .LoadThis => {
-                    const arg_1 = module.getArg(RegRef, &ip);
-                    try stream.print(" #{}\n", .{arg_1});
-                },
-
-                .ReturnNone => try stream.writeByte('\n'),
+                .return_none => try stream.writeByte('\n'),
                 _ => unreachable,
             }
         }
@@ -530,116 +467,45 @@ pub const Module = struct {
         var ip: usize = 0;
         var mangle: u32 = 0;
         while (ip < module.code.len) {
-            const op = module.getArg(Op, &ip);
-            switch (op) {
-                // A i8
-                .LoadCapture, .ConstPrimitive, .ConstInt8 => ip += @sizeOf(RegRef) + @sizeOf(i8),
-
-                // A u32
-                .JumpTrue, .JumpFalse, .JumpNotError, .JumpNone, .Jump => {
-                    var jump_target: usize = undefined;
-                    if (op == .Jump) {
-                        const arg = module.getArg(i32, &ip);
-                        jump_target = @intCast(usize, @intCast(isize, ip) + arg);
-                    } else {
-                        ip += @sizeOf(RegRef);
-                        const arg = module.getArg(u32, &ip);
-                        jump_target = ip + arg;
-                    }
+            const inst = module.code[ip];
+            ip += 1;
+            switch (inst.op.op) {
+                .jump, .jump_false, .jump_true, .jump_none, .jump_not_error => {
+                    const jump_target = if (inst.jump.op == .jump)
+                        @intCast(usize, @intCast(isize, ip) + module.code[ip].bare_signed)
+                    else
+                        ip + module.code[ip].bare;
+                    ip += 1;
                     if (map.getValue(jump_target)) |_| continue;
 
-                    _ = try map.put(jump_target, try std.fmt.allocPrint(arena, "{}_{}", .{ @tagName(op), mangle }));
+                    _ = try map.put(jump_target, try std.fmt.allocPrint(arena, "{}_{}", .{ @tagName(inst.op.op), mangle }));
                     mangle += 1;
                 },
 
-                // A = Fn(arg_count, captures, offset)
-                .BuildFn => {
-                    ip += @sizeOf(RegRef) + @sizeOf(u8) * 2;
-                    const offset = module.getArg(u32, &ip);
-
-                    _ = try map.put(offset, try std.fmt.allocPrint(arena, "function_{}", .{mangle}));
+                .build_func => {
+                    _ = try map.put(module.code[ip].bare, try std.fmt.allocPrint(arena, "function_{}", .{mangle}));
                     mangle += 1;
                 },
 
-                // A i32
-                .ConstInt32 => ip += @sizeOf(RegRef) + @sizeOf(i32),
+                .const_int => if (inst.int.long) {
+                    ip += 1;
+                },
+                .const_num => ip += 2,
 
-                // A i64
-                .ConstInt64 => ip += @sizeOf(RegRef) + @sizeOf(i64),
+                .import_off,
+                .build_native_off,
+                .const_string_off,
+                .build_tuple_off,
+                .build_list_off,
+                .build_map_off,
+                => if (inst.off.isArg()) {
+                    ip += 1;
+                },
 
-                // A STRING(arg1)
-                .Import, .BuildNative, .ConstString => ip += @sizeOf(RegRef) + @sizeOf(u32),
-
-                // A f64
-                .ConstNum => ip += @sizeOf(RegRef) + @sizeOf(f64),
-
-                // A B C
-                .DivFloor,
-                .Div,
-                .Mul,
-                .Pow,
-                .Mod,
-                .Add,
-                .Sub,
-                .LShift,
-                .RShift,
-                .BitAnd,
-                .BitOr,
-                .BitXor,
-                .Equal,
-                .NotEqual,
-                .LessThan,
-                .LessThanEqual,
-                .GreaterThan,
-                .GreaterThanEqual,
-                .In,
-                .BoolAnd,
-                .BoolOr,
-                .Get,
-                .Set,
-                => ip += @sizeOf(RegRef) * 3,
-
-                // A B
-                .Move,
-                .Copy,
-                .BoolNot,
-                .BitNot,
-                .Negate,
-                .Try,
-                .BuildError,
-                .UnwrapError,
-                .IterInit,
-                .IterNext,
-                => ip += @sizeOf(RegRef) * 2,
-
-                // A B u8
-                .StoreCapture => ip += @sizeOf(RegRef) * 2 + @sizeOf(u8),
-
-                // A = (B, B + 1, ... B + N)
-                .BuildTuple, .BuildList, .BuildMap => ip += @sizeOf(RegRef) * 2 + @sizeOf(u16),
-
-                // A = B(C, C + 1, ... C + N)
-                .Call => ip += @sizeOf(RegRef) * 3 + @sizeOf(u16),
-
-                // u32
-                .LineInfo => ip += @sizeOf(u32),
-
-                // A B TYPEID
-                .Is, .As => ip += @sizeOf(RegRef) * 2 + @sizeOf(Type),
-
-                // A
-                .Discard, .Return, .LoadThis => ip += @sizeOf(RegRef),
-
-                .ReturnNone => {},
-                _ => unreachable,
+                .line_info, .call => ip += 1,
+                else => {},
             }
         }
         return map;
-    }
-
-    fn getArg(module: Module, comptime T: type, ip: *usize) T {
-        const val = @ptrCast(*align(1) const T, module.code[ip.*..].ptr).*;
-        ip.* += @sizeOf(T);
-        return val;
     }
 };
