@@ -9,8 +9,7 @@ const Module = bog.Module;
 const Gc = bog.Gc;
 const Errors = bog.Errors;
 
-// TODO move this constant to a more appropriate place
-const max_args_call = 32;
+const max_params = @import("compiler.zig").max_params;
 
 pub const Vm = struct {
     /// Instruction pointer
@@ -110,12 +109,9 @@ pub const Vm = struct {
                 .const_int => {
                     const res = try vm.getNewVal(module, inst.int.res);
 
-                    res.* = if (inst.int.long).{
-                        .int = try vm.getLong(module, i64),
-                    } else .{
-                        .int = inst.int.arg,
+                    res.* = .{
+                        .int = if (inst.int.long) try vm.getLong(module, i64) else inst.int.arg,
                     };
-
                 },
                 .const_num => {
                     const res = try vm.getNewVal(module, inst.off.res);
@@ -126,7 +122,7 @@ pub const Vm = struct {
                 },
                 .const_primitive => {
                     const res = try vm.getRef(module, inst.primitive.res);
-                    
+
                     res.* = switch (inst.primitive.kind) {
                         .none => &Value.None,
                         .True => &Value.True,
@@ -421,52 +417,36 @@ pub const Vm = struct {
                     ret_val.* = arg.*;
                 },
                 .jump => {
-                    const offset = switch (inst.jump.kind) {
-                        .immediate => inst.jump.off,
-                        .arg => @bitCast(i32, try vm.getSingle(module)),
-                        _ => return error.MalformedByteCode,
-                    };
+                    const offset = @bitCast(i32, try vm.getSingle(module));
                     vm.ip = @intCast(usize, @intCast(isize, vm.ip) + offset);
                 },
                 .jump_false => {
-                    const arg = try vm.getBool(module, inst.jump_arg.arg);
-                    const offset = if (inst.jump_arg.isArg())
-                        try vm.getSingle(module)
-                    else
-                        inst.off.off;
+                    const arg = try vm.getBool(module, inst.jump.arg);
+                    const offset = try vm.getSingle(module);
 
                     if (arg == false) {
                         vm.ip += offset;
                     }
                 },
                 .jump_true => {
-                    const arg = try vm.getBool(module, inst.jump_arg.arg);
-                    const offset = if (inst.jump_arg.isArg())
-                        try vm.getSingle(module)
-                    else
-                        inst.off.off;
+                    const arg = try vm.getBool(module, inst.jump.arg);
+                    const offset = try vm.getSingle(module);
 
                     if (arg == true) {
                         vm.ip += offset;
                     }
                 },
                 .jump_not_error => {
-                    const arg = try vm.getVal(module, inst.jump_arg.arg);
-                    const offset = if (inst.jump_arg.isArg())
-                        try vm.getSingle(module)
-                    else
-                        inst.off.off;
+                    const arg = try vm.getVal(module, inst.jump.arg);
+                    const offset = try vm.getSingle(module);
 
                     if (arg.* != .err) {
                         vm.ip += offset;
                     }
                 },
                 .jump_none => {
-                    const arg = try vm.getVal(module, inst.jump_arg.arg);
-                    const offset = if (inst.jump_arg.isArg())
-                        try vm.getSingle(module)
-                    else
-                        inst.off.off;
+                    const arg = try vm.getVal(module, inst.jump.arg);
+                    const offset = try vm.getSingle(module);
 
                     if (arg.* == .none) {
                         vm.ip += offset;
@@ -567,7 +547,7 @@ pub const Vm = struct {
                 },
                 .build_func => {
                     const res = try vm.getNewVal(module, inst.func.res);
-                    if (inst.func.arg_count > max_args_call)
+                    if (inst.func.arg_count > max_params)
                         return error.MalformedByteCode;
 
                     res.* = .{
@@ -627,7 +607,7 @@ pub const Vm = struct {
                     const func = try vm.getVal(module, inst.call.func);
                     const first = inst.call.first;
                     const arg_count = try vm.getSingle(module);
-                    if (arg_count > max_args_call)
+                    if (arg_count > max_params)
                         return error.MalformedByteCode;
 
                     if (func.* == .native) {
@@ -812,18 +792,18 @@ pub const Vm = struct {
             return error.MalformedByteCode;
 
         vm.ip += 1;
-        return module.code[vm.ip].bare;
+        return module.code[vm.ip - 1].bare;
     }
 
     fn getLong(vm: *Vm, module: *Module, comptime T: type) !T {
         if (vm.ip + 2 > module.code.len)
             return error.MalformedByteCode;
-        
+
         var arr: [2]bog.Instruction = undefined;
         arr[0] = module.code[vm.ip];
         arr[1] = module.code[vm.ip + 1];
         vm.ip += 2;
-        
+
         return @bitCast(T, arr);
     }
 

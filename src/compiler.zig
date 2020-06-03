@@ -11,6 +11,8 @@ const RegRef = bog.RegRef;
 const Errors = bog.Errors;
 const util = @import("util.zig");
 
+pub const max_params = 32;
+
 pub const Error = error{CompileError} || Allocator.Error;
 
 pub const Compiler = struct {
@@ -81,6 +83,12 @@ pub const Compiler = struct {
         if (long) try self.code.append(.{ .bare = off });
     }
 
+    fn emitJump(self: *Compiler, op: bog.Op, arg: ?RegRef) !u32 {
+        try self.code.append(.{ .jump = .{ .op = op, .arg = arg orelse 0 } });
+        try self.code.append(undefined);
+        return @intCast(u32, self.code.items.len - 1);
+    }
+
     const Scope = struct {
         id: Id,
         parent: ?*Scope,
@@ -144,7 +152,7 @@ pub const Compiler = struct {
                         if (func) |parent| {
                             try parent.captures.push(sym.*);
                             return RegAndMut{
-                                .reg = @truncate(RegRef, parent.captures.len - 1),
+                                .reg = @intCast(RegRef, parent.captures.len - 1),
                                 .mutable = sym.mutable,
                             };
                         }
@@ -167,7 +175,7 @@ pub const Compiler = struct {
                             .double = .{
                                 .op = .load_capture_double,
                                 .res = res,
-                                .arg = @truncate(u8, sym.reg),
+                                .arg = @intCast(u8, sym.reg),
                             },
                         });
                         return RegAndMut{
@@ -181,7 +189,7 @@ pub const Compiler = struct {
                         .double = .{
                             .op = .load_capture_double,
                             .res = res,
-                            .arg = @truncate(u8, sub.reg),
+                            .arg = @intCast(u8, sub.reg),
                         },
                     });
 
@@ -342,7 +350,7 @@ pub const Compiler = struct {
                     .func = .{
                         .res = res,
                         .arg_count = v.params,
-                        .capture_count = @truncate(u8, v.captures.len),
+                        .capture_count = @intCast(u8, v.captures.len),
                     },
                 });
                 try self.code.append(.{ .bare = v.offset });
@@ -353,7 +361,7 @@ pub const Compiler = struct {
                         .store_capture_triple,
                         res,
                         capture.reg,
-                        @truncate(u8, capture_it.index - 1),
+                        @intCast(u8, capture_it.index - 1),
                     );
                 }
             },
@@ -455,7 +463,7 @@ pub const Compiler = struct {
             .name = "",
             .code = compiler.module_code.toOwnedSlice(),
             .strings = compiler.strings.toOwnedSlice(),
-            .entry = @truncate(u32, entry),
+            .entry = @intCast(u32, entry),
         };
         return mod;
     }
@@ -703,7 +711,7 @@ pub const Compiler = struct {
     fn genFn(self: *Compiler, node: *Node.Fn, res: Result) Error!Value {
         try res.notLval(self, node.fn_tok);
 
-        if (node.params.len > std.math.maxInt(u8)) {
+        if (node.params.len > max_params) {
             return self.reportErr("too many parameters", node.fn_tok);
         }
         const param_count = @truncate(u8, node.params.len);
@@ -731,7 +739,7 @@ pub const Compiler = struct {
         self.code = &fn_scope.code;
 
         // destructure parameters
-        self.used_regs = @truncate(RegRef, node.params.len);
+        self.used_regs = param_count;
         var it = node.params.iterator(0);
         var i: RegRef = 0;
         while (it.next()) |n| {
@@ -775,7 +783,7 @@ pub const Compiler = struct {
         self.used_regs = old_used_regs;
         self.code = old_code;
 
-        const offset = @truncate(u32, self.module_code.items.len);
+        const offset = @intCast(u32, self.module_code.items.len);
         try self.module_code.appendSlice(fn_scope.code.items);
 
         const ret_val = Value{
@@ -834,8 +842,7 @@ pub const Compiler = struct {
             // TODO handle cond_val.isRt()
             const cond_reg = try cond_val.toRt(self);
             // jump past if_body if cond == .none
-            try self.emitInstruction(.JumpNone, .{ cond_reg, @as(u32, 0) });
-            if_skip = self.code.items.len;
+            if_skip = try self.emitJump(.jump_none, cond_reg);
 
             self.cur_scope = &capture_scope;
             const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)
@@ -857,8 +864,7 @@ pub const Compiler = struct {
             return res_val.maybeRt(self, res);
         } else {
             // jump past if_body if cond == false
-            try self.emitInstruction(.JumpFalse, .{ cond_val.getRt(), @as(u32, 0) });
-            if_skip = self.code.items.len;
+            if_skip = try self.emitJump(.jump_false, cond_val.getRt());
         }
         const sub_res = switch (res) {
             .rt, .discard => res,
@@ -875,11 +881,10 @@ pub const Compiler = struct {
         }
 
         // jump past else_body since if_body was executed
-        const else_skip_needed = node.else_body != null or sub_res == .rt;
-        if (else_skip_needed) {
-            try self.emitInstruction(.Jump, .{@as(u32, 0)});
-        }
-        const else_skip = self.code.items.len;
+        const else_skip = if (node.else_body != null or sub_res == .rt)
+            try self.emitJump(.jump, null)
+        else
+            null;
 
         self.finishJump(if_skip);
         // end capture scope
@@ -896,8 +901,8 @@ pub const Compiler = struct {
             });
         }
 
-        if (else_skip_needed) {
-            self.finishJump(else_skip);
+        if (else_skip) |some| {
+            self.finishJump(some);
         }
 
         return sub_res.toVal();
@@ -934,12 +939,11 @@ pub const Compiler = struct {
             break :blk @fieldParentPtr(Scope.Loop, "base", scope);
         };
         if (node.op == .Continue) {
-            try self.emitInstruction(.Jump, .{
-                @truncate(i32, -@intCast(isize, self.code.items.len - loop_scope.cond_begin)),
-            });
+            self.code.items[try self.emitJump(.jump, null)] = .{
+                .bare_signed = @intCast(i32, -@intCast(isize, self.code.items.len - loop_scope.cond_begin)),
+            };
         } else {
-            try self.emitInstruction(.Jump, .{@as(u32, 0)});
-            try loop_scope.breaks.push(@intCast(u32, self.code.items.len));
+            try loop_scope.breaks.push(try self.emitJump(.jump, null));
         }
 
         return Value{ .empty = {} };
@@ -968,8 +972,7 @@ pub const Compiler = struct {
             // TODO handle cond_val.isRt()
             const cond_reg = try cond_val.toRt(self);
             // jump past exit loop if cond == .none
-            try self.emitInstruction(.JumpNone, .{ cond_reg, @as(u32, 0) });
-            cond_jump = self.code.items.len;
+            cond_jump = try self.emitJump(.jump_none, cond_reg);
 
             const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)
                 Result{ .lval = .{ .let = &Value{ .rt = cond_reg } } }
@@ -978,8 +981,7 @@ pub const Compiler = struct {
 
             assert((try self.genNode(node.capture.?, lval_res)) == .empty);
         } else if (cond_val.isRt()) {
-            try self.emitInstruction(.JumpFalse, .{ cond_val.getRt(), @as(u32, 0) });
-            cond_jump = self.code.items.len;
+            cond_jump = try self.emitJump(.jump_false, cond_val.getRt());
         } else {
             const bool_val = try cond_val.getBool(self, node.cond.firstToken());
             if (bool_val == false) {
@@ -997,13 +999,13 @@ pub const Compiler = struct {
 
         const body_val = try self.genNode(node.body, sub_res);
         if (sub_res != .rt and body_val.isRt()) {
-            try self.emitSIngle(.discard_single, body_val.getRt());
+            try self.emitSingle(.discard_single, body_val.getRt());
         }
 
         // jump back to condition
-        try self.emitInstruction(.Jump, .{
-            @truncate(i32, -@intCast(isize, self.code.items.len + @sizeOf(bog.Op) + @sizeOf(u32) - loop_scope.cond_begin)),
-        });
+        self.code.items[try self.emitJump(.jump, null)] = .{
+            .bare_signed = @truncate(i32, -@intCast(isize, self.code.items.len - loop_scope.cond_begin)),
+        };
 
         // exit loop if cond == false
         if (cond_jump) |some| {
@@ -1052,8 +1054,7 @@ pub const Compiler = struct {
         try self.emitDouble(.iter_next_double, iter_val_reg, iter_reg);
 
         // exit loop
-        try self.emitInstruction(.JumpNone, .{ iter_val_reg, @as(u32, 0) });
-        const exit_jump = self.code.items.len;
+        const exit_jump = try self.emitJump(.jump_none, iter_val_reg);
 
         if (node.capture != null) {
             const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)
@@ -1076,9 +1077,10 @@ pub const Compiler = struct {
         }
 
         // jump to the start of the loop
-        try self.emitInstruction(.Jump, .{
-            @truncate(i32, -@intCast(isize, self.code.items.len + @sizeOf(bog.Op) + @sizeOf(u32) - loop_scope.cond_begin)),
-        });
+        const end = try self.emitJump(.jump, null);
+        self.code.items[end] = .{
+            .bare_signed = @truncate(i32, -@intCast(isize, end - loop_scope.cond_begin)),
+        };
 
         // exit loop when IterNext results in None
         self.finishJump(exit_jump);
@@ -1107,8 +1109,7 @@ pub const Compiler = struct {
             .rt = l_val.getRt(),
         };
 
-        try self.emitInstruction(.JumpNotError, .{ sub_res.rt, @as(u32, 0) });
-        const catch_skip = self.code.items.len;
+        const catch_skip = try self.emitJump(.jump_not_error, sub_res.rt);
 
         var capture_scope = Scope{
             .id = .capture,
@@ -1307,9 +1308,13 @@ pub const Compiler = struct {
 
         const index_val = switch (node.op) {
             .call => |*args| {
+                if (args.len > max_params) {
+                    return self.reportErr("too many arguments", node.l_tok);
+                }
+
                 const sub_res = res.toRt(self);
                 const start = self.used_regs;
-                self.used_regs += @intCast(RegRef, args.len);
+                self.used_regs += @truncate(RegRef, args.len);
 
                 var it = args.iterator(0);
                 var i = start;
@@ -1318,7 +1323,14 @@ pub const Compiler = struct {
                     i += 1;
                 }
 
-                try self.emitInstruction(.Call, .{ sub_res.rt, l_reg, start, @truncate(u16, args.len) });
+                try self.code.append(.{
+                    .call = .{
+                        .res = sub_res.rt,
+                        .func = l_reg,
+                        .first = start,
+                    },
+                });
+                try self.code.append(.{ .bare = @truncate(u8, args.len) });
                 return sub_res.toVal();
             },
             .member => Value{ .str = self.tokenSlice(node.r_tok) },
@@ -1342,7 +1354,7 @@ pub const Compiler = struct {
             .discard, .value => self.registerAlloc(),
         };
 
-        try self.emitTripe(.get_triple, res_reg, l_reg, index_reg);
+        try self.emitTriple(.get_triple, res_reg, l_reg, index_reg);
         return Value{ .rt = res_reg };
     }
 
@@ -1890,8 +1902,9 @@ pub const Compiler = struct {
     }
 
     fn finishJump(self: *Compiler, jump_addr: usize) void {
-        @ptrCast(*align(1) u32, self.code.items[jump_addr - @sizeOf(u32) ..].ptr).* =
-            @truncate(u32, self.code.items.len - jump_addr);
+        self.code.items[jump_addr] = .{
+            .bare = @intCast(u32, self.code.items.len - jump_addr),
+        };
     }
 
     fn getLastNode(self: *Compiler, first_node: *Node, allow_block: bool) *Node {
