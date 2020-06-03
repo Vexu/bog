@@ -19,10 +19,11 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
         .nodes = bog.Node.List.init(arena),
     };
 
+    // TODO cleanup
     var repl = Repl{
         .module = .{
             .name = "<stdin>",
-            .code = "",
+            .code = &[0]bog.Instruction{},
             .strings = "",
             .entry = 0,
         },
@@ -51,7 +52,7 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
             },
             .string_interner = std.StringHashMap(u32).init(arena),
             .module_code = Compiler.Code.init(allocator),
-            .strings = Compiler.Code.init(allocator),
+            .strings = std.ArrayList(u8).init(allocator),
             .code = undefined,
             .cur_scope = undefined,
         },

@@ -114,9 +114,9 @@ pub const Instruction = packed union {
     bare_signed: i32,
     op: packed struct {
         op: Op,
-        __pad1: u8,
-        __pad2: u8,
-        __pad3: u8,
+        __pad1: u8 = 0,
+        __pad2: u8 = 0,
+        __pad3: u8 = 0,
     },
     single: packed struct {
         op: Op,
@@ -146,12 +146,12 @@ pub const Instruction = packed union {
         res: RegRef,
         off: u16,
 
-        inline fn isArg(self: *@This()) bool {
+        pub inline fn isArg(self: @This()) bool {
             return self.off == 0xFFFF;
         }
     },
     primitive: packed struct {
-        op: Op,
+        op: Op = .const_primitive,
         res: u8,
         kind: packed enum(u8) {
             none = 0,
@@ -162,14 +162,14 @@ pub const Instruction = packed union {
         __pad: u8 = 0,
     },
     int: packed struct {
-        op: Op,
+        op: Op = .const_int,
         res: RegRef,
         /// if true arg is given as two instructions
         long: bool,
-        arg: u15,
+        arg: i15,
     },
     func: packed struct {
-        op: Op,
+        op: Op = .build_func,
         res: RegRef,
         arg_count: u8,
         capture_count: u8,
@@ -177,7 +177,7 @@ pub const Instruction = packed union {
         // followed by an offset
     },
     jump: packed struct {
-        op: Op,
+        op: Op = .jump,
         kind: packed enum(u8) {
             immediate = 0,
             arg = 1,
@@ -190,13 +190,13 @@ pub const Instruction = packed union {
         arg: RegRef,
         off: u16,
 
-        inline fn isArg(self: *@This()) bool {
+        pub inline fn isArg(self: @This()) bool {
             return self.off == 0xFFFF;
         }
     },
     call: packed struct {
         /// A = B(C, C + 1, ... C + N)
-        op: Op,
+        op: Op = .call,
         res: RegRef,
         func: RegRef,
         first: RegRef,

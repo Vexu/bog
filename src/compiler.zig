@@ -22,10 +22,10 @@ pub const Compiler = struct {
     used_regs: RegRef = 0,
     code: *Code,
     module_code: Code,
-    strings: Code,
+    strings: std.ArrayList(u8),
     string_interner: std.StringHashMap(u32),
 
-    pub const Code = std.ArrayList(u8);
+    pub const Code = std.ArrayList(bog.Instruction);
 
     fn registerAlloc(self: *Compiler) RegRef {
         const reg = self.used_regs;
@@ -39,11 +39,46 @@ pub const Compiler = struct {
         }
     }
 
-    fn emitInstruction(self: *Compiler, op: bog.Op, args: var) !void {
-        try self.code.append(@enumToInt(op));
-        inline for (std.meta.fields(@TypeOf(args))) |f| {
-            try self.code.appendSlice(mem.asBytes(&@field(args, f.name)));
-        }
+    fn emitSingle(self: *Compiler, op: bog.Op, arg: RegRef) !void {
+        try self.code.append(.{
+            .single = .{
+                .op = op,
+                .arg = arg,
+            },
+        });
+    }
+
+    fn emitDouble(self: *Compiler, op: bog.Op, res: RegRef, arg: RegRef) !void {
+        try self.code.append(.{
+            .double = .{
+                .op = op,
+                .res = res,
+                .arg = arg,
+            },
+        });
+    }
+
+    fn emitTriple(self: *Compiler, op: bog.Op, res: RegRef, lhs: RegRef, rhs: RegRef) !void {
+        try self.code.append(.{
+            .triple = .{
+                .op = op,
+                .res = res,
+                .lhs = lhs,
+                .rhs = rhs,
+            },
+        });
+    }
+
+    fn emitOff(self: *Compiler, op: bog.Op, res: RegRef, off: u32) !void {
+        const long = off >= 0xFFFF;
+        try self.code.append(.{
+            .off = .{
+                .op = op,
+                .res = res,
+                .off = if (long) 0xFFFF else @truncate(u16, off),
+            },
+        });
+        if (long) try self.code.append(.{ .bare = off });
     }
 
     const Scope = struct {
@@ -63,13 +98,6 @@ pub const Compiler = struct {
             base: Scope,
             code: Code,
             captures: *Symbol.List,
-
-            fn emitInstruction(scope: *Fn, self: *Compiler, op: bog.Op, args: var) !void {
-                try scope.code.append(@enumToInt(op));
-                inline for (std.meta.fields(@TypeOf(args))) |f| {
-                    try scope.code.appendSlice(mem.asBytes(&@field(args, f.name)));
-                }
-            }
         };
 
         const Module = struct {
@@ -135,9 +163,12 @@ pub const Compiler = struct {
                     while (it.prev()) |sym| {
                         if (!mem.eql(u8, sym.name, name)) continue;
 
-                        try new_func.emitInstruction(self, .LoadCapture, .{
-                            res,
-                            @truncate(u8, sym.reg),
+                        try new_func.code.append(.{
+                            .double = .{
+                                .op = .load_capture_double,
+                                .res = res,
+                                .arg = @truncate(u8, sym.reg),
+                            },
                         });
                         return RegAndMut{
                             .reg = res,
@@ -146,9 +177,12 @@ pub const Compiler = struct {
                     }
                     const parent = some.parent orelse break :blk;
                     const sub = try parent.getSymbolTail(self, name, new_func, tok);
-                    try new_func.emitInstruction(self, .LoadCapture, .{
-                        res,
-                        @truncate(u8, sub.reg),
+                    try new_func.code.append(.{
+                        .double = .{
+                            .op = .load_capture_double,
+                            .res = res,
+                            .arg = @truncate(u8, sub.reg),
+                        },
                     });
 
                     // forward captured symbol
@@ -284,27 +318,43 @@ pub const Compiler = struct {
         return switch (val) {
             .empty => unreachable,
             .ref, .rt => |v| assert(v == res),
-            .none => try self.emitInstruction(.ConstPrimitive, .{ res, @as(u8, 0) }),
-            .int => |v| if (v > std.math.minInt(i8) and v < std.math.maxInt(i8)) {
-                try self.emitInstruction(.ConstInt8, .{ res, @truncate(i8, v) });
-            } else if (v > std.math.minInt(i32) and v < std.math.maxInt(i32)) {
-                try self.emitInstruction(.ConstInt32, .{ res, @truncate(i32, v) });
+            .none => try self.code.append(.{
+                .primitive = .{ .res = res, .kind = .none },
+            }),
+            .int => |v| if (v >= std.math.minInt(i15) and v <= std.math.maxInt(i15)) {
+                try self.code.append(.{ .int = .{ .res = res, .long = false, .arg = @truncate(i15, v) } });
             } else {
-                try self.emitInstruction(.ConstInt64, .{ res, v });
+                try self.code.append(.{ .int = .{ .res = res, .long = true, .arg = 0 } });
+                const arr = @bitCast([2]u32, v);
+                try self.code.append(.{ .bare = arr[0] });
+                try self.code.append(.{ .bare = arr[1] });
             },
-            .num => |v| try self.emitInstruction(.ConstNum, .{ res, v }),
-            .Bool => |v| try self.emitInstruction(.ConstPrimitive, .{ res, @as(u8, @boolToInt(v)) + 1 }),
-            .str => |v| try self.emitInstruction(.ConstString, .{ res, try self.putString(v) }),
+            .num => |v| {
+                try self.code.append(.{ .op = .{ .op = .const_num } });
+                const arr = @bitCast([2]u32, v);
+                try self.code.append(.{ .bare = arr[0] });
+                try self.code.append(.{ .bare = arr[1] });
+            },
+            .Bool => |v| try self.code.append(.{ .primitive = .{ .res = res, .kind = if (v) .True else .False } }),
+            .str => |v| try self.emitOff(.const_string_off, res, try self.putString(v)),
             .func => |v| {
-                try self.emitInstruction(.BuildFn, .{ res, v.params, @truncate(u8, v.captures.len), v.offset });
+                try self.code.append(.{
+                    .func = .{
+                        .res = res,
+                        .arg_count = v.params,
+                        .capture_count = @truncate(u8, v.captures.len),
+                    },
+                });
+                try self.code.append(.{ .bare = v.offset });
 
                 var capture_it = v.captures.iterator(0);
                 while (capture_it.next()) |capture| {
-                    try self.emitInstruction(.StoreCapture, .{
+                    try self.emitTriple(
+                        .store_capture_triple,
                         res,
                         capture.reg,
                         @truncate(u8, capture_it.index - 1),
-                    });
+                    );
                 }
             },
         };
@@ -373,7 +423,7 @@ pub const Compiler = struct {
                 .code = Code.init(arena),
             },
             .module_code = Code.init(allocator),
-            .strings = Code.init(allocator),
+            .strings = std.ArrayList(u8).init(allocator),
             .code = undefined,
             .cur_scope = undefined,
             .string_interner = std.StringHashMap(u32).init(allocator),
@@ -394,7 +444,7 @@ pub const Compiler = struct {
                 const reg = val.getRt();
                 defer val.free(&compiler, reg);
                 // discard unused runtime value
-                try compiler.emitInstruction(.Discard, .{reg});
+                try compiler.emitSingle(.discard_single, reg);
             }
         }
 
@@ -420,7 +470,7 @@ pub const Compiler = struct {
             const reg = try val.toRt(self);
             defer val.free(self, reg);
 
-            try self.emitInstruction(.Discard, .{reg});
+            try self.emitSingle(.discard_single, reg);
         }
         const final_len = self.module_code.items.len;
         try self.module_code.appendSlice(self.code.items);
@@ -516,7 +566,7 @@ pub const Compiler = struct {
                                 // `oldname: newname` is equal to `"oldname": newname`
                                 const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
                                 const str_loc = try self.putString(self.tokenSlice(ident.tok));
-                                try self.emitInstruction(.ConstString, .{ index_reg, str_loc });
+                                try self.emitOff(.const_string_off, index_reg, str_loc);
                             } else {
                                 _ = try self.genNode(some, .{ .rt = index_reg });
                             }
@@ -528,10 +578,10 @@ pub const Compiler = struct {
                             // `oldname` is equal to `"oldname": oldname`
                             const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
                             const str_loc = try self.putString(self.tokenSlice(ident.tok));
-                            try self.emitInstruction(.ConstString, .{ index_reg, str_loc });
+                            try self.emitOff(.const_string_off, index_reg, str_loc);
                         }
 
-                        try self.emitInstruction(.Get, .{ sub_reg, reg, index_reg });
+                        try self.emitTriple(.get_triple, sub_reg, reg, index_reg);
                         const rt_val = Value{ .rt = sub_reg };
                         const l_val = try self.genNode(item.value, switch (res.lval) {
                             .Const => .{ .lval = .{ .Const = &rt_val } },
@@ -565,7 +615,7 @@ pub const Compiler = struct {
                     // `ident: value` is equal to `"ident": value`
                     const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
                     const str_loc = try self.putString(self.tokenSlice(ident.tok));
-                    try self.emitInstruction(.ConstString, .{ i, str_loc });
+                    try self.emitOff(.const_string_off, i, str_loc);
                 } else {
                     _ = try self.genNode(some, .{ .rt = i });
                 }
@@ -577,14 +627,14 @@ pub const Compiler = struct {
                 // `ident` is equal to `"ident": ident`
                 const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
                 const str_loc = try self.putString(self.tokenSlice(ident.tok));
-                try self.emitInstruction(.ConstString, .{ i, str_loc });
+                try self.emitOff(.const_string_off, i, str_loc);
             }
 
             _ = try self.genNode(item.value, .{ .rt = i + 1 });
             i += 2;
         }
-
-        try self.emitInstruction(.BuildMap, .{ sub_res.rt, start, @intCast(u16, node.values.len * 2) });
+        // TODO error if too long
+        try self.emitOff(.build_map_off, sub_res.rt, @intCast(u32, node.values.len * 2));
         return sub_res.toVal();
     }
 
@@ -609,7 +659,7 @@ pub const Compiler = struct {
                             continue;
                         }
                         try self.makeRuntime(index_reg, index_val);
-                        try self.emitInstruction(.Get, .{ sub_reg, reg, index_reg });
+                        try self.emitTriple(.get_triple, sub_reg, reg, index_reg);
                         const rt_val = Value{ .rt = sub_reg };
                         const l_val = try self.genNode(n.*, switch (res.lval) {
                             .Const => .{ .lval = .{ .Const = &rt_val } },
@@ -641,11 +691,12 @@ pub const Compiler = struct {
         }
 
         const op_id: bog.Op = switch (node.base.id) {
-            .Tuple => .BuildTuple,
-            .List => .BuildList,
+            .Tuple => .build_tuple_off,
+            .List => .build_list_off,
             else => unreachable,
         };
-        try self.emitInstruction(op_id, .{ sub_res.rt, start, @intCast(u16, node.values.len) });
+        // TODO error if too long
+        try self.emitOff(op_id, sub_res.rt, @intCast(u32, node.values.len));
         return sub_res.toVal();
     }
 
@@ -712,12 +763,12 @@ pub const Compiler = struct {
         if (last_is_ret) {
             std.debug.assert(body_val == .empty);
         } else if (body_val == .empty or body_val == .none) {
-            try self.code.append(@enumToInt(bog.Op.ReturnNone));
+            try self.code.append(.{ .op = .{ .op = .return_none } });
         } else {
             const reg = try body_val.toRt(self);
             defer body_val.free(self, reg);
 
-            try self.emitInstruction(.Return, .{reg});
+            try self.emitSingle(.return_single, reg);
         }
 
         // reset regs after generating body
@@ -762,7 +813,7 @@ pub const Compiler = struct {
                 defer val.free(self, reg);
 
                 // discard unused runtime value
-                try self.emitInstruction(.Discard, .{reg});
+                try self.emitSingle(.discard_single, reg);
             }
         }
         return Value{ .empty = {} };
@@ -820,7 +871,7 @@ pub const Compiler = struct {
 
         const if_val = try self.genNode(node.if_body, sub_res);
         if (sub_res != .rt and if_val.isRt()) {
-            try self.emitInstruction(.Discard, .{if_val.getRt()});
+            try self.emitSingle(.discard_single, if_val.getRt());
         }
 
         // jump past else_body since if_body was executed
@@ -837,10 +888,12 @@ pub const Compiler = struct {
         if (node.else_body) |some| {
             const else_val = try self.genNode(some, sub_res);
             if (sub_res != .rt and else_val.isRt()) {
-                try self.emitInstruction(.Discard, .{else_val.getRt()});
+                try self.emitSingle(.discard_single, else_val.getRt());
             }
         } else if (sub_res == .rt) {
-            try self.emitInstruction(.ConstPrimitive, .{ sub_res.rt, @as(u8, 0) });
+            try self.code.append(.{
+                .primitive = .{ .res = sub_res.rt, .kind = .none },
+            });
         }
 
         if (else_skip_needed) {
@@ -860,9 +913,9 @@ pub const Compiler = struct {
                 const reg = try val.toRt(self);
                 defer val.free(self, reg);
 
-                try self.emitInstruction(.Return, .{reg});
+                try self.emitSingle(.return_single, reg);
             } else {
-                try self.code.append(@enumToInt(bog.Op.ReturnNone));
+                try self.code.append(.{ .op = .{ .op = .return_none } });
             }
             return Value{ .empty = {} };
         }
@@ -944,7 +997,7 @@ pub const Compiler = struct {
 
         const body_val = try self.genNode(node.body, sub_res);
         if (sub_res != .rt and body_val.isRt()) {
-            try self.emitInstruction(.Discard, .{body_val.getRt()});
+            try self.emitSIngle(.discard_single, body_val.getRt());
         }
 
         // jump back to condition
@@ -989,14 +1042,14 @@ pub const Compiler = struct {
         defer self.registerFree(iter_reg);
 
         // initialize the iterator
-        try self.emitInstruction(.IterInit, .{ iter_reg, cond_reg });
+        try self.emitDouble(.iter_init_double, iter_reg, cond_reg);
 
         const iter_val_reg = self.registerAlloc();
         defer self.registerFree(iter_val_reg);
 
         // loop condition
         loop_scope.cond_begin = @intCast(u32, self.code.items.len);
-        try self.emitInstruction(.IterNext, .{ iter_val_reg, iter_reg });
+        try self.emitDouble(.iter_next_double, iter_val_reg, iter_reg);
 
         // exit loop
         try self.emitInstruction(.JumpNone, .{ iter_val_reg, @as(u32, 0) });
@@ -1019,7 +1072,7 @@ pub const Compiler = struct {
 
         const body_val = try self.genNode(node.body, sub_res);
         if (sub_res != .rt and body_val.isRt()) {
-            try self.emitInstruction(.Discard, .{body_val.getRt()});
+            try self.emitSingle(.discard_single, body_val.getRt());
         }
 
         // jump to the start of the loop
@@ -1065,7 +1118,7 @@ pub const Compiler = struct {
 
         if (node.capture) |some| {
             const unwrap_reg = self.registerAlloc();
-            try self.emitInstruction(.UnwrapError, .{ unwrap_reg, sub_res.rt });
+            try self.emitDouble(.unwrap_error_double, unwrap_reg, sub_res.rt);
 
             self.cur_scope = &capture_scope;
             const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)
@@ -1090,18 +1143,18 @@ pub const Compiler = struct {
 
         if (r_val.isRt()) {
             const op_id: bog.Op = switch (node.op) {
-                .boolNot => .BoolNot,
-                .bitNot => .BitNot,
-                .minus => .Negate,
+                .boolNot => .bool_not_double,
+                .bitNot => .bit_not_double,
+                .minus => .negate_double,
                 // TODO should unary + be a no-op
                 .plus => return r_val,
-                .Try => .Try,
+                .Try => .try_double,
             };
             const reg = r_val.getRt();
             defer r_val.free(self, reg);
 
             const sub_res = res.toRt(self);
-            try self.emitInstruction(op_id, .{ sub_res.rt, reg });
+            try self.emitDouble(op_id, sub_res.rt, reg);
             return sub_res.toVal();
         }
         const ret_val: Value = switch (node.op) {
@@ -1162,8 +1215,14 @@ pub const Compiler = struct {
             const reg = l_val.getRt();
             defer l_val.free(self, reg);
 
-            const op: bog.Op = if (node.op == .as) .As else .Is;
-            try self.emitInstruction(op, .{ sub_res.rt, reg, type_id });
+            try self.code.append(.{
+                .type_id = .{
+                    .op = if (node.op == .as) .as_type_id else .is_type_id,
+                    .res = sub_res.rt,
+                    .arg = reg,
+                    .type_id = type_id,
+                },
+            });
             return sub_res.toVal();
         }
 
@@ -1276,14 +1335,14 @@ pub const Compiler = struct {
                 .assign => |r_val| {
                     const r_reg = try r_val.toRt(self);
                     defer r_val.free(self, r_reg);
-                    try self.emitInstruction(.Set, .{ l_reg, index_reg, r_reg });
+                    try self.emitTriple(.set_triple, l_reg, index_reg, r_reg);
                     return Value.empty;
                 },
             },
             .discard, .value => self.registerAlloc(),
         };
 
-        try self.emitInstruction(.Get, .{ res_reg, l_reg, index_reg });
+        try self.emitTripe(.get_triple, res_reg, l_reg, index_reg);
         return Value{ .rt = res_reg };
     }
 
@@ -1370,26 +1429,24 @@ pub const Compiler = struct {
             else => unreachable,
         };
 
-        const op_id: bog.Op = switch (node.op) {
-            .AddAssign => .Add,
-            .SubAssign => .Sub,
-            .MulAssign => .Mul,
-            .PowAssign => .Pow,
-            .DivAssign => .Div,
-            .DivFloorAssign => .DivFloor,
-            .ModAssign => .Mod,
-            .LShiftAssign => .LShift,
-            .RShiftAssign => .RShift,
-            .BitAndAssign => .BitAnd,
-            .BitOrAssign => .BitOr,
-            .BitXOrAssign => .BitXor,
-            else => unreachable,
-        };
-
         const reg = try r_val.toRt(self);
         defer r_val.free(self, reg);
 
-        try self.emitInstruction(op_id, .{ l_val.getRt(), l_val.getRt(), reg });
+        try self.emitTriple(switch (node.op) {
+            .AddAssign => .add_triple,
+            .SubAssign => .sub_triple,
+            .MulAssign => .mul_triple,
+            .PowAssign => .pow_triple,
+            .DivAssign => .div_triple,
+            .DivFloorAssign => .div_floor_triple,
+            .ModAssign => .mod_triple,
+            .LShiftAssign => .l_shift_triple,
+            .RShiftAssign => .r_shift_triple,
+            .BitAndAssign => .bit_and_triple,
+            .BitOrAssign => .bit_or_triple,
+            .BitXOrAssign => .bit_xor_triple,
+            else => unreachable,
+        }, l_val.getRt(), l_val.getRt(), reg);
         return Value.empty;
     }
 
@@ -1411,18 +1468,16 @@ pub const Compiler = struct {
                 l_val.free(self, l_reg);
             }
 
-            const op_id: bog.Op = switch (node.op) {
-                .Add => .Add,
-                .Sub => .Sub,
-                .Mul => .Mul,
-                .Div => .Div,
-                .DivFloor => .DivFloor,
-                .Mod => .Mod,
-                .Pow => .Pow,
+            try self.emitTriple(switch (node.op) {
+                .Add => .add_triple,
+                .Sub => .sub_triple,
+                .Mul => .mul_triple,
+                .Div => .div_triple,
+                .DivFloor => .div_floor_triple,
+                .Mod => .mod_triple,
+                .Pow => .pow_triple,
                 else => unreachable,
-            };
-
-            try self.emitInstruction(op_id, .{ sub_res.rt, l_reg, r_reg });
+            }, sub_res.rt, l_reg, r_reg);
             return sub_res.toVal();
         }
         try l_val.checkNum(self, node.lhs.firstToken());
@@ -1490,17 +1545,16 @@ pub const Compiler = struct {
                 l_val.free(self, l_reg);
             }
 
-            const op_id: bog.Op = switch (node.op) {
-                .LessThan => .LessThan,
-                .LessThanEqual => .LessThanEqual,
-                .GreaterThan => .GreaterThan,
-                .GreaterThanEqual => .GreaterThanEqual,
-                .Equal => .Equal,
-                .NotEqual => .NotEqual,
-                .In => .In,
+            try self.emitTriple(switch (node.op) {
+                .LessThan => .less_than_triple,
+                .LessThanEqual => .less_than_equal_triple,
+                .GreaterThan => .greater_than_triple,
+                .GreaterThanEqual => .greater_than_equal_triple,
+                .Equal => .equal_triple,
+                .NotEqual => .not_equal_triple,
+                .In => .in_triple,
                 else => unreachable,
-            };
-            try self.emitInstruction(op_id, .{ sub_res.rt, l_reg, r_reg });
+            }, sub_res.rt, l_reg, r_reg);
             return sub_res.toVal();
         }
 
@@ -1599,8 +1653,12 @@ pub const Compiler = struct {
                 l_val.free(self, l_reg);
             }
 
-            const op_id: bog.Op = if (node.op == .BoolAnd) .BoolAnd else .BoolOr;
-            try self.emitInstruction(op_id, .{ sub_res.rt, l_reg, r_reg });
+            try self.emitTriple(
+                if (node.op == .BoolAnd) .bool_and_triple else .bool_or_triple,
+                sub_res.rt,
+                l_reg,
+                r_reg,
+            );
             return sub_res.toVal();
         }
         const l_bool = try l_val.getBool(self, node.lhs.firstToken());
@@ -1630,15 +1688,14 @@ pub const Compiler = struct {
                 l_val.free(self, l_reg);
             }
 
-            const op_id: bog.Op = switch (node.op) {
-                .BitAnd => .BitAnd,
-                .BitOr => .BitOr,
-                .BitXor => .BitXor,
-                .LShift => .LShift,
-                .RShift => .RShift,
+            try self.emitTriple(switch (node.op) {
+                .BitAnd => .bit_and_triple,
+                .BitOr => .bit_or_triple,
+                .BitXor => .bit_xor_triple,
+                .LShift => .l_shift_triple,
+                .RShift => .r_shift_triple,
                 else => unreachable,
-            };
-            try self.emitInstruction(op_id, .{ sub_res.rt, l_reg, r_reg });
+            }, sub_res.rt, l_reg, r_reg);
             return sub_res.toVal();
         }
         const l_int = try l_val.getInt(self, node.lhs.firstToken());
@@ -1702,7 +1759,7 @@ pub const Compiler = struct {
                     if (val.* == .ref and res.lval == .let) {
                         // copy on assign
                         const copy_reg = self.registerAlloc();
-                        try self.emitInstruction(.Copy, .{ copy_reg, reg });
+                        try self.emitDouble(.copy_double, copy_reg, reg);
                         reg = copy_reg;
                     }
                     try self.cur_scope.declSymbol(.{
@@ -1718,9 +1775,9 @@ pub const Compiler = struct {
                         return self.reportErr("assignment to constant", node.tok);
                     }
                     if (val.* == .ref) {
-                        try self.emitInstruction(.Copy, .{ sym.reg, val.getRt() });
+                        try self.emitDouble(.copy_double, sym.reg, val.getRt());
                     } else if (val.isRt()) {
-                        try self.emitInstruction(.Move, .{ sym.reg, val.getRt() });
+                        try self.emitDouble(.move_double, sym.reg, val.getRt());
                     } else {
                         try self.makeRuntime(sym.reg, val.*);
                     }
@@ -1737,8 +1794,7 @@ pub const Compiler = struct {
         }
         const sym = try self.cur_scope.getSymbol(self, name, node.tok);
         if (res == .rt) {
-            const op_id: bog.Op = if (sym.mutable) .Move else .Copy;
-            try self.emitInstruction(op_id, .{ res.rt, sym.reg });
+            try self.emitDouble(if (sym.mutable) .move_double else .copy_double, res.rt, sym.reg);
             return res.toVal();
         }
         return Value{ .ref = sym.reg };
@@ -1749,7 +1805,7 @@ pub const Compiler = struct {
         try res.notLval(self, node.tok);
 
         const sub_res = res.toRt(self);
-        try self.emitInstruction(.LoadThis, .{sub_res.rt});
+        try self.emitSingle(.load_this_single, sub_res.rt);
         return sub_res.toVal();
     }
 
@@ -1776,7 +1832,7 @@ pub const Compiler = struct {
         const str = try self.parseStr(node.str_tok);
         const str_loc = try self.putString(str);
 
-        try self.emitInstruction(.Import, .{ sub_res.rt, str_loc });
+        try self.emitOff(.import_off, sub_res.rt, str_loc);
         return sub_res.toVal();
     }
 
@@ -1789,7 +1845,7 @@ pub const Compiler = struct {
             return self.reportErr("invalid namespace", node.str_tok);
         }
         const str_loc = try self.putString(str);
-        try self.emitInstruction(.BuildNative, .{ sub_res.rt, str_loc });
+        try self.emitOff(.build_native_off, sub_res.rt, str_loc);
         return sub_res.toVal();
     }
 
@@ -1800,7 +1856,7 @@ pub const Compiler = struct {
                     return self.reportErr("expected an error", node.base.firstToken());
                 }
                 const unwrap_reg = self.registerAlloc();
-                try self.emitInstruction(.UnwrapError, .{ unwrap_reg, val.getRt() });
+                try self.emitDouble(.unwrap_error_double, unwrap_reg, val.getRt());
                 const r_val = Value{ .rt = unwrap_reg };
                 const l_val = try self.genNode(node.value, switch (res.lval) {
                     .Const => Result{ .lval = .{ .Const = &r_val } },
@@ -1821,7 +1877,7 @@ pub const Compiler = struct {
         const reg = try val.toRt(self);
         defer val.free(self, reg);
 
-        try self.emitInstruction(.BuildError, .{ sub_res.rt, reg });
+        try self.emitDouble(.build_error_double, sub_res.rt, reg);
         return sub_res.toVal();
     }
 
@@ -1829,7 +1885,8 @@ pub const Compiler = struct {
         const token = node.firstToken();
         const tok = self.tree.tokens.at(token);
 
-        try self.emitInstruction(.LineInfo, .{tok.start});
+        try self.code.append(.{ .op = .{ .op = .line_info } });
+        try self.code.append(.{ .bare = tok.start });
     }
 
     fn finishJump(self: *Compiler, jump_addr: usize) void {

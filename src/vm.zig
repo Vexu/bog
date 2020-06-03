@@ -118,7 +118,7 @@ pub const Vm = struct {
 
                 },
                 .const_num => {
-                    const res = try vm.getNewVal(module, inst.op.res);
+                    const res = try vm.getNewVal(module, inst.off.res);
 
                     res.* = .{
                         .num = try vm.getLong(module, f64),
@@ -218,14 +218,14 @@ pub const Vm = struct {
                     res.* = copy;
                 },
                 .bool_and_triple => {
-                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const res = try vm.getRef(module, inst.triple.res);
                     const lhs = try vm.getBool(module, inst.triple.lhs);
                     const rhs = try vm.getBool(module, inst.triple.rhs);
 
                     res.* = if (lhs and rhs) &Value.True else &Value.False;
                 },
                 .bool_or_triple => {
-                    const res = try vm.getNewVal(module, inst.triple.res);
+                    const res = try vm.getRef(module, inst.triple.res);
                     const lhs = try vm.getBool(module, inst.triple.lhs);
                     const rhs = try vm.getBool(module, inst.triple.rhs);
 
@@ -423,7 +423,7 @@ pub const Vm = struct {
                 .jump => {
                     const offset = switch (inst.jump.kind) {
                         .immediate => inst.jump.off,
-                        .arg => @bitCast(i32, try vm.getSingle(module))
+                        .arg => @bitCast(i32, try vm.getSingle(module)),
                         _ => return error.MalformedByteCode,
                     };
                     vm.ip = @intCast(usize, @intCast(isize, vm.ip) + offset);
@@ -436,7 +436,7 @@ pub const Vm = struct {
                         inst.off.off;
 
                     if (arg == false) {
-                        vm.ip += addr;
+                        vm.ip += offset;
                     }
                 },
                 .jump_true => {
@@ -446,8 +446,8 @@ pub const Vm = struct {
                     else
                         inst.off.off;
 
-                    if (res == true) {
-                        vm.ip += addr;
+                    if (arg == true) {
+                        vm.ip += offset;
                     }
                 },
                 .jump_not_error => {
@@ -469,7 +469,7 @@ pub const Vm = struct {
                         inst.off.off;
 
                     if (arg.* == .none) {
-                        vm.ip += addr;
+                        vm.ip += offset;
                     }
                 },
                 .iter_init_double => {
@@ -496,7 +496,7 @@ pub const Vm = struct {
                     res.* = arg.err;
                 },
                 .import_off => {
-                    const res = try vm.getNewVal(module, inst.off.res);
+                    const res = try vm.getRef(module, inst.off.res);
                     const str = try vm.getString(module, inst);
 
                     res.* = try vm.import(str);
@@ -542,7 +542,7 @@ pub const Vm = struct {
                         inst.off.off;
 
                     res.* = .{
-                        .list = Value.List.initCapacity(vm.gc.gpa, size),
+                        .list = try Value.List.initCapacity(vm.gc.gpa, size),
                     };
                 },
                 .build_map_off => {
@@ -608,7 +608,7 @@ pub const Vm = struct {
                         _ => return error.MalformedByteCode,
                     }
 
-                    res.* = try arg.as(vm, type_id);
+                    res.* = try arg.as(vm, inst.type_id.type_id);
                 },
                 .is_type_id => {
                     const res = try vm.getRef(module, inst.type_id.res);
@@ -723,13 +723,13 @@ pub const Vm = struct {
 
                     res.* = frame.captures[arg];
                 },
-                .store_capture_double => {
+                .store_capture_triple => {
                     const res = try vm.getVal(module, inst.triple.res);
                     const lhs = try vm.getVal(module, inst.triple.lhs);
                     const rhs = inst.triple.rhs;
 
                     if (res.* != .func) return error.MalformedByteCode;
-                    if (rhsn >= res.func.captures.len) return error.MalformedByteCode;
+                    if (rhs >= res.func.captures.len) return error.MalformedByteCode;
 
                     res.func.captures[rhs] = lhs;
                 },
@@ -781,7 +781,7 @@ pub const Vm = struct {
             const mod = try vm.allocator.create(Module);
             mod.* = .{
                 .name = try mem.dupe(vm.allocator, u8, id),
-                .code = try mem.dupe(vm.allocator, u8, read_module.code),
+                .code = try mem.dupe(vm.allocator, bog.Instruction, read_module.code),
                 .strings = try mem.dupe(vm.allocator, u8, read_module.strings),
                 .entry = read_module.entry,
             };
@@ -819,12 +819,12 @@ pub const Vm = struct {
         if (vm.ip + 2 > module.code.len)
             return error.MalformedByteCode;
         
-        var arr: [2]u32 = undefined;
+        var arr: [2]bog.Instruction = undefined;
         arr[0] = module.code[vm.ip];
         arr[1] = module.code[vm.ip + 1];
         vm.ip += 2;
         
-        return @ptrCast(*T, &arr).*;
+        return @bitCast(T, arr);
     }
 
     fn getVal(vm: *Vm, module: *Module, reg: RegRef) !*Value {
