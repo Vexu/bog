@@ -338,7 +338,7 @@ pub const Compiler = struct {
                 try self.code.append(.{ .bare = arr[1] });
             },
             .num => |v| {
-                try self.code.append(.{ .op = .{ .op = .const_num } });
+                try self.code.append(.{ .single = .{ .op = .const_num, .arg = res } });
                 const arr = @bitCast([2]u32, v);
                 try self.code.append(.{ .bare = arr[0] });
                 try self.code.append(.{ .bare = arr[1] });
@@ -1003,8 +1003,9 @@ pub const Compiler = struct {
         }
 
         // jump back to condition
-        self.code.items[try self.emitJump(.jump, null)] = .{
-            .bare_signed = @truncate(i32, -@intCast(isize, self.code.items.len - loop_scope.cond_begin)),
+        const end = try self.emitJump(.jump, null);
+        self.code.items[end] = .{
+            .bare_signed = @truncate(i32, -@intCast(isize, end - loop_scope.cond_begin)),
         };
 
         // exit loop if cond == false

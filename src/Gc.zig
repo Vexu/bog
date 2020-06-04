@@ -137,7 +137,7 @@ pub fn alloc(gc: *Gc) !*Value {
 /// Get value from stack at `index`.
 /// Returns `error.NullPtrDeref` if stack has no value at `index`.
 pub fn stackGet(gc: *Gc, index: usize) !*Value {
-    if (index > gc.stack.items.len)
+    if (index >= gc.stack.items.len)
         return error.NullPtrDeref;
 
     return gc.stack.items[index] orelse

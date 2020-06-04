@@ -114,7 +114,7 @@ pub const Vm = struct {
                     };
                 },
                 .const_num => {
-                    const res = try vm.getNewVal(module, inst.off.res);
+                    const res = try vm.getNewVal(module, inst.single.arg);
 
                     res.* = .{
                         .num = try vm.getLong(module, f64),
@@ -417,39 +417,44 @@ pub const Vm = struct {
                     ret_val.* = arg.*;
                 },
                 .jump => {
+                    const base = vm.ip;
                     const offset = @bitCast(i32, try vm.getSingle(module));
-                    vm.ip = @intCast(usize, @intCast(isize, vm.ip) + offset);
+                    vm.ip = @intCast(usize, @intCast(isize, base) + offset);
                 },
                 .jump_false => {
+                    const base = vm.ip;
                     const arg = try vm.getBool(module, inst.jump.arg);
                     const offset = try vm.getSingle(module);
 
                     if (arg == false) {
-                        vm.ip += offset;
+                        vm.ip = base + offset;
                     }
                 },
                 .jump_true => {
+                    const base = vm.ip;
                     const arg = try vm.getBool(module, inst.jump.arg);
                     const offset = try vm.getSingle(module);
 
                     if (arg == true) {
-                        vm.ip += offset;
+                        vm.ip = base + offset;
                     }
                 },
                 .jump_not_error => {
+                    const base = vm.ip;
                     const arg = try vm.getVal(module, inst.jump.arg);
                     const offset = try vm.getSingle(module);
 
                     if (arg.* != .err) {
-                        vm.ip += offset;
+                        vm.ip = base + offset;
                     }
                 },
                 .jump_none => {
+                    const base = vm.ip;
                     const arg = try vm.getVal(module, inst.jump.arg);
                     const offset = try vm.getSingle(module);
 
                     if (arg.* == .none) {
-                        vm.ip += offset;
+                        vm.ip = base + offset;
                     }
                 },
                 .iter_init_double => {

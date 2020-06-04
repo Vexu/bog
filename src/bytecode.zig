@@ -352,7 +352,7 @@ pub const Module = struct {
                     try stream.print("{} <- ({})\n", .{ inst.int.res, val });
                 },
                 .const_num => {
-                    try stream.print("{} <- ({})\n", .{ inst.op.op, @ptrCast(*align(@alignOf(Instruction)) const f64, &module.code[ip]).* });
+                    try stream.print("{} <- ({d})\n", .{ inst.single.arg, @ptrCast(*align(@alignOf(Instruction)) const f64, &module.code[ip]).* });
                     ip += 2;
                 },
                 .const_string_off, .build_native_off, .import_off => {
@@ -411,7 +411,7 @@ pub const Module = struct {
                 .get_triple,
                 .set_triple,
                 => {
-                    try stream.print("{} <- {} op {}\n", .{ inst.triple.res, inst.triple.lhs, inst.triple.rhs });
+                    try stream.print("{} <- {} {} {}\n", .{ inst.triple.res, inst.triple.lhs, opToStr(inst.triple.op), inst.triple.rhs });
                 },
 
                 .move_double,
@@ -425,7 +425,7 @@ pub const Module = struct {
                 .iter_init_double,
                 .iter_next_double,
                 => {
-                    try stream.print("{} <- op {}\n", .{ inst.double.res, inst.double.arg });
+                    try stream.print("{} <- {} {}\n", .{ inst.double.res, opToStr(inst.double.op), inst.double.arg });
                 },
 
                 .store_capture_triple => {
@@ -443,13 +443,13 @@ pub const Module = struct {
                 },
 
                 .call => {
-                    try stream.print("{} <- {}({}..N:{})\n", .{ inst.call.res, inst.call.func, inst.call.first, module.code[ip] });
+                    try stream.print("{} <- {}({}..N:{})\n", .{ inst.call.res, inst.call.func, inst.call.first, module.code[ip].bare });
                     ip += 1;
                 },
 
                 .line_info => ip += 1,
                 .is_type_id, .as_type_id => {
-                    try stream.print("{} <- {} op {}\n", .{ inst.type_id.res, inst.type_id.arg, @tagName(inst.type_id.type_id) });
+                    try stream.print("{} <- {} {} {}\n", .{ inst.type_id.res, inst.type_id.arg, opToStr(inst.op.op), @tagName(inst.type_id.type_id) });
                 },
                 .discard_single, .return_single, .load_this_single => {
                     try stream.print("{}\n", .{inst.single.arg});
@@ -507,5 +507,47 @@ pub const Module = struct {
             }
         }
         return map;
+    }
+
+    fn opToStr(op: Op) []const u8 {
+        return switch (op) {
+            .div_floor_triple => "//",
+            .div_triple => "/",
+            .mul_triple => "*",
+            .pow_triple => "**",
+            .mod_triple => "%",
+            .add_triple => "+",
+            .sub_triple, .negate_double => "-",
+            .l_shift_triple => "<<",
+            .r_shift_triple => ">>",
+            .bit_and_triple => "&",
+            .bit_or_triple => "|",
+            .bit_xor_triple => "^",
+            .equal_triple => "==",
+            .not_equal_triple => "!=",
+            .less_than_triple => "<",
+            .less_than_equal_triple => "<=",
+            .greater_than_triple => ">",
+            .greater_than_equal_triple => ">=",
+            .in_triple => "in",
+            .bool_and_triple => "and",
+            .bool_or_triple => "or",
+            .get_triple => "\"get\"",
+            .set_triple => "\"set\"",
+
+            .bool_not_double => "not",
+            .bit_not_double => "~",
+            .try_double => "try",
+            .build_error_double => "error",
+            .unwrap_error_double => "\"unwrap\"",
+            .iter_init_double => "\"init\"",
+            .iter_next_double => "\"next\"",
+            .move_double => "\"move\"",
+            .copy_double => "\"copy\"",
+
+            .is_type_id => "is",
+            .as_type_id => "as",
+            else => unreachable,
+        };
     }
 };
