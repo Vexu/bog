@@ -1,5 +1,5 @@
 test "invalid type" {
-    try expectError(
+    expectError(
         \\foo
     ,
         \\use of undeclared identifier
@@ -7,7 +7,7 @@ test "invalid type" {
 }
 
 test "invalid map" {
-    try expectError(
+    expectError(
         \\let y = {1}
     ,
         \\expected a key
@@ -15,7 +15,7 @@ test "invalid map" {
 }
 
 test "index out of bounds" {
-    try expectError(
+    expectError(
         \\let y = [0,0,0]
         \\y[y["len"]] = true
     ,
@@ -24,7 +24,7 @@ test "index out of bounds" {
 }
 
 test "invalid namespace for native" {
-    try expectError(
+    expectError(
         \\native("foo")
     ,
         \\invalid namespace
@@ -32,7 +32,7 @@ test "invalid namespace for native" {
 }
 
 test "invalid type" {
-    try expectError(
+    expectError(
         \\1 + true
     ,
         \\expected a number
@@ -49,24 +49,21 @@ const Errors = bog.Errors;
 
 var buffer: [10 * 1024]u8 = undefined;
 
-fn expectError(source: []const u8, expected: []const u8) !void {
+fn expectError(source: []const u8, expected: []const u8) void {
     var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const alloc = &buf_alloc.allocator;
 
     var vm = Vm.init(alloc, .{});
 
     run(alloc, source, &vm) catch |e| switch (e) {
-        else => return e,
+        else => @panic("test failure"),
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
             const result = vm.errors.list.at(0).*.msg;
-            if (!mem.eql(u8, result, expected)) {
-                warn("\n---expected----\n{}\n-----found-----\n{}\n---------------\n", .{ expected, result });
-                return error.TestFailed;
-            }
+            std.testing.expectEqualStrings(expected, result);
             return;
         },
     };
-    return error.TestFailed;
+    @panic("test failed: expected error");
 }
 
 fn run(alloc: *mem.Allocator, source: []const u8, vm: *Vm) !void {
