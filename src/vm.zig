@@ -910,4 +910,40 @@ pub const Vm = struct {
         }
         return error.RuntimeError;
     }
+
+    /// Gets function `func_name` from map and calls it with `args`.
+    pub fn call(vm: *Vm, val: *Value, func_name: []const u8, args: var) !?*Value {
+        std.debug.assert(vm.call_stack.len == 0); // vm must be in 
+        if (val.* != .map) return error.NotAMap;
+        const index: Value = .{
+            .str = func_name,
+        };
+        const member = val.map.getValue(&index) orelse
+            return error.NoSuchMember;
+
+        switch (member.*) {
+            .func => |*func| {
+                if (func.arg_count != args.len) {
+                    // TODO improve this error message to tell the expected and given counts
+                    return error.InvalidArgCount;
+                }
+                
+                // prepare arguments
+                inline for (args) |arg, i| {
+                    const loc = try vm.gc.stackRef(i);
+                    loc.* = try Value.zigToBog(vm, arg);
+                }
+
+                var frame: FunctionFrame = undefined;
+                frame.this = val;
+                try vm.call_stack.push(frame);
+
+                vm.sp = 0;
+                vm.ip = func.offset;
+                return try vm.exec(func.module);
+            },
+            .native => return error.NativeFunctionsUnsupported, // TODO
+            else => return error.NotAFunction,
+        }
+    }
 };

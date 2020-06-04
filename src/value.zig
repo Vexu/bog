@@ -107,7 +107,7 @@ pub const Value = union(Type) {
     bool: bool,
     none,
 
-    pub const Map = std.HashMap(*Value, *Value, hash, eql);
+    pub const Map = std.HashMap(*const Value, *Value, hash, eql);
     pub const List = std.ArrayList(*Value);
 
     pub var None = Value{ .none = {} };
@@ -136,7 +136,7 @@ pub const Value = union(Type) {
         }
     }
 
-    pub fn hash(key: *Value) u32 {
+    pub fn hash(key: *const Value) u32 {
         const autoHash = std.hash.autoHash;
 
         var hasher = std.hash.Wyhash.init(0);
@@ -181,7 +181,7 @@ pub const Value = union(Type) {
         return @truncate(u32, hasher.final());
     }
 
-    pub fn eql(a: *Value, b: *Value) bool {
+    pub fn eql(a: *const Value, b: *const Value) bool {
         switch (a.*) {
             .int => |i| return switch (b.*) {
                 .int => |b_val| i == b_val,
@@ -324,7 +324,7 @@ pub const Value = union(Type) {
     }
 
     /// Returns value in `container` at `index`.
-    pub fn get(container: *Value, vm: *Vm, index: *Value, res: *?*Value) !void {
+    pub fn get(container: *Value, vm: *Vm, index: *const Value, res: *?*Value) !void {
         switch (container.*) {
             .tuple => |tuple| switch (index.*) {
                 .int => {
