@@ -98,7 +98,7 @@ pub const Vm = struct {
     }
 
     // TODO rename to step and execute 1 instruction
-    pub fn exec(vm: *Vm, mod: *Module) Error!?*Value {
+    pub fn exec(vm: *Vm, mod: *Module) Error!*Value {
         const start_len = vm.call_stack.len;
         var module = mod;
         while (vm.ip < module.code.len) {
@@ -802,7 +802,7 @@ pub const Vm = struct {
         vm.ip = saved_ip;
         vm.sp = saved_sp;
         vm.line_loc = saved_line_loc;
-        return res orelse &Value.None;
+        return res;
     }
 
     fn getSingle(vm: *Vm, module: *Module) !u32 {
@@ -912,8 +912,8 @@ pub const Vm = struct {
     }
 
     /// Gets function `func_name` from map and calls it with `args`.
-    pub fn call(vm: *Vm, val: *Value, func_name: []const u8, args: var) !?*Value {
-        std.debug.assert(vm.call_stack.len == 0); // vm must be in 
+    pub fn call(vm: *Vm, val: *Value, func_name: []const u8, args: var) !*Value {
+        std.debug.assert(vm.call_stack.len == 0); // vm must be in a callable state
         if (val.* != .map) return error.NotAMap;
         const index: Value = .{
             .str = func_name,
@@ -927,7 +927,7 @@ pub const Vm = struct {
                     // TODO improve this error message to tell the expected and given counts
                     return error.InvalidArgCount;
                 }
-                
+
                 // prepare arguments
                 inline for (args) |arg, i| {
                     const loc = try vm.gc.stackRef(i);

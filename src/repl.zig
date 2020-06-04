@@ -99,11 +99,9 @@ const Repl = struct {
         repl.vm.ip += try repl.compiler.compileRepl(node, &repl.module);
 
         const res = try repl.vm.exec(&repl.module);
-        if (res) |some| {
-            if (some.* == .none) return;
-            try some.dump(out_stream, 2);
-            try out_stream.writeByte('\n');
-        }
+        if (res.* == .none) return;
+        try res.dump(out_stream, 2);
+        try out_stream.writeByte('\n');
     }
 
     fn readLine(repl: *Repl, prompt: []const u8, in_stream: var, out_stream: var) !void {

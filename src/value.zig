@@ -620,7 +620,7 @@ pub const Value = union(Type) {
                     .Int => if (val.* == .int) blk: {
                         if (val.int < std.math.minInt(T) or val.int > std.math.maxInt(T))
                             return vm.reportErr("cannot fit int in desired type");
-                        break :blk @intCast(T, val.int);                        
+                        break :blk @intCast(T, val.int);
                     } else if (val.* == .num)
                         @floatToInt(T, val.num)
                     else

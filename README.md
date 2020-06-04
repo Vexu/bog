@@ -29,7 +29,7 @@ else if (op == "/")
 else if (op == "**")
     print(val1 ** val2)
 else 
-    print("unkown op")
+    print("unknown op")
 ```
 
 ### Loops
@@ -65,7 +65,7 @@ return add(tuplify(1,2)) # 3
 ```zig
 const bog = @import("bog");
 
-fn run(allocator: *Allocator, source: []const u8, vm: *Vm) !?*bog.Value {
+fn run(allocator: *Allocator, source: []const u8, vm: *Vm) !*bog.Value {
     var module = try bog.compile(allocator, source, &vm.errors);
     defer module.deinit();
 
@@ -84,15 +84,37 @@ const res = run(allocator, source, &vm) catch |e| switch (e) {
     else => |err| return err,
     error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
         try vm.errors.render(source, out_stream);
-        return e;
+        return error.RunningBogFailed;
     },
 };
 
-if (res) |some| ...
+const bog_bool = try res.bogToZig(bool, &vm);
+```
+
+### Calling Bog functions from Zig
+
+```zig
+var vm = Vm.init(allocator, .{});
+const res = run(allocator, source, &vm) catch |e| switch (e) {
+    else => |err| return err,
+    error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
+        try vm.errors.render(source, out_stream);
+        return error.RunningBogFailed;
+    },
+};
+
+const call_res = vm.call(res, "bogFunction", .{1, true}) catch |e| switch (e) {
+    else => |err| return err,
+    error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
+        try vm.errors.render(source, out_stream);
+        return error.CallingBogFunctionFailed;
+    },
+};
+const bog_integer = try call_res.bogToZig(i64, &vm);
 ```
 
 ## Setup
-* Download latest Zig from https://ziglang.org/download/
+* Download master version of Zig from https://ziglang.org/download/
 * Clone this repo
 * Build with `zig build`
 * Run with `./zig-cache/bin/bog`

@@ -508,7 +508,7 @@ fn expectCallOutput(source: []const u8, args: var, expected: []const u8) void {
         },
     };
 
-    const call_res = vm.call(res.?, "doTheTest", args) catch |e| switch (e) {
+    const call_res = vm.call(res, "doTheTest", args) catch |e| switch (e) {
         else => @panic("test failure"),
         error.RuntimeError => {
             vm.errors.render(source, std.io.getStdErr().outStream()) catch {};
@@ -516,7 +516,7 @@ fn expectCallOutput(source: []const u8, args: var, expected: []const u8) void {
         },
     };
     var out_buf = std.ArrayList(u8).init(alloc);
-    call_res.?.dump(out_buf.outStream(), 2) catch @panic("test failure");
+    call_res.dump(out_buf.outStream(), 2) catch @panic("test failure");
     testing.expectEqualStrings(expected, out_buf.items);
 }
 
@@ -534,11 +534,11 @@ fn expectOutput(source: []const u8, expected: []const u8) void {
     };
 
     var out_buf = std.ArrayList(u8).init(alloc);
-    res.?.dump(out_buf.outStream(), 2) catch @panic("test failure");
+    res.dump(out_buf.outStream(), 2) catch @panic("test failure");
     testing.expectEqualStrings(expected, out_buf.items);
 }
 
-fn run(alloc: *mem.Allocator, source: []const u8, vm: *Vm) !?*bog.Value {
+fn run(alloc: *mem.Allocator, source: []const u8, vm: *Vm) !*bog.Value {
     var module = try bog.compile(alloc, source, &vm.errors);
 
     // TODO this should happen in vm.exec but currently that would break repl
