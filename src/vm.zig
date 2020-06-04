@@ -518,6 +518,12 @@ pub const Vm = struct {
                             .allocator = vm.gc.gpa,
                         },
                     };
+
+                    // initialize to nones
+                    for (res.tuple.values) |*item| {
+                        item.* = try vm.gc.alloc();
+                        item.*.* = .{ .none = {} };
+                    }
                 },
                 .build_list_off => {
                     const res = try vm.getNewVal(module, inst.off.res);
@@ -527,8 +533,15 @@ pub const Vm = struct {
                         inst.off.off;
 
                     res.* = .{
-                        .list = try Value.List.initCapacity(vm.gc.gpa, size),
+                        .list = Value.List.init(vm.gc.gpa),
                     };
+                    try res.list.resize(size);
+
+                    // initialize to nones
+                    for (res.list.items) |*item| {
+                        item.* = try vm.gc.alloc();
+                        item.*.* = .{ .none = {} };
+                    }
                 },
                 .build_map_off => {
                     const res = try vm.getNewVal(module, inst.off.res);

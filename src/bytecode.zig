@@ -346,8 +346,8 @@ pub const Module = struct {
                 },
                 .const_int => {
                     const val = if (inst.int.long) blk: {
-                        ip += 1;
-                        break :blk module.code[ip - 1].bare_signed;
+                        ip += 2;
+                        break :blk module.code[ip - 2].bare_signed;
                     } else inst.int.arg;
                     try stream.print("{} <- ({})\n", .{ inst.int.res, val });
                 },
@@ -418,17 +418,10 @@ pub const Module = struct {
                     try stream.print("{}[{}] <- {}\n", .{ inst.triple.res, inst.triple.lhs, inst.triple.rhs });
                 },
 
-                .move_double,
-                .copy_double,
-                .bool_not_double,
-                .bit_not_double,
-                .negate_double,
-                .try_double,
-                .build_error_double,
-                .unwrap_error_double,
-                .iter_init_double,
-                .iter_next_double,
-                => {
+                .build_error_double, .unwrap_error_double, .iter_init_double, .iter_next_double, .move_double, .copy_double => {
+                    try stream.print("{} <- {}\n", .{ inst.double.res, inst.double.arg });
+                },
+                .bool_not_double, .bit_not_double, .negate_double, .try_double => {
                     try stream.print("{} <- {} {}\n", .{ inst.double.res, opToStr(inst.double.op), inst.double.arg });
                 },
 
@@ -447,7 +440,17 @@ pub const Module = struct {
                 },
 
                 .call => {
-                    try stream.print("{} <- {}({}..N:{})\n", .{ inst.call.res, inst.call.func, inst.call.first, module.code[ip].bare });
+                    var first = inst.call.first;
+                    const last = module.code[ip].bare + first;
+                    try stream.print("{} <- {}(", .{ inst.call.res, inst.call.func });
+                    var comma = false;
+                    while (first < last) : (first += 1) {
+                        if (comma) {
+                            try stream.writeAll(", ");
+                        } else comma = true;
+                        try stream.print("{}", .{first});
+                    }
+                    try stream.writeAll(")\n");
                     ip += 1;
                 },
 
@@ -492,7 +495,7 @@ pub const Module = struct {
                 },
 
                 .const_int => if (inst.int.long) {
-                    ip += 1;
+                    ip += 2;
                 },
                 .const_num => ip += 2,
 
@@ -540,12 +543,6 @@ pub const Module = struct {
             .bool_not_double => "not",
             .bit_not_double => "~",
             .try_double => "try",
-            .build_error_double => "error",
-            .unwrap_error_double => "\"unwrap\"",
-            .iter_init_double => "\"init\"",
-            .iter_next_double => "\"next\"",
-            .move_double => "\"move\"",
-            .copy_double => "\"copy\"",
 
             .is_type_id => "is",
             .as_type_id => "as",

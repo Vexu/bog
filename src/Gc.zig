@@ -134,6 +134,13 @@ pub fn alloc(gc: *Gc) !*Value {
     return error.OutOfMemory;
 }
 
+/// Allocates a shallow copy of `val`.
+pub fn dupe(gc: *Gc, val: *Value) !*Value {
+    const new = try gc.alloc();
+    new.* = val.*;
+    return new;
+}
+
 /// Get value from stack at `index`.
 /// Returns `error.NullPtrDeref` if stack has no value at `index`.
 pub fn stackGet(gc: *Gc, index: usize) !*Value {

@@ -1,3 +1,13 @@
+test "containers do not overwrite memoized values" {
+    try expectOutput(
+        \\let x = [true]
+        \\x[0] = 1
+        \\return true
+    ,
+        \\true
+    );
+}
+
 test "this" {
     try expectOutput(
         \\let x = {
@@ -44,7 +54,7 @@ test "map" {
         \\map["foo"] = "bar"
         \\return map
     ,
-        \\{"y": 2, "foo": "bar", 1: 2}
+        \\{"foo": "bar", "y": 2, 1: 2}
     );
     try expectOutput(
         \\let y = 2

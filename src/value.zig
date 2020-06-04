@@ -230,6 +230,7 @@ pub const Value = union(Type) {
         };
     }
 
+    /// Prints string representation of value to stream
     pub fn dump(value: Value, stream: var, level: u32) @TypeOf(stream).Error!void {
         switch (value) {
             .iterator => unreachable,
@@ -322,8 +323,9 @@ pub const Value = union(Type) {
         }
     }
 
-    pub fn get(val: *Value, vm: *Vm, index: *Value, res: *?*Value) !void {
-        switch (val.*) {
+    /// Returns value in `container` at `index`.
+    pub fn get(container: *Value, vm: *Vm, index: *Value, res: *?*Value) !void {
+        switch (container.*) {
             .tuple => |tuple| switch (index.*) {
                 .int => {
                     var i = index.int;
@@ -397,8 +399,9 @@ pub const Value = union(Type) {
         }
     }
 
-    pub fn set(val: *Value, vm: *Vm, index: *Value, new_val: *Value) !void {
-        switch (val.*) {
+    /// Sets index of container to value. Does a shallow copy if value stored.
+    pub fn set(container: *Value, vm: *Vm, index: *Value, new_val: *Value) !void {
+        switch (container.*) {
             .tuple => |tuple| if (index.* == .int) {
                 var i = index.int;
                 if (i < 0)
@@ -411,7 +414,8 @@ pub const Value = union(Type) {
                 return vm.reportErr("TODO set with ranges");
             },
             .map => |*map| {
-                _ = try map.put(index, new_val);
+                // hashmaps store the key and the value so both have to be duped.
+                _ = try map.put(try vm.gc.dupe(index), try vm.gc.dupe(new_val));
             },
             .list => |list| if (index.* == .int) {
                 var i = index.int;
@@ -497,6 +501,7 @@ pub const Value = union(Type) {
         return false;
     }
 
+    /// Returns whether `container` has `val` in it.
     pub fn in(val: *Value, container: *Value) bool {
         switch (container.*) {
             .str => |str| {
