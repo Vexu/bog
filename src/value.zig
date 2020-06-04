@@ -544,6 +544,107 @@ pub const Value = union(Type) {
         };
         return iter;
     }
+
+    /// Converts Zig value to Bog value. Allocates copy in the gc.
+    pub fn zigToBog(vm: *Vm, val: var) Vm.Error!*Value {
+        switch (@TypeOf(val)) {
+            void => return &Value.None,
+            bool => return if (val) &Value.True else &Value.False,
+            *Value => return val,
+            []u8 => {
+                // assume val was allocated with vm.gc
+                const str = try vm.gc.alloc();
+                str.* = .{
+                    .str = val,
+                };
+                return str;
+            },
+            else => switch (@typeInfo(@TypeOf(val))) {
+                .ComptimeInt, .Int => {
+                    const int = try vm.gc.alloc();
+                    int.* = .{
+                        // try to implicit cast the value
+                        .int = val,
+                    };
+                    return int;
+                },
+                .ComptimeFloat, .Float => {
+                    const num = try vm.gc.alloc();
+                    num.* = .{
+                        // try to implicit cast the value
+                        .num = val,
+                    };
+                    return num;
+                },
+                .ErrorUnion => if (val) |some| {
+                    return zigToBog(vm, some);
+                } else |e| {
+                    // wrap error string
+                    const str = try vm.gc.alloc();
+                    str.* = .{
+                        .str = @errorName(e),
+                    };
+                    const err = try vm.gc.alloc();
+                    err.* = .{
+                        .err = str,
+                    };
+                    return err;
+                },
+                else => @compileError("TODO unsupported type"),
+            },
+        }
+    }
+
+    /// Converts Bog value to Zig value. Returned string is invalidated
+    /// on next garbage collection.
+    pub fn bogToZig(val: *Value, comptime T: type, vm: *Vm) Vm.Error!T {
+        return switch (T) {
+            void => {
+                if (val.* != .none)
+                    return vm.reportErr("expected none");
+            },
+            bool => blk: {
+                if (val.* != .bool)
+                    return vm.reportErr("expected bool");
+                break :blk val.bool;
+            },
+            []const u8 => blk: {
+                if (val.* != .str)
+                    return vm.reportErr("expected num");
+                break :blk val.str;
+            },
+            *Vm => vm,
+            *Value, *const Value => val,
+            else => blk: {
+                switch (@typeInfo(T)) {
+                    .Int => if (val.* == .int) blk: {
+                        if (val.int < std.math.minInt(T) or val.int > std.math.maxInt(T))
+                            return vm.reportErr("cannot fit int in desired type");
+                        break :blk @intCast(T, val.int);                        
+                    } else if (val.* == .num)
+                        @floatToInt(T, val.num)
+                    else
+                        return vm.reportErr("expected int"),
+                    .Float => |info| switch (info.bits) {
+                        32 => if (val.* == .num)
+                            @floatCast(f32, val.num)
+                        else if (val.* == .int)
+                            @intToFloat(f32, val.int)
+                        else
+                            return vm.reportErr("expected num"),
+                        64 => if (val.* == .num)
+                            val.num
+                        else if (val.* == .int)
+                            @intToFloat(f64, val.int)
+                        else
+                            return vm.reportErr("expected num"),
+                        else => @compileError("unsupported float"),
+                    },
+                    else => @compileError("TODO unsupported type"),
+                }
+            },
+        };
+    }
 };
 
 var buffer: [1024]u8 = undefined;
