@@ -342,7 +342,7 @@ pub const Module = struct {
             }
             switch (inst.op.op) {
                 .const_primitive => {
-                    try stream.print("{} <- ({})\n", .{ inst.primitive.res, inst.primitive.kind });
+                    try stream.print("{} <- ({})\n", .{ inst.primitive.res, @tagName(inst.primitive.kind) });
                 },
                 .const_int => {
                     const val = if (inst.int.long) blk: {
@@ -408,10 +408,14 @@ pub const Module = struct {
                 .in_triple,
                 .bool_and_triple,
                 .bool_or_triple,
-                .get_triple,
-                .set_triple,
                 => {
                     try stream.print("{} <- {} {} {}\n", .{ inst.triple.res, inst.triple.lhs, opToStr(inst.triple.op), inst.triple.rhs });
+                },
+                .get_triple => {
+                    try stream.print("{} <- {}[{}]\n", .{ inst.triple.res, inst.triple.lhs, inst.triple.rhs });
+                },
+                .set_triple => {
+                    try stream.print("{}[{}] <- {}\n", .{ inst.triple.res, inst.triple.lhs, inst.triple.rhs });
                 },
 
                 .move_double,
@@ -439,7 +443,7 @@ pub const Module = struct {
                         ip += 1;
                         break :blk module.code[ip - 1].bare;
                     } else inst.off.off;
-                    try stream.print("{} <- size:{}\n", .{ inst.off.op, size });
+                    try stream.print("{} <- size:{}\n", .{ inst.off.res, size });
                 },
 
                 .call => {
@@ -532,8 +536,6 @@ pub const Module = struct {
             .in_triple => "in",
             .bool_and_triple => "and",
             .bool_or_triple => "or",
-            .get_triple => "\"get\"",
-            .set_triple => "\"set\"",
 
             .bool_not_double => "not",
             .bit_not_double => "~",

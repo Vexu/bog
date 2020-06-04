@@ -567,20 +567,20 @@ pub const Vm = struct {
                 },
                 .get_triple => {
                     const res = try vm.getRef(module, inst.triple.res);
-                    const lhs = try vm.getVal(module, inst.triple.lhs);
-                    const rhs = try vm.getVal(module, inst.triple.rhs);
+                    const container = try vm.getVal(module, inst.triple.lhs);
+                    const index = try vm.getVal(module, inst.triple.rhs);
 
-                    try lhs.get(vm, rhs, res);
+                    try container.get(vm, index, res);
 
                     // this will become the value of `this` for the next function call
-                    vm.last_get = lhs;
+                    vm.last_get = container;
                 },
                 .set_triple => {
-                    const res = try vm.getVal(module, inst.triple.res);
-                    const lhs = try vm.getVal(module, inst.triple.lhs);
-                    const rhs = try vm.getVal(module, inst.triple.rhs);
+                    const container = try vm.getVal(module, inst.triple.res);
+                    const index = try vm.getVal(module, inst.triple.lhs);
+                    const val = try vm.getVal(module, inst.triple.rhs);
 
-                    try res.set(vm, lhs, rhs);
+                    try container.set(vm, index, val);
                 },
                 .as_type_id => {
                     const res = try vm.getRef(module, inst.type_id.res);

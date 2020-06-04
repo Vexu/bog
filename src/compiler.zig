@@ -554,15 +554,19 @@ pub const Compiler = struct {
     }
 
     fn genMap(self: *Compiler, node: *Node.ListTupleMap, res: Result) Error!Value {
+        if (node.values.len > std.math.maxInt(u32)) {
+            return self.reportErr("too many items", node.base.firstToken());
+        }
+
         if (res == .lval) {
             switch (res.lval) {
                 .Const, .let, .assign => |val| {
                     if (!val.isRt()) {
                         return self.reportErr("expected a map", node.base.firstToken());
                     }
-                    const reg = val.getRt();
+                    const container_reg = val.getRt();
                     const index_reg = self.registerAlloc();
-                    var sub_reg = self.registerAlloc();
+                    var result_reg = self.registerAlloc();
 
                     var it = node.values.iterator(0);
                     while (it.next()) |n| {
@@ -589,8 +593,8 @@ pub const Compiler = struct {
                             try self.emitOff(.const_string_off, index_reg, str_loc);
                         }
 
-                        try self.emitTriple(.get_triple, sub_reg, reg, index_reg);
-                        const rt_val = Value{ .rt = sub_reg };
+                        try self.emitTriple(.get_triple, result_reg, container_reg, index_reg);
+                        const rt_val = Value{ .rt = result_reg };
                         const l_val = try self.genNode(item.value, switch (res.lval) {
                             .Const => .{ .lval = .{ .Const = &rt_val } },
                             .let => .{ .lval = .{ .let = &rt_val } },
@@ -599,7 +603,7 @@ pub const Compiler = struct {
                         });
                         std.debug.assert(l_val == .empty);
 
-                        if (it.peek() != null and res.lval != .assign) sub_reg = self.registerAlloc();
+                        if (it.peek() != null and res.lval != .assign) result_reg = self.registerAlloc();
                     }
                     return Value.empty;
                 },
@@ -608,12 +612,18 @@ pub const Compiler = struct {
                 },
             }
         }
+
         const sub_res = res.toRt(self);
-        const start = self.used_regs;
-        self.used_regs += @intCast(RegRef, node.values.len * 2);
+        try self.emitOff(.build_map_off, sub_res.rt, @intCast(u32, node.values.len));
+
+        // prepare registers
+        const container_reg = sub_res.rt;
+        const index_reg = self.registerAlloc();
+        defer self.registerFree(index_reg);
+        const result_reg = self.registerAlloc();
+        defer self.registerFree(result_reg);
 
         var it = node.values.iterator(0);
-        var i = start;
         while (it.next()) |n| {
             const item = @fieldParentPtr(Node.MapItem, "base", n.*);
 
@@ -623,9 +633,9 @@ pub const Compiler = struct {
                     // `ident: value` is equal to `"ident": value`
                     const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
                     const str_loc = try self.putString(self.tokenSlice(ident.tok));
-                    try self.emitOff(.const_string_off, i, str_loc);
+                    try self.emitOff(.const_string_off, index_reg, str_loc);
                 } else {
-                    _ = try self.genNode(some, .{ .rt = i });
+                    _ = try self.genNode(some, .{ .rt = index_reg });
                 }
             } else {
                 const last_node = self.getLastNode(item.value, false);
@@ -635,40 +645,43 @@ pub const Compiler = struct {
                 // `ident` is equal to `"ident": ident`
                 const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
                 const str_loc = try self.putString(self.tokenSlice(ident.tok));
-                try self.emitOff(.const_string_off, i, str_loc);
+                try self.emitOff(.const_string_off, index_reg, str_loc);
             }
 
-            _ = try self.genNode(item.value, .{ .rt = i + 1 });
-            i += 2;
+            _ = try self.genNode(item.value, .{ .rt = result_reg });
+            try self.emitTriple(.set_triple, container_reg, index_reg, result_reg);
         }
-        // TODO error if too long
-        try self.emitOff(.build_map_off, sub_res.rt, @intCast(u32, node.values.len * 2));
+
         return sub_res.toVal();
     }
 
     fn genTupleList(self: *Compiler, node: *Node.ListTupleMap, res: Result) Error!Value {
+        if (node.values.len > std.math.maxInt(u32)) {
+            return self.reportErr("too many items", node.base.firstToken());
+        }
         if (res == .lval) {
             switch (res.lval) {
                 .Const, .let, .assign => |val| {
                     if (!val.isRt()) {
                         return self.reportErr("expected a tuple/list", node.base.firstToken());
                     }
-                    const reg = val.getRt();
+
+                    // prepare registers
+                    const container_reg = val.getRt();
                     const index_reg = self.registerAlloc();
-                    var sub_reg = self.registerAlloc();
-                    var index_val = Value{
-                        .int = 0,
-                    };
+                    var result_reg = self.registerAlloc();
 
                     var it = node.values.iterator(0);
+                    var index = Value{ .int = 0 };
+
                     while (it.next()) |n| {
                         if (n.*.id == .Discard) {
-                            index_val.int += 1;
+                            index.int += 1;
                             continue;
                         }
-                        try self.makeRuntime(index_reg, index_val);
-                        try self.emitTriple(.get_triple, sub_reg, reg, index_reg);
-                        const rt_val = Value{ .rt = sub_reg };
+                        try self.makeRuntime(index_reg, index);
+                        try self.emitTriple(.get_triple, result_reg, container_reg, index_reg);
+                        const rt_val = Value{ .rt = result_reg };
                         const l_val = try self.genNode(n.*, switch (res.lval) {
                             .Const => .{ .lval = .{ .Const = &rt_val } },
                             .let => .{ .lval = .{ .let = &rt_val } },
@@ -676,9 +689,9 @@ pub const Compiler = struct {
                             else => unreachable,
                         });
                         std.debug.assert(l_val == .empty);
-                        index_val.int += 1;
+                        index.int += 1;
 
-                        if (it.peek() != null and res.lval != .assign) sub_reg = self.registerAlloc();
+                        if (it.peek() != null and res.lval != .assign) result_reg = self.registerAlloc();
                     }
                     return Value.empty;
                 },
@@ -687,24 +700,32 @@ pub const Compiler = struct {
                 },
             }
         }
+
         const sub_res = res.toRt(self);
-        const start = self.used_regs;
-        self.used_regs += @intCast(RegRef, node.values.len);
-
-        var it = node.values.iterator(0);
-        var i = start;
-        while (it.next()) |n| {
-            _ = try self.genNode(n.*, .{ .rt = i });
-            i += 1;
-        }
-
-        const op_id: bog.Op = switch (node.base.id) {
+        try self.emitOff(switch (node.base.id) {
             .Tuple => .build_tuple_off,
             .List => .build_list_off,
             else => unreachable,
-        };
-        // TODO error if too long
-        try self.emitOff(op_id, sub_res.rt, @intCast(u32, node.values.len));
+        }, sub_res.rt, @intCast(u32, node.values.len));
+
+        // prepare registers
+        const container_reg = sub_res.rt;
+        const index_reg = self.registerAlloc();
+        defer self.registerFree(index_reg);
+        const result_reg = self.registerAlloc();
+        defer self.registerFree(result_reg);
+
+        var it = node.values.iterator(0);
+        var index = Value{ .int = 0 };
+
+        while (it.next()) |n| {
+            _ = try self.genNode(n.*, .{ .rt = result_reg });
+
+            try self.makeRuntime(index_reg, index);
+            try self.emitTriple(.set_triple, container_reg, index_reg, result_reg);
+            index.int += 1;
+        }
+
         return sub_res.toVal();
     }
 
