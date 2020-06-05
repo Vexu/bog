@@ -226,7 +226,8 @@ fn debugTokens(gpa: *std.mem.Allocator, args: [][]const u8) !void {
     const stream = std.io.getStdOut().outStream();
     for (tokens) |tok| {
         switch (tok.id) {
-            .Nl, .Indent => try stream.print("{}\n", .{@tagName(tok.id)}),
+            .Nl, .Eof => try stream.print("{}\n", .{@tagName(tok.id)}),
+            .Indent => |level| try stream.print("{} {}\n", .{ @tagName(tok.id), level }),
             else => try stream.print("{} |{}|\n", .{ @tagName(tok.id), source[tok.start..tok.end] }),
         }
     }

@@ -13,7 +13,59 @@ const util = @import("util.zig");
 
 pub const max_params = 32;
 
-pub const Error = error{CompileError} || Allocator.Error;
+pub fn compile(gpa: *Allocator, source: []const u8, errors: *Errors) (Compiler.Error || bog.Parser.Error || bog.Tokenizer.Error)!*bog.Module {
+    var tree = try bog.parse(gpa, source, errors);
+    defer tree.deinit();
+
+    const arena = &tree.arena.promote(gpa).allocator;
+    var compiler = Compiler{
+        .errors = errors,
+        .tree = tree,
+        .arena = arena,
+        .root_scope = .{
+            .base = .{
+                .id = .module,
+                .parent = null,
+                .syms = Compiler.Symbol.List.init(arena),
+            },
+            .code = Compiler.Code.init(arena),
+        },
+        .module_code = Compiler.Code.init(gpa),
+        .strings = std.ArrayList(u8).init(gpa),
+        .code = undefined,
+        .cur_scope = undefined,
+        .string_interner = std.StringHashMap(u32).init(gpa),
+    };
+    compiler.code = &compiler.root_scope.code;
+    compiler.cur_scope = &compiler.root_scope.base;
+    defer compiler.string_interner.deinit();
+
+    for (tree.nodes) |node| {
+        try compiler.autoForwardDecl(node);
+    }
+    for (tree.nodes) |node| {
+        try compiler.addLineInfo(node);
+
+        const val = try compiler.genNode(node, .discard);
+        if (val.isRt()) {
+            const reg = val.getRt();
+            defer val.free(&compiler, reg);
+            // discard unused runtime value
+            try compiler.emitSingle(.discard_single, reg);
+        }
+    }
+
+    const entry = compiler.module_code.items.len;
+    try compiler.module_code.appendSlice(compiler.code.items);
+    const mod = try gpa.create(bog.Module);
+    mod.* = .{
+        .name = "",
+        .code = compiler.module_code.toOwnedSlice(),
+        .strings = compiler.strings.toOwnedSlice(),
+        .entry = @intCast(u32, entry),
+    };
+    return mod;
+}
 
 pub const Compiler = struct {
     tree: *Tree,
@@ -28,6 +80,8 @@ pub const Compiler = struct {
     string_interner: std.StringHashMap(u32),
 
     pub const Code = std.ArrayList(bog.Instruction);
+
+    pub const Error = error{CompileError} || Allocator.Error;
 
     fn registerAlloc(self: *Compiler) RegRef {
         const reg = self.used_regs;
@@ -415,59 +469,6 @@ pub const Compiler = struct {
         }
     };
 
-    pub fn compile(allocator: *Allocator, source: []const u8, errors: *Errors) (Error || bog.Parser.Error || bog.Tokenizer.Error)!*bog.Module {
-        var tree = try bog.parse(allocator, source, errors);
-        const arena = &tree.arena_allocator.allocator;
-        var compiler = Compiler{
-            .errors = errors,
-            .tree = tree,
-            .arena = arena,
-            .root_scope = .{
-                .base = .{
-                    .id = .module,
-                    .parent = null,
-                    .syms = Symbol.List.init(arena),
-                },
-                .code = Code.init(arena),
-            },
-            .module_code = Code.init(allocator),
-            .strings = std.ArrayList(u8).init(allocator),
-            .code = undefined,
-            .cur_scope = undefined,
-            .string_interner = std.StringHashMap(u32).init(allocator),
-        };
-        compiler.code = &compiler.root_scope.code;
-        compiler.cur_scope = &compiler.root_scope.base;
-
-        var it = tree.nodes.iterator(0);
-        while (it.next()) |n| {
-            try compiler.autoForwardDecl(n.*);
-        }
-        it = tree.nodes.iterator(0);
-        while (it.next()) |n| {
-            try compiler.addLineInfo(n.*);
-
-            const val = try compiler.genNode(n.*, .discard);
-            if (val.isRt()) {
-                const reg = val.getRt();
-                defer val.free(&compiler, reg);
-                // discard unused runtime value
-                try compiler.emitSingle(.discard_single, reg);
-            }
-        }
-
-        const entry = compiler.module_code.items.len;
-        try compiler.module_code.appendSlice(compiler.code.items);
-        const mod = try allocator.create(bog.Module);
-        mod.* = .{
-            .name = "",
-            .code = compiler.module_code.toOwnedSlice(),
-            .strings = compiler.strings.toOwnedSlice(),
-            .entry = @intCast(u32, entry),
-        };
-        return mod;
-    }
-
     pub fn compileRepl(self: *Compiler, node: *Node, module: *bog.Module) Error!usize {
         try self.autoForwardDecl(node);
 
@@ -495,7 +496,7 @@ pub const Compiler = struct {
 
         // only forward declarations like
         // `const IDENTIFIER = fn ...`
-        if (self.tree.tokens.at(decl.let_const).id == .Keyword_const and
+        if (self.tree.tokens[decl.let_const].id == .Keyword_const and
             decl.capture.id != .Identifier or decl.value.id != .Fn)
             return;
 
@@ -560,17 +561,16 @@ pub const Compiler = struct {
 
         if (res == .lval) {
             switch (res.lval) {
-                .Const, .let, .assign => |val| {
-                    if (!val.isRt()) {
+                .Const, .let, .assign => |lval| {
+                    if (!lval.isRt()) {
                         return self.reportErr("expected a map", node.base.firstToken());
                     }
-                    const container_reg = val.getRt();
+                    const container_reg = lval.getRt();
                     const index_reg = self.registerAlloc();
                     var result_reg = self.registerAlloc();
 
-                    var it = node.values.iterator(0);
-                    while (it.next()) |n| {
-                        const item = @fieldParentPtr(Node.MapItem, "base", n.*);
+                    for (node.values) |val, i| {
+                        const item = @fieldParentPtr(Node.MapItem, "base", val);
 
                         if (item.key) |some| {
                             const last_node = self.getLastNode(some, false);
@@ -603,7 +603,7 @@ pub const Compiler = struct {
                         });
                         std.debug.assert(l_val == .empty);
 
-                        if (it.peek() != null and res.lval != .assign) result_reg = self.registerAlloc();
+                        if (i + 1 == node.values.len and res.lval != .assign) result_reg = self.registerAlloc();
                     }
                     return Value.empty;
                 },
@@ -623,9 +623,8 @@ pub const Compiler = struct {
         const result_reg = self.registerAlloc();
         defer self.registerFree(result_reg);
 
-        var it = node.values.iterator(0);
-        while (it.next()) |n| {
-            const item = @fieldParentPtr(Node.MapItem, "base", n.*);
+        for (node.values) |val| {
+            const item = @fieldParentPtr(Node.MapItem, "base", val);
 
             if (item.key) |some| {
                 const last_node = self.getLastNode(some, false);
@@ -661,28 +660,26 @@ pub const Compiler = struct {
         }
         if (res == .lval) {
             switch (res.lval) {
-                .Const, .let, .assign => |val| {
-                    if (!val.isRt()) {
+                .Const, .let, .assign => |lval| {
+                    if (!lval.isRt()) {
                         return self.reportErr("expected a tuple/list", node.base.firstToken());
                     }
 
                     // prepare registers
-                    const container_reg = val.getRt();
+                    const container_reg = lval.getRt();
                     const index_reg = self.registerAlloc();
                     var result_reg = self.registerAlloc();
 
-                    var it = node.values.iterator(0);
                     var index = Value{ .int = 0 };
-
-                    while (it.next()) |n| {
-                        if (n.*.id == .Discard) {
+                    for (node.values) |val, i| {
+                        if (val.id == .Discard) {
                             index.int += 1;
                             continue;
                         }
                         try self.makeRuntime(index_reg, index);
                         try self.emitTriple(.get_triple, result_reg, container_reg, index_reg);
                         const rt_val = Value{ .rt = result_reg };
-                        const l_val = try self.genNode(n.*, switch (res.lval) {
+                        const l_val = try self.genNode(val, switch (res.lval) {
                             .Const => .{ .lval = .{ .Const = &rt_val } },
                             .let => .{ .lval = .{ .let = &rt_val } },
                             .assign => .{ .lval = .{ .assign = &rt_val } },
@@ -691,7 +688,7 @@ pub const Compiler = struct {
                         std.debug.assert(l_val == .empty);
                         index.int += 1;
 
-                        if (it.peek() != null and res.lval != .assign) result_reg = self.registerAlloc();
+                        if (i + 1 == node.values.len and res.lval != .assign) result_reg = self.registerAlloc();
                     }
                     return Value.empty;
                 },
@@ -715,11 +712,9 @@ pub const Compiler = struct {
         const result_reg = self.registerAlloc();
         defer self.registerFree(result_reg);
 
-        var it = node.values.iterator(0);
         var index = Value{ .int = 0 };
-
-        while (it.next()) |n| {
-            _ = try self.genNode(n.*, .{ .rt = result_reg });
+        for (node.values) |val| {
+            _ = try self.genNode(val, .{ .rt = result_reg });
 
             try self.makeRuntime(index_reg, index);
             try self.emitTriple(.set_triple, container_reg, index_reg, result_reg);
@@ -761,10 +756,9 @@ pub const Compiler = struct {
 
         // destructure parameters
         self.used_regs = param_count;
-        var it = node.params.iterator(0);
         var i: RegRef = 0;
-        while (it.next()) |n| {
-            const param_res = try self.genNode(n.*, .{
+        for (node.params) |param| {
+            const param_res = try self.genNode(param, .{
                 .lval = .{
                     .let = &Value{ .rt = i },
                 },
@@ -818,7 +812,7 @@ pub const Compiler = struct {
     }
 
     fn genBlock(self: *Compiler, node: *Node.Block, res: Result) Error!Value {
-        try res.notLval(self, node.stmts.at(0).*.firstToken());
+        try res.notLval(self, node.stmts[0].firstToken());
         var block_scope = Scope{
             .id = .block,
             .parent = self.cur_scope,
@@ -827,16 +821,15 @@ pub const Compiler = struct {
         self.cur_scope = &block_scope;
         defer self.cur_scope = block_scope.parent.?;
 
-        var it = node.stmts.iterator(0);
-        while (it.next()) |n| {
-            try self.addLineInfo(n.*);
+        for (node.stmts) |stmt, i| {
+            try self.addLineInfo(stmt);
 
             // return value of last instruction if it is not discarded
-            if (it.peek() == null and res != .discard) {
-                return self.genNode(n.*, res);
+            if (i + 1 == node.stmts.len and res != .discard) {
+                return self.genNode(stmt, res);
             }
 
-            const val = try self.genNode(n.*, .discard);
+            const val = try self.genNode(stmt, .discard);
             if (val.isRt()) {
                 const reg = val.getRt();
                 defer val.free(self, reg);
@@ -866,7 +859,7 @@ pub const Compiler = struct {
             if_skip = try self.emitJump(.jump_none, cond_reg);
 
             self.cur_scope = &capture_scope;
-            const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)
+            const lval_res = if (self.tree.tokens[node.let_const.?].id == .Keyword_let)
                 Result{ .lval = .{ .let = &Value{ .rt = cond_reg } } }
             else
                 Result{ .lval = .{ .Const = &Value{ .rt = cond_reg } } };
@@ -995,7 +988,7 @@ pub const Compiler = struct {
             // jump past exit loop if cond == .none
             cond_jump = try self.emitJump(.jump_none, cond_reg);
 
-            const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)
+            const lval_res = if (self.tree.tokens[node.let_const.?].id == .Keyword_let)
                 Result{ .lval = .{ .let = &Value{ .rt = cond_reg } } }
             else
                 Result{ .lval = .{ .Const = &Value{ .rt = cond_reg } } };
@@ -1080,7 +1073,7 @@ pub const Compiler = struct {
         try self.code.append(.{ .bare = 0 });
 
         if (node.capture != null) {
-            const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)
+            const lval_res = if (self.tree.tokens[node.let_const.?].id == .Keyword_let)
                 Result{ .lval = .{ .let = &Value{ .rt = iter_val_reg } } }
             else
                 Result{ .lval = .{ .Const = &Value{ .rt = iter_val_reg } } };
@@ -1145,7 +1138,7 @@ pub const Compiler = struct {
             try self.emitDouble(.unwrap_error_double, unwrap_reg, sub_res.rt);
 
             self.cur_scope = &capture_scope;
-            const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)
+            const lval_res = if (self.tree.tokens[node.let_const.?].id == .Keyword_let)
                 Result{ .lval = .{ .let = &Value{ .rt = unwrap_reg } } }
             else
                 Result{ .lval = .{ .Const = &Value{ .rt = unwrap_reg } } };
@@ -1330,7 +1323,7 @@ pub const Compiler = struct {
         defer l_val.free(self, l_reg);
 
         const index_val = switch (node.op) {
-            .call => |*args| {
+            .call => |args| {
                 if (args.len > max_params) {
                     return self.reportErr("too many arguments", node.l_tok);
                 }
@@ -1339,10 +1332,9 @@ pub const Compiler = struct {
                 const start = self.used_regs;
                 self.used_regs += @truncate(RegRef, args.len);
 
-                var it = args.iterator(0);
                 var i = start;
-                while (it.next()) |n| {
-                    _ = try self.genNode(n.*, .{ .rt = i });
+                for (args) |arg| {
+                    _ = try self.genNode(arg, .{ .rt = i });
                     i += 1;
                 }
 
@@ -1762,7 +1754,7 @@ pub const Compiler = struct {
         assert(res != .lval);
         const r_val = try self.genNodeNonEmpty(node.value, .value);
 
-        const lval_kind = if (self.tree.tokens.at(node.let_const).id == .Keyword_let)
+        const lval_kind = if (self.tree.tokens[node.let_const].id == .Keyword_let)
             Result{ .lval = .{ .let = &r_val } }
         else
             Result{ .lval = .{ .Const = &r_val } };
@@ -1917,8 +1909,7 @@ pub const Compiler = struct {
     }
 
     fn addLineInfo(self: *Compiler, node: *Node) !void {
-        const token = node.firstToken();
-        const tok = self.tree.tokens.at(token);
+        const tok = self.tree.tokens[node.firstToken()];
 
         try self.code.append(.{ .op = .{ .op = .line_info } });
         try self.code.append(.{ .bare = tok.start });
@@ -1938,7 +1929,7 @@ pub const Compiler = struct {
                 .Block => {
                     if (!allow_block) return node;
                     const blk = @fieldParentPtr(Node.Block, "base", node);
-                    node = blk.stmts.at(blk.stmts.len - 1).*;
+                    node = blk.stmts[blk.stmts.len - 1];
                 },
                 else => return node,
             }
@@ -1946,7 +1937,7 @@ pub const Compiler = struct {
     }
 
     fn tokenSlice(self: *Compiler, token: TokenIndex) []const u8 {
-        const tok = self.tree.tokens.at(token);
+        const tok = self.tree.tokens[token];
         return self.tree.source[tok.start..tok.end];
     }
 
@@ -1981,7 +1972,7 @@ pub const Compiler = struct {
     }
 
     fn reportErr(self: *Compiler, msg: []const u8, tok: TokenIndex) Error {
-        try self.errors.add(msg, self.tree.tokens.at(tok).start, .err);
+        try self.errors.add(msg, self.tree.tokens[tok].start, .err);
         return error.CompileError;
     }
 };

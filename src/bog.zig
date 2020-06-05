@@ -16,7 +16,7 @@ pub const Node = ast.Node;
 
 const compiler = @import("compiler.zig");
 pub const Compiler = compiler.Compiler;
-pub const compile = Compiler.compile;
+pub const compile = compiler.compile;
 
 const value = @import("value.zig");
 pub const Value = value.Value;

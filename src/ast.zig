@@ -74,7 +74,7 @@ pub const Node = struct {
             .Native => @fieldParentPtr(Node.Native, "base", node).tok,
             .Error => @fieldParentPtr(Node.Error, "base", node).tok,
             .List, .Tuple, .Map => @fieldParentPtr(Node.ListTupleMap, "base", node).l_tok,
-            .Block => @fieldParentPtr(Node.Block, "base", node).stmts.at(0).*.firstToken(),
+            .Block => @fieldParentPtr(Node.Block, "base", node).stmts[0].firstToken(),
             .Grouped => @fieldParentPtr(Node.Grouped, "base", node).l_tok,
             .MapItem => {
                 const map = @fieldParentPtr(Node.MapItem, "base", node);
@@ -89,7 +89,7 @@ pub const Node = struct {
             .Match => @fieldParentPtr(Node.Match, "base", node).match_tok,
             .MatchCatchAll => @fieldParentPtr(Node.Jump, "base", node).tok,
             .MatchLet => @fieldParentPtr(Node.MatchLet, "base", node).let_const,
-            .MatchCase => @fieldParentPtr(Node.MatchCase, "base", node).lhs.at(0).*.firstToken(),
+            .MatchCase => @fieldParentPtr(Node.MatchCase, "base", node).lhs[0].firstToken(),
             .Jump => @fieldParentPtr(Node.Jump, "base", node).tok,
         };
     }
