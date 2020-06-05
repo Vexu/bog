@@ -470,13 +470,19 @@ pub const Vm = struct {
                     res.* = try Value.iterator(arg, vm);
                 },
                 .iter_next_double => {
+                    const base = vm.ip;
                     const res = try vm.getRef(module, inst.double.res);
                     const arg = try vm.getVal(module, inst.double.arg);
+                    const offset = try vm.getSingle(module);
 
                     if (arg.* != .iterator)
                         return error.MalformedByteCode;
 
                     try arg.iterator.next(vm, res);
+
+                    if (res.*.?.* == .none) {
+                        vm.ip = base + offset;
+                    }
                 },
                 .unwrap_error_double => {
                     const res = try vm.getRef(module, inst.double.res);

@@ -1073,10 +1073,11 @@ pub const Compiler = struct {
 
         // loop condition
         loop_scope.cond_begin = @intCast(u32, self.code.items.len);
-        try self.emitDouble(.iter_next_double, iter_val_reg, iter_reg);
 
-        // exit loop
-        const exit_jump = try self.emitJump(.jump_none, iter_val_reg);
+        // iter_next is fused with a jump_none
+        try self.emitDouble(.iter_next_double, iter_val_reg, iter_reg);
+        const exit_jump = self.code.items.len;
+        try self.code.append(.{ .bare = 0 });
 
         if (node.capture != null) {
             const lval_res = if (self.tree.tokens.at(node.let_const.?).id == .Keyword_let)

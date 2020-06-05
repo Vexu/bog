@@ -59,6 +59,7 @@ pub const Op = enum(u8) {
 
     negate_double,
     iter_init_double,
+    /// This is fused with a jump_none as an optimization
     iter_next_double,
     unwrap_error_double,
     /// IF (B==error) RET B ELSE A = B
@@ -418,7 +419,13 @@ pub const Module = struct {
                     try stream.print("{}[{}] <- {}\n", .{ inst.triple.res, inst.triple.lhs, inst.triple.rhs });
                 },
 
-                .build_error_double, .unwrap_error_double, .iter_init_double, .iter_next_double, .move_double, .copy_double => {
+                .iter_next_double => {
+                    const jump_target = ip + module.code[ip].bare;
+                    ip += 1;
+                    const label = jumps.getValue(jump_target) orelse unreachable;
+                    try stream.print("{} <- {}, jump_none to {}\n", .{ inst.double.res, inst.double.arg, label });
+                },
+                .build_error_double, .unwrap_error_double, .iter_init_double, .move_double, .copy_double => {
                     try stream.print("{} <- {}\n", .{ inst.double.res, inst.double.arg });
                 },
                 .bool_not_double, .bit_not_double, .negate_double, .try_double => {
@@ -477,7 +484,7 @@ pub const Module = struct {
             const inst = module.code[ip];
             ip += 1;
             switch (inst.op.op) {
-                .jump, .jump_false, .jump_true, .jump_none, .jump_not_error => {
+                .jump, .jump_false, .jump_true, .jump_none, .jump_not_error, .iter_next_double => {
                     const jump_target = if (inst.jump.op == .jump)
                         @intCast(usize, @intCast(isize, ip) + module.code[ip].bare_signed)
                     else
