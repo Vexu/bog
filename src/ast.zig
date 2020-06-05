@@ -149,7 +149,7 @@ pub const Node = struct {
 
     pub const Fn = struct {
         base: Node = Node{ .id = .Fn },
-        params: List,
+        params: []*Node,
         body: *Node,
         fn_tok: TokenIndex,
         r_paren: TokenIndex,
