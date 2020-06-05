@@ -62,28 +62,38 @@ fn help() !void {
 
 fn run(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     std.debug.assert(args.len > 0);
-    var bytecode = false;
-    if (mem.endsWith(u8, args[0], bog.bytecode_extension)) {
-        bytecode = true;
-    }
+    const file_name = args[0];
 
     var vm = bog.Vm.init(alloc, .{ .import_files = true });
     defer vm.deinit();
     try bog.std.registerAll(&vm.native_registry);
 
-    const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
+    const source = std.fs.cwd().readFileAlloc(alloc, file_name, 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => |err| {
-            printAndExit("unable to open '{}': {}", .{ args[0], err });
+            printAndExit("unable to open '{}': {}", .{ file_name, err });
         },
     };
     defer alloc.free(source);
 
-    const res = vm.run(source) catch |e| switch (e) {
+    var module = bog.Module.read(source) catch |e| switch (e) {
+        // not a bog bytecode file
+        error.InvalidMagic => null,
+        else => |err| printAndExit("cannot execute file '{}': {}", .{ file_name, err }),
+    };
+
+    // TODO this doesn't cast nicely for some reason
+    const res_with_err = (if (module) |*some| blk: {
+        vm.ip = some.entry;
+        break :blk vm.exec(some);
+    } else
+        vm.run(source));
+    const res = res_with_err catch |e| switch (e) {
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => printErrorsAndExit(&vm.errors, source),
         error.MalformedByteCode => if (is_debug) @panic("malformed") else printAndExit("attempted to execute invalid bytecode", .{}),
         error.OutOfMemory => return error.OutOfMemory,
     };
+
     switch (res.*) {
         .int => |int| {
             if (int >= 0 and int < std.math.maxInt(u8)) {
