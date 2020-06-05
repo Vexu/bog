@@ -32,8 +32,6 @@ pub const Vm = struct {
     /// all currently loaded packages and files
     imported_modules: std.StringHashMap(*Module),
 
-    allocator: *Allocator,
-
     options: Options,
 
     // TODO gc can't see this and it will be invalidated on collect
@@ -79,7 +77,6 @@ pub const Vm = struct {
             .call_stack = CallStack.init(allocator),
             .errors = Errors.init(allocator),
             .options = options,
-            .allocator = allocator,
             .native_registry = bog.native.Registry.init(allocator),
             .imported_modules = std.StringHashMap(*Module).init(allocator),
         };
@@ -92,12 +89,21 @@ pub const Vm = struct {
         vm.native_registry.deinit();
         var it = vm.imported_modules.iterator();
         while (it.next()) |mod| {
-            mod.value.deinit(vm.allocator);
+            mod.value.deinit(vm.gc.gpa);
         }
         vm.imported_modules.deinit();
     }
 
-    // TODO rename to step and execute 1 instruction
+    /// Compiles and executes `source`.
+    pub fn run(vm: *Vm, source: []const u8) !*bog.Value {
+        var module = try bog.compile(vm.gc.gpa, source, &vm.errors);
+        defer module.deinit(vm.gc.gpa);
+
+        vm.ip = module.entry;
+        return try vm.exec(module);
+    }
+
+    /// Continues execution from current instruction pointer.
     pub fn exec(vm: *Vm, mod: *Module) Error!*Value {
         const start_len = vm.call_stack.len;
         var module = mod;
@@ -573,8 +579,8 @@ pub const Vm = struct {
                             .arg_count = inst.func.arg_count,
                             .offset = try vm.getSingle(module),
                             .module = module,
-                            .allocator = vm.allocator,
-                            .captures = try vm.allocator.alloc(*Value, inst.func.capture_count),
+                            .allocator = vm.gc.gpa,
+                            .captures = try vm.gc.gpa.alloc(*Value, inst.func.capture_count),
                         },
                     };
                 },
@@ -754,33 +760,33 @@ pub const Vm = struct {
             if (!vm.options.import_files) {
                 return vm.reportErr("import failed");
             }
-            const source = std.fs.cwd().readFileAlloc(vm.allocator, id, vm.options.max_import_size) catch |e| switch (e) {
+            const source = std.fs.cwd().readFileAlloc(vm.gc.gpa, id, vm.options.max_import_size) catch |e| switch (e) {
                 error.OutOfMemory => return error.OutOfMemory,
                 else => return vm.reportErr("import failed"),
             };
-            defer vm.allocator.free(source);
-            const mod = bog.compile(vm.allocator, source, &vm.errors) catch
+            defer vm.gc.gpa.free(source);
+            const mod = bog.compile(vm.gc.gpa, source, &vm.errors) catch
                 return vm.reportErr("import failed");
-            mod.name = try mem.dupe(vm.allocator, u8, id);
+            mod.name = try mem.dupe(vm.gc.gpa, u8, id);
             _ = try vm.imported_modules.put(id, mod);
             break :blk mod;
         } else if (mem.endsWith(u8, id, bog.bytecode_extension)) blk: {
             if (!vm.options.import_files) {
                 return vm.reportErr("import failed");
             }
-            const source = std.fs.cwd().readFileAlloc(vm.allocator, id, vm.options.max_import_size) catch |e| switch (e) {
+            const source = std.fs.cwd().readFileAlloc(vm.gc.gpa, id, vm.options.max_import_size) catch |e| switch (e) {
                 error.OutOfMemory => return error.OutOfMemory,
                 else => return vm.reportErr("import failed"),
             };
-            defer vm.allocator.free(source);
+            defer vm.gc.gpa.free(source);
             const read_module = Module.read(source) catch
                 return vm.reportErr("import failed");
 
-            const mod = try vm.allocator.create(Module);
+            const mod = try vm.gc.gpa.create(Module);
             mod.* = .{
-                .name = try mem.dupe(vm.allocator, u8, id),
-                .code = try mem.dupe(vm.allocator, bog.Instruction, read_module.code),
-                .strings = try mem.dupe(vm.allocator, u8, read_module.strings),
+                .name = try mem.dupe(vm.gc.gpa, u8, id),
+                .code = try mem.dupe(vm.gc.gpa, bog.Instruction, read_module.code),
+                .strings = try mem.dupe(vm.gc.gpa, u8, read_module.strings),
                 .entry = read_module.entry,
             };
             _ = try vm.imported_modules.put(id, mod);

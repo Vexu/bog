@@ -65,22 +65,11 @@ return add(tuplify(1,2)) # 3
 ```zig
 const bog = @import("bog");
 
-fn run(allocator: *Allocator, source: []const u8, vm: *Vm) !*bog.Value {
-    var module = try bog.compile(allocator, source, &vm.errors);
-    defer module.deinit();
-
-    // TODO this should happen in vm.exec but currently that would break repl
-    vm.ip = module.entry;
-    return try vm.exec(module);
-}
-
-...
-
 var vm = bog.Vm.init(allocator, .{ .import_files = true });
 defer vm.deinit();
 try bog.std.registerAll(&vm.native_registry);
 
-const res = run(allocator, source, &vm) catch |e| switch (e) {
+const res = vm.run(source) catch |e| switch (e) {
     else => |err| return err,
     error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
         try vm.errors.render(source, out_stream);
@@ -95,7 +84,9 @@ const bog_bool = try res.bogToZig(bool, &vm);
 
 ```zig
 var vm = Vm.init(allocator, .{});
-const res = run(allocator, source, &vm) catch |e| switch (e) {
+defer vm.deinit();
+
+const res = vm.run(source) catch |e| switch (e) {
     else => |err| return err,
     error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
         try vm.errors.render(source, out_stream);
@@ -110,6 +101,7 @@ const call_res = vm.call(res, "bogFunction", .{1, true}) catch |e| switch (e) {
         return error.CallingBogFunctionFailed;
     },
 };
+
 const bog_integer = try call_res.bogToZig(i64, &vm);
 ```
 

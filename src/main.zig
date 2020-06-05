@@ -20,16 +20,16 @@ pub fn main() !void {
         }
         if (is_debug) {
             if (mem.eql(u8, args[1], "debug:dump")) {
-                return debug_dump(alloc, args[2..]);
+                return debugDump(alloc, args[2..]);
             }
             if (mem.eql(u8, args[1], "debug:tokens")) {
-                return debug_tokens(alloc, args[2..]);
+                return debugTokens(alloc, args[2..]);
             }
             if (mem.eql(u8, args[1], "debug:write")) {
-                return debug_write(alloc, args[2..]);
+                return debugWrite(alloc, args[2..]);
             }
             if (mem.eql(u8, args[1], "debug:read")) {
-                return debug_read(alloc, args[2..]);
+                return debugRead(alloc, args[2..]);
             }
         }
         if (!mem.startsWith(u8, "-", args[1])) {
@@ -74,22 +74,22 @@ fn run(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => |err| {
-            print_and_exit("unable to open '{}': {}", .{ args[0], err });
+            printAndExit("unable to open '{}': {}", .{ args[0], err });
         },
     };
     defer alloc.free(source);
 
-    const res = run_source(alloc, &vm, source) catch |e| switch (e) {
-        error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => print_errors_and_exit(&vm.errors, source),
-        error.MalformedByteCode => if (is_debug) @panic("malformed") else print_and_exit("attempted to execute invalid bytecode", .{}),
+    const res = vm.run(source) catch |e| switch (e) {
+        error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => printErrorsAndExit(&vm.errors, source),
+        error.MalformedByteCode => if (is_debug) @panic("malformed") else printAndExit("attempted to execute invalid bytecode", .{}),
         error.OutOfMemory => return error.OutOfMemory,
     };
-    if (res) |some| switch (some.*) {
+    switch (res.*) {
         .int => |int| {
             if (int >= 0 and int < std.math.maxInt(u8)) {
                 process.exit(@intCast(u8, int));
             } else {
-                print_and_exit("invalid exit code: {}", .{int});
+                printAndExit("invalid exit code: {}", .{int});
             }
         },
         .err => |err| {
@@ -100,17 +100,8 @@ fn run(alloc: *std.mem.Allocator, args: [][]const u8) !void {
             process.exit(1);
         },
         .none => {},
-        else => print_and_exit("invalid return type '{}'", .{@tagName(some.*)}),
-    };
-}
-
-fn run_source(alloc: *std.mem.Allocator, vm: *bog.Vm, source: []const u8) !?*bog.Value {
-    var module = try bog.compile(alloc, source, &vm.errors);
-    defer module.deinit(alloc);
-
-    // TODO this should happen in vm.exec but currently that would break repl
-    vm.ip = module.entry;
-    return try vm.exec(module);
+        else => printAndExit("invalid return type '{}'", .{@tagName(res.*)}),
+    }
 }
 
 const usage_fmt =
@@ -122,14 +113,14 @@ const usage_fmt =
 
 fn fmt(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     if (args.len == 0) {
-        print_and_exit(usage_fmt, .{});
+        printAndExit(usage_fmt, .{});
     }
     // TODO handle dirs
     const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
-        error.IsDir => print_and_exit("TODO fmt dirs", .{}),
+        error.IsDir => printAndExit("TODO fmt dirs", .{}),
         else => |err| {
-            print_and_exit("unable to open '{}': {}", .{ args[0], err });
+            printAndExit("unable to open '{}': {}", .{ args[0], err });
         },
     };
     defer alloc.free(source);
@@ -138,7 +129,7 @@ fn fmt(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     defer errors.deinit();
 
     var tree = bog.parse(alloc, source, &errors) catch |e| switch (e) {
-        error.TokenizeError, error.ParseError => print_errors_and_exit(&errors, source),
+        error.TokenizeError, error.ParseError => printErrorsAndExit(&errors, source),
         error.OutOfMemory => return error.OutOfMemory,
     };
     defer tree.deinit();
@@ -149,24 +140,24 @@ fn fmt(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     try tree.render(file.outStream());
 }
 
-fn print_errors_and_exit(errors: *bog.Errors, source: []const u8) noreturn {
+fn printErrorsAndExit(errors: *bog.Errors, source: []const u8) noreturn {
     errors.render(source, std.io.getStdErr().outStream()) catch {};
     process.exit(1);
 }
 
-fn print_and_exit(comptime msg: []const u8, args: var) noreturn {
+fn printAndExit(comptime msg: []const u8, args: var) noreturn {
     std.io.getStdErr().outStream().print(msg ++ "\n", args) catch {};
     process.exit(1);
 }
 
-fn debug_dump(alloc: *std.mem.Allocator, args: [][]const u8) !void {
+fn debugDump(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     if (args.len != 1) {
-        print_and_exit("expected one argument", .{});
+        printAndExit("expected one argument", .{});
     }
     const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => |err| {
-            print_and_exit("unable to open '{}': {}", .{ args[0], err });
+            printAndExit("unable to open '{}': {}", .{ args[0], err });
         },
     };
     defer alloc.free(source);
@@ -186,14 +177,14 @@ fn debug_dump(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     try module.dump(alloc, std.io.getStdOut().outStream());
 }
 
-fn debug_tokens(alloc: *std.mem.Allocator, args: [][]const u8) !void {
+fn debugTokens(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     if (args.len != 1) {
-        print_and_exit("expected one argument", .{});
+        printAndExit("expected one argument", .{});
     }
     const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => |err| {
-            print_and_exit("unable to open '{}': {}", .{ args[0], err });
+            printAndExit("unable to open '{}': {}", .{ args[0], err });
         },
     };
     defer alloc.free(source);
@@ -227,14 +218,14 @@ fn debug_tokens(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     }
 }
 
-fn debug_write(alloc: *std.mem.Allocator, args: [][]const u8) !void {
+fn debugWrite(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     if (args.len != 2) {
-        print_and_exit("expected one argument", .{});
+        printAndExit("expected one argument", .{});
     }
     const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => |err| {
-            print_and_exit("unable to open '{}': {}", .{ args[0], err });
+            printAndExit("unable to open '{}': {}", .{ args[0], err });
         },
     };
     defer alloc.free(source);
@@ -257,14 +248,14 @@ fn debug_write(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     try module.write(file.outStream());
 }
 
-fn debug_read(alloc: *std.mem.Allocator, args: [][]const u8) !void {
+fn debugRead(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     if (args.len != 1) {
-        print_and_exit("expected one argument", .{});
+        printAndExit("expected one argument", .{});
     }
     const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => |err| {
-            print_and_exit("unable to open '{}': {}", .{ args[0], err });
+            printAndExit("unable to open '{}': {}", .{ args[0], err });
         },
     };
     defer alloc.free(source);
