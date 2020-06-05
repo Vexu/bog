@@ -2,63 +2,59 @@ const std = @import("std");
 const bog = @import("bog.zig");
 const Tree = bog.Tree;
 const Node = bog.Node;
-const TokenList = bog.Token.List;
 const TokenIndex = bog.Token.Index;
 
 pub fn render(tree: *Tree, stream: var) @TypeOf(stream).Error!void {
     var renderer = Renderer{
         .source = tree.source,
-        .tokens = &tree.tokens,
+        .tokens = tree.tokens,
     };
     try renderer.renderComments(0, stream, 0, .newline);
-    {
-        var it = tree.nodes.iterator(0);
-        while (it.next()) |node| {
-            try renderer.renderNode(node.*, stream, 0, .newline);
+    for (tree.nodes) |node, i| {
+        try renderer.renderNode(node, stream, 0, .newline);
 
-            if (it.peek() == null) break;
-            const last_token = node.*.lastToken();
-            if (renderer.lineDist(last_token, renderer.nextToken(last_token)) > 1) {
-                try stream.writeByte('\n');
-            }
-            if (Renderer.isBlock(node.*)) {
-                try stream.writeAll("\n\n");
-            }
+        if (i + 1 == tree.nodes.len) break;
+        const last_token = node.lastToken();
+        if (renderer.lineDist(last_token, renderer.nextToken(last_token)) > 1) {
+            try stream.writeByte('\n');
+        }
+        if (Renderer.isBlock(node)) {
+            try stream.writeAll("\n\n");
         }
     }
 }
 
 const Renderer = struct {
     source: []const u8,
-    tokens: *TokenList,
+    tokens: []const bog.Token,
 
     const indent_delta = 4;
 
     fn prevToken(self: *Renderer, tok: TokenIndex) TokenIndex {
-        var it = self.tokens.iterator(tok);
-        while (it.prev()) |some| {
-            switch (some.id) {
-                .Comment, .Nl, .End, .Begin => {},
+        var index = tok - 1;
+        while (true) {
+            switch (self.tokens[index].id) {
+                .Comment, .Nl, .Indent => index -= 1,
                 else => break,
             }
         }
-        return @truncate(TokenIndex, it.index);
+        return index;
     }
 
     fn nextToken(self: *Renderer, tok: TokenIndex) TokenIndex {
-        var it = self.tokens.iterator(tok + 1);
-        while (it.next()) |some| {
-            switch (some.id) {
-                .Comment, .Nl, .End, .Begin => {},
+        var index = tok + 1;
+        while (true) {
+            switch (self.tokens[index].id) {
+                .Comment, .Nl, .Indent => index += 1,
                 else => break,
             }
         }
-        return @truncate(TokenIndex, it.index - 1);
+        return index;
     }
 
     fn lineDist(self: *Renderer, a: TokenIndex, b: TokenIndex) u32 {
-        const first_end = self.tokens.at(a).end;
-        const second_start = self.tokens.at(b).start;
+        const first_end = self.tokens[a].end;
+        const second_start = self.tokens[b].start;
         var i = first_end;
         var count: u32 = 0;
         while (i < second_start) : (i += 1) {
@@ -99,7 +95,7 @@ const Renderer = struct {
             },
             .Grouped => {
                 const grouped = @fieldParentPtr(Node.Grouped, "base", node);
-                const after_tok_space: Space = if (self.tokens.at(grouped.l_tok).id == .LBrace) .space else .none;
+                const after_tok_space: Space = if (self.tokens[grouped.l_tok].id == .LBrace) .space else .none;
 
                 try self.renderToken(grouped.l_tok, stream, indent, after_tok_space);
                 try self.renderNode(grouped.expr, stream, indent, after_tok_space);
@@ -123,32 +119,7 @@ const Renderer = struct {
                 try self.renderNode(suffix.lhs, stream, indent, .none);
                 try self.renderToken(suffix.l_tok, stream, indent, .none);
                 switch (suffix.op) {
-                    .call => |*params| {
-                        var it = params.iterator(0);
-                        const prev = self.tokens.at(suffix.r_tok - 1).id;
-                        if (prev == .Comma or prev == .Nl or prev == .End) {
-                            try stream.writeByte('\n');
-                            const new_indet = indent + indent_delta;
-                            while (it.next()) |param| {
-                                try stream.writeByteNTimes(' ', new_indet);
-                                try self.renderNode(param.*, stream, new_indet, .none);
-                                const comma = self.nextToken(param.*.lastToken());
-                                if (self.tokens.at(comma).id == .Comma)
-                                    try self.renderToken(comma, stream, indent, .newline)
-                                else
-                                    try stream.writeAll(",\n");
-                            }
-                        } else {
-                            while (it.next()) |param| {
-                                if (it.peek() == null) {
-                                    try self.renderNode(param.*, stream, indent, .none);
-                                    break;
-                                }
-                                try self.renderNode(param.*, stream, indent, .none);
-                                try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .space);
-                            }
-                        }
-                    },
+                    .call => |params| try self.renderCommaList(params, suffix.r_tok, stream, indent, space),
                     .subscript => |arr_node| try self.renderNode(arr_node, stream, indent, .none),
                     .member => {},
                 }
@@ -234,30 +205,7 @@ const Renderer = struct {
                 try self.renderToken(fn_expr.fn_tok, stream, indent, .none);
                 try self.renderToken(self.nextToken(fn_expr.fn_tok), stream, indent, .none);
 
-                var it = fn_expr.params.iterator(0);
-                const prev = self.tokens.at(fn_expr.r_paren - 1).id;
-                if (prev == .Comma or prev == .Nl or prev == .End) {
-                    try stream.writeByte('\n');
-                    const new_indet = indent + indent_delta;
-                    while (it.next()) |param| {
-                        try stream.writeByteNTimes(' ', new_indet);
-                        try self.renderNode(param.*, stream, new_indet, .none);
-                        const comma = self.nextToken(param.*.lastToken());
-                        if (self.tokens.at(comma).id == .Comma)
-                            try self.renderToken(comma, stream, indent, .newline)
-                        else
-                            try stream.writeAll(",\n");
-                    }
-                } else {
-                    while (it.next()) |param| {
-                        if (it.peek() == null) {
-                            try self.renderNode(param.*, stream, indent, .none);
-                            break;
-                        }
-                        try self.renderNode(param.*, stream, indent, .none);
-                        try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .space);
-                    }
-                }
+                try self.renderCommaList(fn_expr.params, fn_expr.r_paren, stream, indent, space);
 
                 try self.renderToken(fn_expr.r_paren, stream, indent, .space);
                 return self.renderNode(fn_expr.body, stream, indent, space);
@@ -266,32 +214,7 @@ const Renderer = struct {
                 const ltm = @fieldParentPtr(Node.ListTupleMap, "base", node);
 
                 try self.renderToken(ltm.l_tok, stream, indent, .none);
-
-                var it = ltm.values.iterator(0);
-                const prev = self.tokens.at(ltm.r_tok - 1).id;
-                if (prev == .Comma or prev == .Nl or prev == .End) {
-                    try stream.writeByte('\n');
-                    const new_indet = indent + indent_delta;
-                    while (it.next()) |param| {
-                        try stream.writeByteNTimes(' ', new_indet);
-                        try self.renderNode(param.*, stream, new_indet, .none);
-                        const comma = self.nextToken(param.*.lastToken());
-                        if (self.tokens.at(comma).id == .Comma)
-                            try self.renderToken(comma, stream, indent, .newline)
-                        else
-                            try stream.writeAll(",\n");
-                    }
-                    try stream.writeByteNTimes(' ', indent);
-                } else {
-                    while (it.next()) |param| {
-                        if (it.peek() == null) {
-                            try self.renderNode(param.*, stream, indent, .none);
-                            break;
-                        }
-                        try self.renderNode(param.*, stream, indent, .none);
-                        try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .space);
-                    }
-                }
+                try self.renderCommaList(ltm.values, ltm.r_tok, stream, indent, space);
 
                 return self.renderToken(ltm.r_tok, stream, indent, space);
             },
@@ -299,17 +222,16 @@ const Renderer = struct {
                 const blk = @fieldParentPtr(Node.Block, "base", node);
 
                 const new_indet = indent + indent_delta;
-                var it = blk.stmts.iterator(0);
-                while (it.next()) |stmt| {
+                for (blk.stmts) |stmt, i| {
                     try stream.writeByteNTimes(' ', new_indet);
-                    try self.renderNode(stmt.*, stream, new_indet, .newline);
+                    try self.renderNode(stmt, stream, new_indet, .newline);
 
-                    if (it.peek() == null) break;
-                    const last_token = stmt.*.lastToken();
+                    if (i + 1 == blk.stmts.len) break;
+                    const last_token = stmt.lastToken();
                     if (self.lineDist(last_token, self.nextToken(last_token)) != 1) {
                         try stream.writeByte('\n');
                     }
-                    if (isBlock(stmt.*)) {
+                    if (isBlock(stmt)) {
                         try stream.writeAll("\n\n");
                     }
                 }
@@ -372,17 +294,16 @@ const Renderer = struct {
                 try self.renderToken(match_expr.r_paren, stream, indent, .newline);
 
                 const new_indet = indent + indent_delta;
-                var it = match_expr.body.iterator(0);
-                while (it.next()) |n| {
+                for (match_expr.body) |case| {
                     try stream.writeByteNTimes(' ', new_indet);
-                    try self.renderNode(n.*, stream, new_indet, .newline);
+                    try self.renderNode(case, stream, new_indet, .newline);
                 }
                 try stream.writeByteNTimes(' ', indent);
             },
             .MatchCatchAll => {
                 const case = @fieldParentPtr(Node.MatchCatchAll, "base", node);
 
-                if (self.tokens.at(case.tok).id != .Underscore) {
+                if (self.tokens[case.tok].id != .Underscore) {
                     try self.renderToken(case.tok, stream, indent, .space);
                     try self.renderToken(self.nextToken(case.tok), stream, indent, .none);
                 } else {
@@ -402,16 +323,7 @@ const Renderer = struct {
             .MatchCase => {
                 const case = @fieldParentPtr(Node.MatchCase, "base", node);
 
-                var it = case.lhs.iterator(0);
-                // TODO trailing comma
-                while (it.next()) |param| {
-                    if (it.peek() == null) {
-                        try self.renderNode(param.*, stream, indent, .none);
-                        break;
-                    }
-                    try self.renderNode(param.*, stream, indent, .none);
-                    try self.renderToken(self.nextToken(param.*.lastToken()), stream, indent, .space);
-                }
+                try self.renderCommaList(case.lhs, case.colon, stream, indent, space);
                 try self.renderToken(case.colon, stream, indent, .space);
 
                 return self.renderNode(case.expr, stream, indent, space);
@@ -419,15 +331,42 @@ const Renderer = struct {
         }
     }
 
+    fn renderCommaList(self: *Renderer, nodes: []const *Node, last_token: TokenIndex, stream: var, indent: u32, space: Space) !void {
+        const prev = self.tokens[last_token - 1].id;
+        if (prev == .Comma or prev == .Nl or prev == .Comment) {
+            try stream.writeByte('\n');
+            const new_indet = indent + indent_delta;
+            for (nodes) |node, i| {
+                try stream.writeByteNTimes(' ', new_indet);
+                try self.renderNode(node, stream, new_indet, .none);
+                const comma = self.nextToken(node.lastToken());
+                if (self.tokens[comma].id == .Comma)
+                    try self.renderToken(comma, stream, indent, .newline)
+                else
+                    try stream.writeAll(",\n");
+            }
+            try stream.writeByteNTimes(' ', indent);
+        } else {
+            for (nodes) |node, i| {
+                if (i + 1 == nodes.len) {
+                    try self.renderNode(node, stream, indent, .none);
+                    break;
+                }
+                try self.renderNode(node, stream, indent, .none);
+                try self.renderToken(self.nextToken(node.lastToken()), stream, indent, .space);
+            }
+        }
+    }
+
     fn renderComments(self: *Renderer, token: TokenIndex, stream: var, indent: u32, space: Space) !void {
         var i = token;
-        while (true) : (i += 1) {
-            var tok = self.tokens.at(i);
-            switch (tok.id) {
-                .Nl, .End, .Begin => continue,
-                .Comment => {},
+        while (true) {
+            switch (self.tokens[i].id) {
+                .Nl, .Indent => continue,
+                .Comment => i += 1,
                 else => break,
             }
+            var tok = self.tokens[i];
 
             const slice = self.source[tok.start..tok.end];
             const trimmed = std.mem.trimRight(u8, slice, " \t\r");
@@ -482,16 +421,12 @@ const Renderer = struct {
     };
 
     fn renderToken(self: *Renderer, token: TokenIndex, stream: var, indent: u32, space: Space) !void {
-        var tok = self.tokens.at(token);
+        var tok = self.tokens[token];
         try stream.writeAll(self.source[tok.start..tok.end]);
         switch (space) {
             .none => {},
             .newline => try stream.writeByte('\n'),
-            .space => if (self.tokens.len > token + 2 and self.tokens.at(token + 2).id == .Begin) {
-                try stream.writeByte('\n');
-            } else {
-                try stream.writeByte(' ');
-            },
+            .space => try stream.writeByte(' '),
         }
         try self.renderComments(token + 1, stream, indent, space);
     }

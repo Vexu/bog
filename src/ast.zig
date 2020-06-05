@@ -110,7 +110,7 @@ pub const Node = struct {
             .List, .Tuple, .Map => @fieldParentPtr(Node.ListTupleMap, "base", node).r_tok,
             .Block => {
                 const block = @fieldParentPtr(Node.Block, "base", node);
-                return block.stmts.at(block.stmts.len - 1).*.lastToken();
+                return block.stmts[block.stmts.len - 1].lastToken();
             },
             .Grouped => @fieldParentPtr(Node.Grouped, "base", node).r_tok,
             .MapItem => @fieldParentPtr(Node.MapItem, "base", node).value.lastToken(),
@@ -124,7 +124,7 @@ pub const Node = struct {
             .While => @fieldParentPtr(Node.While, "base", node).body.lastToken(),
             .Match => {
                 const match = @fieldParentPtr(Node.Match, "base", node);
-                return match.body.at(match.body.len - 1).*.lastToken();
+                return match.body[match.body.len - 1].lastToken();
             },
             .MatchCatchAll => @fieldParentPtr(Node.MatchCatchAll, "base", node).expr.lastToken(),
             .MatchLet => @fieldParentPtr(Node.MatchLet, "base", node).expr.lastToken(),

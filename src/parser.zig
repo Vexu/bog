@@ -1000,6 +1000,7 @@ pub const Parser = struct {
 
     fn eatTokenId(parser: *Parser, id: @TagType(Token.Id), skip_nl: bool) ?TokAndId {
         while (true) {
+            parser.tok_index += 1;
             switch (parser.tokens[parser.tok_index].id) {
                 // skip nl and indent if they are not meaningful
                 .Nl, .Indent => if (!skip_nl) break,
@@ -1007,7 +1008,6 @@ pub const Parser = struct {
                 .Comment => {},
                 else => break,
             }
-            parser.tok_index += 1;
         }
         if (parser.tokens[parser.tok_index].id == id) {
             return TokAndId{
