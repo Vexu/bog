@@ -20,7 +20,7 @@ pub const Registry = struct {
     }
 
     pub fn register(self: *Registry, name: []const u8, comptime func: var) !void {
-        std.debug.assert((try self.map.put(name, wrap(func))) == null);
+        try self.map.putNoClobber(name, wrap(func));
     }
 };
 

@@ -1,13 +1,15 @@
 const Builder = @import("std").build.Builder;
 
 pub fn build(b: *Builder) void {
-    const mode = b.standardReleaseOptions();
-    // const lib = b.addStaticLibrary("bog", "src/lib.zig");
-    // lib.setBuildMode(mode);
-    // lib.linkSystemLibrary("c");
-    // lib.install();
+    b.setPreferredReleaseMode(.ReleaseSafe);
 
-    addTests(b, mode, .{
+    const lib = b.addStaticLibrary("bog", "src/lib.zig");
+    lib.linkLibC();
+    lib.bundle_compiler_rt = true;
+    const lib_step = b.step("lib", "Build C library");
+    lib_step.dependOn(&b.addInstallArtifact(lib).step);
+
+    addTests(b, .{
         "src/main.zig",
         "tests/fmt.zig",
         "tests/behavior.zig",
@@ -15,13 +17,8 @@ pub fn build(b: *Builder) void {
     });
 
     var exe = b.addExecutable("bog", "src/main.zig");
-    exe.setBuildMode(mode);
     exe.install();
     exe.linkLibC();
-
-    // repl doesn't work with this
-    // const run_step = b.step("run", "Run");
-    // run_step.dependOn(&exe.run().step);
 
     const fmt_step = b.step("fmt", "Format all source files");
     fmt_step.dependOn(&b.addFmt(&[_][]const u8{
@@ -30,12 +27,11 @@ pub fn build(b: *Builder) void {
     }).step);
 }
 
-fn addTests(b: *Builder, mode: var, tests: var) void {
+fn addTests(b: *Builder, tests: var) void {
     const tests_step = b.step("test", "Run all tests");
     tests_step.dependOn(b.getInstallStep());
     inline for (tests) |t| {
         var test_step = b.addTest(t);
-        test_step.setBuildMode(mode);
         test_step.addPackagePath("bog", "src/bog.zig");
         tests_step.dependOn(&test_step.step);
     }
