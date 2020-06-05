@@ -105,6 +105,35 @@ const call_res = vm.call(res, "bogFunction", .{1, true}) catch |e| switch (e) {
 const bog_integer = try call_res.bogToZig(i64, &vm);
 ```
 
+### Calling Zig functions from Bog
+
+```zig
+fn pow(val: i64) i64 {
+    return val * val;
+}
+
+var vm = Vm.init(allocator, .{});
+defer vm.deinit();
+try vm.native_registry.register("my_lib.pow", pow);
+
+const res = vm.run(source) catch |e| switch (e) {
+    else => |err| return err,
+    error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
+        try vm.errors.render(source, out_stream);
+        return error.RunningBogFailed;
+    },
+};
+
+const bog_integer = try res.bogToZig(i64, &vm);
+std.debug.assert(bog_integer == 8);
+```
+
+```rust
+const pow = native("my_lib.pow")
+
+return 2 * pow(2)
+```
+
 ## Setup
 * Download master version of Zig from https://ziglang.org/download/
 * Clone this repo

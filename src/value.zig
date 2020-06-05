@@ -615,33 +615,31 @@ pub const Value = union(Type) {
             },
             *Vm => vm,
             *Value, *const Value => val,
-            else => blk: {
-                switch (@typeInfo(T)) {
-                    .Int => if (val.* == .int) blk: {
-                        if (val.int < std.math.minInt(T) or val.int > std.math.maxInt(T))
-                            return vm.reportErr("cannot fit int in desired type");
-                        break :blk @intCast(T, val.int);
-                    } else if (val.* == .num)
-                        @floatToInt(T, val.num)
+            else => switch (@typeInfo(T)) {
+                .Int => if (val.* == .int) blk: {
+                    if (val.int < std.math.minInt(T) or val.int > std.math.maxInt(T))
+                        return vm.reportErr("cannot fit int in desired type");
+                    break :blk @intCast(T, val.int);
+                } else if (val.* == .num)
+                    @floatToInt(T, val.num)
+                else
+                    return vm.reportErr("expected int"),
+                .Float => |info| switch (info.bits) {
+                    32 => if (val.* == .num)
+                        @floatCast(f32, val.num)
+                    else if (val.* == .int)
+                        @intToFloat(f32, val.int)
                     else
-                        return vm.reportErr("expected int"),
-                    .Float => |info| switch (info.bits) {
-                        32 => if (val.* == .num)
-                            @floatCast(f32, val.num)
-                        else if (val.* == .int)
-                            @intToFloat(f32, val.int)
-                        else
-                            return vm.reportErr("expected num"),
-                        64 => if (val.* == .num)
-                            val.num
-                        else if (val.* == .int)
-                            @intToFloat(f64, val.int)
-                        else
-                            return vm.reportErr("expected num"),
-                        else => @compileError("unsupported float"),
-                    },
-                    else => @compileError("TODO unsupported type"),
-                }
+                        return vm.reportErr("expected num"),
+                    64 => if (val.* == .num)
+                        val.num
+                    else if (val.* == .int)
+                        @intToFloat(f64, val.int)
+                    else
+                        return vm.reportErr("expected num"),
+                    else => @compileError("unsupported float"),
+                },
+                else => @compileError("TODO unsupported type"),
             },
         };
     }
