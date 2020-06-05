@@ -187,42 +187,36 @@ fn debugDump(alloc: *std.mem.Allocator, args: [][]const u8) !void {
     try module.dump(alloc, std.io.getStdOut().outStream());
 }
 
-fn debugTokens(alloc: *std.mem.Allocator, args: [][]const u8) !void {
+fn debugTokens(gpa: *std.mem.Allocator, args: [][]const u8) !void {
     if (args.len != 1) {
         printAndExit("expected one argument", .{});
     }
-    const source = std.fs.cwd().readFileAlloc(alloc, args[0], 1024 * 1024) catch |e| switch (e) {
+    const file_name = args[0];
+
+    const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => |err| {
-            printAndExit("unable to open '{}': {}", .{ args[0], err });
+            printAndExit("unable to open '{}': {}", .{ file_name, err });
         },
     };
-    defer alloc.free(source);
+    defer gpa.free(source);
 
-    var tree = bog.Tree{
-        .tokens = bog.Token.List.init(alloc),
-        .source = source,
-        .nodes = undefined,
-        .arena_allocator = undefined,
-    };
-    defer tree.tokens.deinit();
-
-    var errors = bog.Errors.init(alloc);
+    var errors = bog.Errors.init(gpa);
     defer errors.deinit();
 
-    bog.tokenize(&tree, &errors) catch |e| switch (e) {
+    const tokens = bog.tokenize(gpa, source, &errors) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.TokenizeError => {
             try errors.render(source, std.io.getStdErr().outStream());
             process.exit(1);
         },
     };
+    defer gpa.free(tokens);
 
     const stream = std.io.getStdOut().outStream();
-    var it = tree.tokens.iterator(0);
-    while (it.next()) |tok| {
+    for (tokens) |tok| {
         switch (tok.id) {
-            .Nl, .End, .Begin => try stream.print("{}\n", .{@tagName(tok.id)}),
+            .Nl, .Indent => try stream.print("{}\n", .{@tagName(tok.id)}),
             else => try stream.print("{} |{}|\n", .{ @tagName(tok.id), source[tok.start..tok.end] }),
         }
     }

@@ -4,11 +4,11 @@ const Allocator = zig_std.mem.Allocator;
 const tokenizer = @import("tokenizer.zig");
 pub const Token = tokenizer.Token;
 pub const Tokenizer = tokenizer.Tokenizer;
-pub const tokenize = Tokenizer.tokenize;
+pub const tokenize = tokenizer.tokenize;
 
 const parser = @import("parser.zig");
 pub const Parser = parser.Parser;
-pub const parse = Parser.parse;
+pub const parse = parser.parse;
 
 const ast = @import("ast.zig");
 pub const Tree = ast.Tree;

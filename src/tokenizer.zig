@@ -307,6 +307,29 @@ pub const Token = struct {
     }
 };
 
+pub fn tokenize(allocator: *mem.Allocator, source: []const u8, errors: *Errors) Tokenizer.Error![]const Token {
+    // estimate one token per 8 bytes to reduce allocation in the beginning
+    const estimated = source.len / 8;
+    var tokenizer = Tokenizer{
+        .tokens = try Token.List.initCapacity(allocator, estimated),
+        .errors = errors,
+        .it = .{
+            .i = 0,
+            .bytes = source,
+        },
+        .repl = false,
+    };
+    errdefer tokenizer.tokens.deinit();
+    while (true) {
+        const tok = try tokenizer.tokens.addOne();
+        tok.* = try tokenizer.next();
+        if (tok.id == .Eof) {
+            // std.debug.warn("estimated: {}, actual: {}\n\n", .{estimated, tokenizer.tokens.items.len});
+            return tokenizer.tokens.toOwnedSlice();
+        }
+    }
+}
+
 pub const Tokenizer = struct {
     errors: *Errors,
     tokens: Token.List,
@@ -330,27 +353,6 @@ pub const Tokenizer = struct {
     repl: bool,
 
     pub const Error = error{TokenizeError} || mem.Allocator.Error;
-
-    pub fn tokenize(allocator: *mem.Allocator, source: []const u8, errors: *Errors) Error![]const Token {
-        var tokenizer = Tokenizer{
-            // estimate one token per 6 bytes to reduce allocation in the beginning
-            .tokens = try Token.List.initCapacity(allocator, source.len / 6),
-            .errors = errors,
-            .it = .{
-                .i = 0,
-                .bytes = source,
-            },
-            .repl = false,
-        };
-        errdefer tokenizer.tokens.deinit();
-        while (true) {
-            const tok = try tokenizer.tokens.addOne();
-            tok.* = try tokenizer.next();
-            if (tok.id == .Eof) {
-                return tokens.toOwnedSlice();
-            }
-        }
-    }
 
     pub fn tokenizeRepl(self: *Tokenizer, input: []const u8) Error!bool {
         // remove previous eof

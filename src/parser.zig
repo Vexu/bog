@@ -4,62 +4,56 @@ const testing = std.testing;
 const Allocator = mem.Allocator;
 const bog = @import("bog.zig");
 const Token = bog.Token;
-const TokenList = Token.List;
 const TokenIndex = Token.Index;
-const Tokenizer = bog.Tokenizer;
 const Tree = bog.Tree;
 const Node = bog.Node;
-const NodeList = Node.List;
-const Errors = bog.Errors;
+const NodeList = std.ArrayList(*Node);
+
+/// root : (stmt NL)* EOF
+pub fn parse(gpa: *Allocator, source: []const u8, errors: *bog.Errors) (Parser.Error || bog.Tokenizer.Error)!*Tree {
+    const tokens = try bog.tokenize(gpa, source, errors);
+    errdefer gpa.free(tokens);
+
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    errdefer arena.deinit();
+
+    var parser = Parser{
+        .arena = &arena.allocator,
+        .gpa = gpa,
+        .errors = errors,
+        .tokens = tokens,
+    };
+    var nodes = NodeList.init(gpa);
+    defer nodes.deinit();
+
+    while (true) {
+        if (parser.eatToken(.Eof, true)) |_| break;
+        try nodes.append(try parser.stmt());
+        _ = parser.eatToken(.Nl, false) orelse
+            try parser.expectToken(.Eof, true);
+    }
+
+    const tree = try parser.arena.allocator.create(Tree);
+    tree.* = .{
+        .tokens = tokens,
+        .nodes = try parser.arena.dupe(*Node, nodes.items),
+        .source = source,
+        .arena = arena.state,
+        .gpa = gpa,
+    };
+    return tree;
+}
 
 pub const Parser = struct {
-    it: TokenList.Iterator,
-    errors: *Errors,
-    tree: *Tree,
     arena: *Allocator,
+    gpa: *Allocator,
+    errors: *bog.Errors,
+    tokens: []const Token,
+    tok_index: usize = 0,
 
     pub const Error = error{ParseError} || Allocator.Error;
 
-    /// root : (stmt NL)* EOF
-    pub fn parse(allocator: *Allocator, source: []const u8, errors: *Errors) (Error || Tokenizer.Error)!*Tree {
-        const tree = blk: {
-            var arena = std.heap.ArenaAllocator.init(allocator);
-            errdefer arena.deinit();
-            const tree = try arena.allocator.create(Tree);
-            tree.* = .{
-                .source = source,
-                .arena_allocator = arena,
-                .tokens = undefined,
-                .nodes = undefined,
-            };
-            break :blk tree;
-        };
-        errdefer tree.deinit();
-        const arena = &tree.arena_allocator.allocator;
-        tree.tokens = TokenList.init(arena);
-        tree.nodes = NodeList.init(arena);
-
-        try Tokenizer.tokenize(tree, errors);
-
-        var parser = Parser{
-            .arena = arena,
-            .it = tree.tokens.iterator(0),
-            .tree = tree,
-            .errors = errors,
-        };
-        while (true) {
-            if (parser.eatToken(.Eof, true)) |_| break;
-            try tree.nodes.push(try parser.stmt());
-            _ = parser.eatToken(.Nl, false) orelse {
-                if (parser.sawEnd()) continue;
-                _ = try parser.expectToken(.Eof, true);
-                break;
-            };
-        }
-        return tree;
-    }
-
-    pub fn parseRepl(tree: *Tree, start_index: usize, errors: *Errors) Error!?*Node {
+    pub fn parseRepl(tree: *Tree, start_index: usize, errors: *bog.Errors) Error!?*Node {
         var parser = Parser{
             .arena = &tree.arena_allocator.allocator,
             .it = tree.tokens.iterator(start_index),
@@ -114,27 +108,30 @@ pub const Parser = struct {
     /// fn : "fn" "(" (primary_expr ",")* primary_expr? ")" expr
     fn func(parser: *Parser, skip_nl: bool) Error!?*Node {
         const tok = parser.eatToken(.Keyword_fn, skip_nl) orelse return null;
-        const node = try parser.arena.create(Node.Fn);
-        node.* = .{
-            .fn_tok = tok,
-            .params = NodeList.init(parser.arena),
-            .r_paren = undefined,
-            .body = undefined,
-        };
+        var r_paren: TokenIndex = undefined;
+        var params = NodeList.init(parser.gpa);
+        defer params.deinit();
+
         _ = try parser.expectToken(.LParen, true);
         var end = false;
         while (true) {
             if (parser.eatToken(.RParen, true)) |r_tok| {
-                node.r_paren = r_tok;
+                r_paren = r_tok;
                 break;
             } else if (end) {
-                node.r_paren = try parser.expectToken(.RParen, true);
+                r_paren = try parser.expectToken(.RParen, true);
                 break;
             }
-            try node.params.push(try parser.primaryExpr(true));
+            try params.append(try parser.primaryExpr(true));
             if (parser.eatToken(.Comma, true) == null) end = true;
         }
-        node.body = try parser.expr(skip_nl);
+        const node = try parser.arena.create(Node.Fn);
+        node.* = .{
+            .fn_tok = tok,
+            .params = try parser.arena.dupe(*Node, params.items),
+            .r_paren = r_paren,
+            .body = try parser.expr(skip_nl),
+        };
         return &node.base;
     }
 
@@ -503,25 +500,30 @@ pub const Parser = struct {
                 lhs = &node.base;
             } else if (parser.eatToken(.LParen, skip_nl)) |tok| {
                 parser.skipNl();
+                var r_paren: TokenIndex = undefined;
+                var args = NodeList.init(parser.gpa);
+                defer args.deinit();
+
+                var end = false;
+                while (true) {
+                    if (parser.eatToken(.RParen, true)) |r_tok| {
+                        r_paren = r_tok;
+                        break;
+                    } else if (end) {
+                        r_paren = try parser.expectToken(.RParen, true);
+                        break;
+                    }
+                    try args.append(try parser.expr(true));
+                    if (parser.eatToken(.Comma, true) == null) end = true;
+                }
+
                 const node = try parser.arena.create(Node.Suffix);
                 node.* = .{
                     .lhs = lhs,
                     .l_tok = tok,
-                    .op = .{ .call = NodeList.init(parser.arena) },
-                    .r_tok = undefined,
+                    .op = .{ .call = parser.arena.dupe(*Node, args.items) },
+                    .r_tok = r_paren,
                 };
-                var end = false;
-                while (true) {
-                    if (parser.eatToken(.RParen, true)) |r_tok| {
-                        node.r_tok = r_tok;
-                        break;
-                    } else if (end) {
-                        node.r_tok = try parser.expectToken(.RParen, true);
-                        break;
-                    }
-                    try node.op.call.push(try parser.expr(true));
-                    if (parser.eatToken(.Comma, true) == null) end = true;
-                }
                 lhs = &node.base;
             } else if (parser.eatTokenNoNl(.Period, skip_nl)) |tok| {
                 parser.skipNl();
@@ -697,45 +699,47 @@ pub const Parser = struct {
                     };
                     return &node.base;
                 }
-                const node = try parser.arena.create(Node.ListTupleMap);
-                node.* = .{
-                    .base = .{ .id = .Tuple },
-                    .l_tok = tok,
-                    .values = NodeList.init(parser.arena),
-                    .r_tok = undefined,
-                };
-                try node.values.push(first);
+                var elems = NodeList.init(parser.gpa);
+                defer elems.deinit();
+                try elems.append(first);
+                var r_paren: Tokenizer = undefined;
+
                 _ = try parser.expectToken(.Comma, true);
                 var end = false;
                 while (true) {
                     if (parser.eatToken(.RParen, true)) |r_tok| {
-                        node.r_tok = r_tok;
-                        return &node.base;
+                        r_paren = r_tok;
+                        break;
                     } else if (end) {
-                        node.r_tok = try parser.expectToken(.RBrace, true);
+                        r_paren = try parser.expectToken(.RBrace, true);
                         break;
                     }
-                    try node.values.push(try parser.expr(true));
+                    try elems.append(try parser.expr(true));
                     if (parser.eatToken(.Comma, true) == null) end = true;
                 }
+                const node = try parser.arena.create(Node.ListTupleMap);
+                node.* = .{
+                    .base = .{ .id = .Tuple },
+                    .l_tok = tok,
+                    .values = try parser.arena.dupe(*Node, elems.items),
+                    .r_tok = r_paren,
+                };
+                return &node.base;
             }
         }
         if (parser.eatToken(.LBrace, skip_nl)) |tok| {
             // map
-            const node = try parser.arena.create(Node.ListTupleMap);
-            node.* = .{
-                .base = .{ .id = .Map },
-                .l_tok = tok,
-                .values = NodeList.init(parser.arena),
-                .r_tok = undefined,
-            };
+            var elems = NodeList.init(parser.gpa);
+            defer elems.deinit();
+            var r_brace: TokenIndex = undefined;
+
             var end = false;
             while (true) {
                 if (parser.eatToken(.RBrace, true)) |r_tok| {
-                    node.r_tok = r_tok;
+                    r_brace = r_tok;
                     break;
                 } else if (end) {
-                    node.r_tok = try parser.expectToken(.RBrace, true);
+                    r_brace = try parser.expectToken(.RBrace, true);
                     break;
                 }
                 var key: ?*Node = null;
@@ -752,33 +756,45 @@ pub const Parser = struct {
                     .colon = colon,
                     .value = value,
                 };
-                try node.values.push(&item.base);
+                try elems.append(&item.base);
                 if (parser.eatToken(.Comma, true) == null) end = true;
             }
+
+            const node = try parser.arena.create(Node.ListTupleMap);
+            node.* = .{
+                .base = .{ .id = .Map },
+                .l_tok = tok,
+                .values = try parser.arena.dupe(*Node, elems.items),
+                .r_tok = r_brace,
+            };
             return &node.base;
         }
         if (parser.eatToken(.LBracket, skip_nl)) |tok| {
             // list
             parser.skipNl();
-            const node = try parser.arena.create(Node.ListTupleMap);
-            node.* = .{
-                .base = .{ .id = .List },
-                .l_tok = tok,
-                .values = NodeList.init(parser.arena),
-                .r_tok = undefined,
-            };
+            var elems = NodeList.init(parser.gpa);
+            defer elems.deinit();
+            var r_bracket: TokenIndex = undefined;
+
             var end = false;
             while (true) {
                 if (parser.eatToken(.RBracket, true)) |r_tok| {
-                    node.r_tok = r_tok;
+                    r_bracket = r_tok;
                     break;
                 } else if (end) {
-                    node.r_tok = try parser.expectToken(.RBracket, true);
+                    r_bracket = try parser.expectToken(.RBracket, true);
                     break;
                 }
                 try node.values.push(try parser.expr(true));
                 if (parser.eatToken(.Comma, true) == null) end = true;
             }
+            const node = try parser.arena.create(Node.ListTupleMap);
+            node.* = .{
+                .base = .{ .id = .List },
+                .l_tok = tok,
+                .values = try parser.arena.dupe(*Node, elems.items),
+                .r_tok = r_bracket,
+            };
             return &node.base;
         }
         if (try parser.ifExpr(skip_nl)) |res| return res;
@@ -795,13 +811,11 @@ pub const Parser = struct {
             parser.it.index -= 1;
             return null;
         };
-        const node = try parser.arena.create(Node.Block);
-        node.* = .{
-            .base = .{ .id = .Block },
-            .stmts = NodeList.init(parser.arena),
-        };
+        var stmts = NodeList.init(parser.gpa);
+        defer stmts.deinit();
+
         while (true) {
-            try node.stmts.push(try parser.stmt());
+            try stmts.append(try parser.stmt());
             _ = parser.eatToken(.Nl, false) orelse blk: {
                 if (parser.sawEnd()) break :blk;
                 if (parser.eatToken(.Eof, false)) |_| {
@@ -814,6 +828,11 @@ pub const Parser = struct {
             if (parser.eatToken(.End, false)) |_|
                 break;
         }
+        const node = try parser.arena.create(Node.Block);
+        node.* = .{
+            .base = .{ .id = .Block },
+            .stmts = try parser.arena.dupe(stmts.items),
+        };
         return &node.base;
     }
 
@@ -883,17 +902,15 @@ pub const Parser = struct {
     fn matchExpr(parser: *Parser, skip_nl: bool) Error!?*Node {
         const tok = parser.eatToken(.Keyword_match, skip_nl) orelse return null;
         _ = try parser.expectToken(.LParen, true);
-        const node = try parser.arena.create(Node.Match);
-        node.* = .{
-            .match_tok = tok,
-            .expr = try parser.expr(true),
-            .body = NodeList.init(parser.arena),
-            .r_paren = try parser.expectToken(.RParen, true),
-        };
+
+        const r_paren = try parser.expectToken(.RParen, true);
+        var cases = NodeList.init(gpa);
+        defer cases.deinit();
+
         _ = try parser.expectToken(.Nl, false);
         _ = try parser.expectToken(.Begin, false);
         while (true) {
-            try node.body.push(try parser.matchCase());
+            try cases.append(try parser.matchCase());
             _ = parser.eatToken(.Nl, false) orelse {
                 _ = try parser.expectToken(.End, false);
                 break;
@@ -901,6 +918,14 @@ pub const Parser = struct {
             if (parser.eatToken(.End, false)) |_|
                 break;
         }
+
+        const node = try parser.arena.create(Node.Match);
+        node.* = .{
+            .match_tok = tok,
+            .expr = try parser.expr(true),
+            .body = try parser.arena.dupe(*Node, cases.items),
+            .r_paren = r_paren,
+        };
         return &node.base;
     }
 
@@ -938,25 +963,28 @@ pub const Parser = struct {
             };
             return &node.base;
         } else {
-            const node = try parser.arena.create(Node.MatchCase);
-            node.* = .{
-                .lhs = NodeList.init(parser.arena),
-                .expr = undefined,
-                .colon = undefined,
-            };
+            var items = NodeList.init(gpa);
+            defer items.deinit();
+            var colon: TokenIndex = undefined;
+
             var end = false;
             while (true) {
-                if (parser.eatToken(.Colon, true)) |colon| {
-                    node.colon = colon;
+                if (parser.eatToken(.Colon, true)) |tok| {
+                    colon = tok;
                     break;
                 } else if (end) {
-                    node.colon = try parser.expectToken(.Colon, true);
+                    colon = try parser.expectToken(.Colon, true);
                     break;
                 }
-                try node.lhs.push(try parser.expr(true));
+                try items.append(try parser.expr(true));
                 if (parser.eatToken(.Comma, true) == null) end = true;
             }
-            node.expr = try parser.expr(false);
+            const node = try parser.arena.create(Node.MatchCase);
+            node.* = .{
+                .lhs = try parser.arena.dupe(*Node, items.items),
+                .colon = colon,
+                .expr = try parser.expr(false),
+            };
             return &node.base;
         }
     }
@@ -976,12 +1004,6 @@ pub const Parser = struct {
         id: Token.Id,
         tok: *Token,
     };
-
-    fn sawEnd(parser: *Parser) bool {
-        const res = parser.it.prev().?.id == .End;
-        _ = parser.it.next();
-        return res;
-    }
 
     fn eatTokenId(parser: *Parser, id: Token.Id, skip_nl: bool) ?TokAndId {
         var next_tok = parser.it.next().?;

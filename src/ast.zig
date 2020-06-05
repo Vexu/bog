@@ -6,25 +6,25 @@ const Token = bog.Token;
 const TokenIndex = Token.Index;
 
 pub const Tree = struct {
-    tokens: Token.List,
-    nodes: Node.List,
-    source: []const u8,
-    arena_allocator: std.heap.ArenaAllocator,
+    tokens: []const Token,
+    nodes: []const *Node,
 
-    pub fn deinit(tree: *Tree) void {
-        var arena = tree.arena_allocator;
-        arena.deinit();
+    /// not owned by the tree
+    source: []const u8,
+
+    arena: std.heap.ArenaAllocator.State,
+    gpa: *Allocator,
+
+    pub fn deinit(self: *Tree) void {
+        self.gpa.free(self.tokens);
+        self.arena.promote(self.gpa).deinit();
     }
 
-    pub const tokenize = bog.Tokenizer.tokenize;
     pub const render = @import("render.zig").render;
-    pub const compileRepl = bog.Compiler.compileRepl;
 };
 
 pub const Node = struct {
     id: Id,
-
-    pub const List = std.SegmentedList(*Node, 4);
 
     pub const Id = enum {
         Decl,
@@ -236,7 +236,7 @@ pub const Node = struct {
         base: Node = Node{ .id = .Suffix },
         lhs: *Node,
         op: union(enum) {
-            call: List,
+            call: []*Node,
             subscript: *Node,
             member,
         },
@@ -280,14 +280,14 @@ pub const Node = struct {
 
     pub const ListTupleMap = struct {
         base: Node,
-        values: List,
+        values: []*Node,
         l_tok: TokenIndex,
         r_tok: TokenIndex,
     };
 
     pub const Block = struct {
         base: Node,
-        stmts: List,
+        stmts: []*Node,
     };
 
     pub const Grouped = struct {
@@ -351,7 +351,7 @@ pub const Node = struct {
     pub const Match = struct {
         base: Node = Node{ .id = .Match },
         expr: *Node,
-        body: List,
+        body: []*Node,
         match_tok: TokenIndex,
         r_paren: TokenIndex,
     };
@@ -373,7 +373,7 @@ pub const Node = struct {
 
     pub const MatchCase = struct {
         base: Node = Node{ .id = .MatchCase },
-        lhs: List,
+        lhs: []*Node,
         expr: *Node,
         colon: TokenIndex,
     };
