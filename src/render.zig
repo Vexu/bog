@@ -19,7 +19,8 @@ pub fn render(tree: *Tree, stream: var) @TypeOf(stream).Error!void {
             try stream.writeByte('\n');
         }
         if (Renderer.isBlock(node)) {
-            try stream.writeAll("\n\n");
+            // render extra newline after blocks
+            try stream.writeByte('\n');
         }
     }
 }
@@ -220,6 +221,7 @@ const Renderer = struct {
             },
             .Block => {
                 const blk = @fieldParentPtr(Node.Block, "base", node);
+                try stream.writeByte('\n');
 
                 const new_indet = indent + indent_delta;
                 for (blk.stmts) |stmt, i| {
@@ -232,7 +234,8 @@ const Renderer = struct {
                         try stream.writeByte('\n');
                     }
                     if (isBlock(stmt)) {
-                        try stream.writeAll("\n\n");
+                        // render extra newline after blocks
+                        try stream.writeByte('\n');
                     }
                 }
             },
