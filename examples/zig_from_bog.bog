@@ -1,0 +1,3 @@
+const pow = native("my_lib.pow")
+
+return 2 * pow(2)
