@@ -70,8 +70,47 @@ export fn bog_Vm_call(vm: *bog.Vm, res: **bog.Value, container: *bog.Value, func
     return .None;
 }
 
-export fn bog_Vm_renderErrors(vm: *bog.Vm, source: [*:0]const u8) Error {
-    vm.errors.render(span(source), std.io.getStdErr().outStream()) catch return .IoError;
+export fn bog_Vm_renderErrors(vm: *bog.Vm, source: [*:0]const u8, out: *std.c.FILE) Error {
+    vm.errors.render(span(source), std.io.cOutStream(out)) catch return .IoError;
 
+    return .None;
+}
+
+export fn bog_Errors_init(errors: **bog.Errors) Error {
+    const ptr = gpa.create(bog.Errors) catch |e| switch (e) {
+        error.OutOfMemory => return .OutOfMemory,
+    };
+    ptr.* = bog.Errors.init(gpa);
+
+    errors.* = ptr;
+    return .None;
+}
+
+export fn bog_Errors_deinit(errors: *bog.Errors) void {
+    errors.deinit();
+}
+
+export fn bog_Errors_render(errors: *bog.Errors, source: [*:0]const u8, out: *std.c.FILE) Error {
+    errors.render(span(source), std.io.cOutStream(out)) catch return .IoError;
+
+    return .None;
+}
+
+export fn bog_parse(tree: **bog.Tree, source: [*:0]const u8, errors: *bog.Errors) Error {
+    tree.* = bog.parse(gpa, span(source), errors) catch |e| switch (e) {
+        error.OutOfMemory => return .OutOfMemory,
+        error.TokenizeError => return .TokenizeError,
+        error.ParseError => return .ParseError,
+    };
+
+    return .None;
+}
+
+export fn bog_Tree_deinit(tree: *bog.Tree) void {
+    tree.deinit();
+}
+
+export fn bog_Tree_render(tree: *bog.Tree, out: *std.c.FILE) Error {
+    tree.render(std.io.cOutStream(out)) catch return .IoError;
     return .None;
 }

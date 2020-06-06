@@ -1,5 +1,5 @@
 Small, strongly typed, embeddable language. 
-## Examples
+## [Examples](examples)
 
 ### Hello world (only the latter works currently)
 ```rust

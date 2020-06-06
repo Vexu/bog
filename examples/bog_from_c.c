@@ -12,13 +12,14 @@ char *read_file(char *name) {
     long bytes = ftell(file);
     fseek(file, 0, SEEK_SET);
 
-    char *buffer = (char *)malloc(bytes);
+    char *buffer = (char *)malloc(bytes + 1);
     if (!buffer) {
         fclose(file);
         return NULL;
     }
 
     fread(buffer, sizeof(char), bytes, file);
+    buffer[bytes] = '\0';
     fclose(file);
     return buffer;
 }
@@ -43,7 +44,7 @@ int main(int argc, char **argv) {
 
     bog_Value *res;
     if (bog_Vm_run(vm, &res, source) != BOG_ERROR_NONE) {
-        bog_Vm_renderErrors(vm, source);
+        bog_Vm_renderErrors(vm, source, stderr);
         goto error;
     }
 
