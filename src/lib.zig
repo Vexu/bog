@@ -22,7 +22,9 @@ const Error = extern enum {
 };
 
 export fn bog_Vm_init(vm: **bog.Vm, import_files: bool) Error {
-    const ptr = gpa.create(bog.Vm) catch return .OutOfMemory;
+    const ptr = gpa.create(bog.Vm) catch |e| switch (e) {
+        error.OutOfMemory => return .OutOfMemory,
+    };
     ptr.* = bog.Vm.init(gpa, .{ .import_files = import_files });
 
     vm.* = ptr;
@@ -31,6 +33,13 @@ export fn bog_Vm_init(vm: **bog.Vm, import_files: bool) Error {
 
 export fn bog_Vm_deinit(vm: *bog.Vm) void {
     vm.deinit();
+}
+
+export fn bog_Vm_addStd(vm: *bog.Vm) Error {
+    bog.std.registerAll(&vm.native_registry) catch |e| switch (e) {
+        error.OutOfMemory => return .OutOfMemory,
+    };
+    return .None;
 }
 
 export fn bog_Vm_run(vm: *bog.Vm, res: **bog.Value, source: [*:0]const u8) Error {
