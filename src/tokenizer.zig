@@ -4,7 +4,6 @@ const math = std.math;
 const testing = std.testing;
 const unicode = std.unicode;
 const bog = @import("bog.zig");
-const Tree = bog.Tree;
 const Errors = bog.Errors;
 
 fn isWhiteSpace(c: u32) bool {
@@ -113,13 +112,12 @@ pub const Token = struct {
     end: u32,
     id: Id,
 
-    pub const List = std.SegmentedList(Token, 64);
+    pub const List = std.ArrayList(Token);
     pub const Index = u32;
 
-    pub const Id = enum {
+    pub const Id = union(enum) {
         Eof,
-        Begin,
-        End,
+        Indent: u16,
         Comment,
         Identifier,
         String,
@@ -232,8 +230,7 @@ pub const Token = struct {
             .Comment => "<Comment>",
             .Eof => "<EOF>",
             .Nl => "<NL>",
-            .Begin => "<BEGIN>",
-            .End => "<END>",
+            .Indent => "<INDENT>",
             .Identifier => "Identifier",
             .This => "this",
             .String => "String",
@@ -310,24 +307,79 @@ pub const Token = struct {
     }
 };
 
+pub fn tokenize(allocator: *mem.Allocator, source: []const u8, errors: *Errors) Tokenizer.Error![]const Token {
+    // estimate one token per 8 bytes to reduce allocation in the beginning
+    const estimated = source.len / 8;
+    var tokenizer = Tokenizer{
+        .tokens = try Token.List.initCapacity(allocator, estimated),
+        .errors = errors,
+        .it = .{
+            .i = 0,
+            .bytes = source,
+        },
+        .repl = false,
+    };
+    errdefer tokenizer.tokens.deinit();
+    while (true) {
+        const tok = try tokenizer.tokens.addOne();
+        tok.* = try tokenizer.next();
+        if (tok.id == .Eof) {
+            // std.debug.warn("estimated: {}, actual: {}\n\n", .{estimated, tokenizer.tokens.items.len});
+            return tokenizer.tokens.toOwnedSlice();
+        }
+    }
+}
+
+pub fn tokenizeRepl(repl: *@import("repl.zig").Repl) Tokenizer.Error!bool {
+    // remove previous eof
+    if (repl.tokens.items.len > 0) _ = repl.tokens.pop();
+    const start_len = repl.tokens.items.len;
+
+    var tokenizer = Tokenizer{
+        .tokens = repl.tokens,
+        .errors = &repl.vm.errors,
+        .it = .{
+            .i = repl.byte_index,
+            .bytes = repl.buffer.items,
+        },
+        .repl = true,
+    };
+    defer {
+        repl.byte_index = tokenizer.it.i;
+        repl.tokens = tokenizer.tokens;
+    }
+    while (true) {
+        const tok = try tokenizer.tokens.addOne();
+        tok.* = try tokenizer.next();
+        if (tok.id == .Eof) {
+            // check if more input is expected
+            return if (tokenizer.tokens.items.len == start_len + 2)
+                true
+            else if (tokenizer.paren_level != 0 or
+                tokenizer.string or
+                tokenizer.expect_indent or
+                tokenizer.indent_level != 0)
+                false
+            else
+                true;
+        }
+    }
+}
+
 pub const Tokenizer = struct {
     errors: *Errors,
-    tree: *Tree,
+    tokens: Token.List,
     it: unicode.Utf8Iterator,
 
-    /// beginning index of the next token
-    start_index: usize = 0,
+    /// indentation specific variables
+    indent_char: ?u32 = null,
 
     /// level of parentheses
     paren_level: u32 = 0,
 
-    /// indentation specific variables
-    pending_ends: u32 = 0,
-    indent_char: ?u32 = null,
-
     /// how many of `indent_char` are in one indentation level
     chars_per_indent: ?u8 = null,
-    indent_level: u8 = 0,
+    indent_level: u16 = 0,
 
     /// saw a nl, need to check for indentation
     expect_indent: bool = false,
@@ -337,49 +389,6 @@ pub const Tokenizer = struct {
     repl: bool,
 
     pub const Error = error{TokenizeError} || mem.Allocator.Error;
-
-    pub fn tokenize(tree: *Tree, errors: *Errors) Error!void {
-        var tokenizer = Tokenizer{
-            .errors = errors,
-            .tree = tree,
-            .it = .{
-                .i = 0,
-                .bytes = tree.source,
-            },
-            .repl = false,
-        };
-        while (true) {
-            const tok = try tree.tokens.addOne();
-            tok.* = try tokenizer.next();
-            if (tok.id == .Eof) {
-                return;
-            }
-        }
-    }
-
-    pub fn tokenizeRepl(self: *Tokenizer, input: []const u8) Error!bool {
-        // remove previous eof
-        self.it.bytes = input;
-        _ = self.tree.tokens.pop();
-        self.tree.source = input;
-        const start_len = self.tree.tokens.len;
-        while (true) {
-            const tok = try self.tree.tokens.addOne();
-            tok.* = try self.next();
-            if (tok.id == .Eof) {
-                // check if more input is expected
-                return if (self.tree.tokens.len == start_len + 2)
-                    true
-                else if (self.paren_level != 0 or
-                    self.string or
-                    self.expect_indent or
-                    self.indent_level != 0)
-                    false
-                else
-                    true;
-            }
-        }
-    }
 
     fn reportErr(self: *Tokenizer, msg: []const u8, c: u21) Error {
         try self.errors.add(
@@ -392,6 +401,7 @@ pub const Tokenizer = struct {
     }
 
     fn getIndent(self: *Tokenizer) !?Token {
+        var start_index = self.it.i;
         var count: u8 = 0;
         // get all indentation characters
         while (self.it.nextCodepoint()) |c| {
@@ -414,8 +424,8 @@ pub const Tokenizer = struct {
             }
         } else {
             if (self.repl) {
-                if (self.indent_level == 0 and self.tree.tokens.len > 2) {
-                    switch (self.tree.tokens.at(self.tree.tokens.len - 3).id) {
+                if (self.indent_level == 0 and self.tokens.items.len > 2) {
+                    switch (self.tokens.items[self.tokens.items.len - 3].id) {
                         // no further input is expected after these tokens
                         // so we can stop asking for more input
                         .Comment,
@@ -445,8 +455,6 @@ pub const Tokenizer = struct {
             // back to level zero, close all blocks
             self.indent_char = null;
             self.chars_per_indent = null;
-            self.pending_ends = self.indent_level;
-            self.indent_level = 0;
             return null;
         }
 
@@ -454,7 +462,6 @@ pub const Tokenizer = struct {
             // reset indentation in case of error
             self.indent_char = null;
             self.chars_per_indent = null;
-            self.indent_level = 0;
         };
         if (self.chars_per_indent) |some| {
             if (count % some != 0) {
@@ -469,46 +476,24 @@ pub const Tokenizer = struct {
         if (level > 50) {
             return self.reportErr("indentation exceeds maximum of 50 levels", 'a');
         }
-        if (level == self.indent_level) {
-            // no change
-            return null;
-        }
-        if (level > self.indent_level + 1) {
-            // indentation grew more than one level
-            return self.reportErr("unexpected indentation", 'a');
-        }
-        if (level < self.indent_level) {
-            // indentation shrunk, close blocks
-            self.pending_ends = self.indent_level - level;
-            self.indent_level = level;
-            return null;
-        }
+
+        // needed by the repl tokenizer
         self.indent_level = level;
         return Token{
-            .id = .Begin,
-            .start = @truncate(u32, self.start_index),
+            .id = .{ .Indent = level },
+            .start = @truncate(u32, start_index),
             .end = @truncate(u32, self.it.i),
         };
     }
 
     fn next(self: *Tokenizer) !Token {
-        self.start_index = self.it.i;
-        // get any block begins
+        // get indent
         if (self.expect_indent) {
             self.expect_indent = false;
             if (try self.getIndent()) |some|
                 return some;
         }
-        // clear pending block ends
-        if (self.pending_ends > 0) {
-            self.pending_ends -= 1;
-            return Token{
-                .id = .End,
-                .start = @truncate(u32, self.start_index),
-                .end = @truncate(u32, self.it.i),
-            };
-        }
-        self.start_index = self.it.i;
+        var start_index = self.it.i;
         var state: enum {
             Start,
             String,
@@ -547,7 +532,7 @@ pub const Tokenizer = struct {
             FloatExponent,
             FloatExponentDigits,
         } = .Start;
-        var res = Token.Id.Eof;
+        var res: Token.Id = .Eof;
         var str_delimit: u32 = undefined;
         var counter: u32 = 0;
 
@@ -665,7 +650,7 @@ pub const Tokenizer = struct {
                     },
                     else => {
                         if (isWhiteSpace(c)) {
-                            self.start_index = self.it.i;
+                            start_index = self.it.i;
                         } else if (isIdentifier(c)) {
                             state = .Identifier;
                         } else {
@@ -748,7 +733,7 @@ pub const Tokenizer = struct {
                 .Identifier => {
                     if (!isIdentifier(c)) {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        const slice = self.it.bytes[self.start_index..self.it.i];
+                        const slice = self.it.bytes[start_index..self.it.i];
                         res = Token.keywords.get(slice) orelse .Identifier;
                         break;
                     }
@@ -759,7 +744,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        self.it.i = self.start_index + 1;
+                        self.it.i = start_index + 1;
                         res = .Equal;
                         break;
                     },
@@ -779,7 +764,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        self.it.i = self.start_index + 1;
+                        self.it.i = start_index + 1;
                         res = .Pipe;
                         break;
                     },
@@ -790,7 +775,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        self.it.i = self.start_index + 1;
+                        self.it.i = start_index + 1;
                         res = .Percent;
                         break;
                     },
@@ -804,7 +789,7 @@ pub const Tokenizer = struct {
                         state = .AsteriskAsterisk;
                     },
                     else => {
-                        self.it.i = self.start_index + 1;
+                        self.it.i = start_index + 1;
                         res = .Asterisk;
                         break;
                     },
@@ -815,7 +800,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        self.it.i = self.start_index + 2;
+                        self.it.i = start_index + 2;
                         res = .AsteriskAsterisk;
                         break;
                     },
@@ -826,7 +811,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        self.it.i = self.start_index + 1;
+                        self.it.i = start_index + 1;
                         res = .Plus;
                         break;
                     },
@@ -840,7 +825,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        self.it.i = self.start_index + 1;
+                        self.it.i = start_index + 1;
                         res = .LArr;
                         break;
                     },
@@ -851,7 +836,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        self.it.i = self.start_index + 2;
+                        self.it.i = start_index + 2;
                         res = .LArrArr;
                         break;
                     },
@@ -865,7 +850,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        self.it.i = self.start_index + 1;
+                        self.it.i = start_index + 1;
                         res = .RArr;
                         break;
                     },
@@ -876,7 +861,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        self.it.i = self.start_index + 2;
+                        self.it.i = start_index + 2;
                         res = .RArrArr;
                         break;
                     },
@@ -887,7 +872,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        self.it.i = self.start_index + 1;
+                        self.it.i = start_index + 1;
                         res = .Caret;
                         break;
                     },
@@ -897,7 +882,7 @@ pub const Tokenizer = struct {
                         state = .Period2;
                     },
                     else => {
-                        self.it.i = self.start_index + 1;
+                        self.it.i = start_index + 1;
                         res = .Period;
                         break;
                     },
@@ -917,7 +902,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        self.it.i = self.start_index + 1;
+                        self.it.i = start_index + 1;
                         res = .Minus;
                         break;
                     },
@@ -931,7 +916,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        self.it.i = self.start_index + 1;
+                        self.it.i = start_index + 1;
                         res = .Slash;
                         break;
                     },
@@ -942,7 +927,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        self.it.i = self.start_index + 2;
+                        self.it.i = start_index + 2;
                         res = .SlashSlash;
                         break;
                     },
@@ -953,7 +938,7 @@ pub const Tokenizer = struct {
                         break;
                     },
                     else => {
-                        self.it.i = self.start_index + 1;
+                        self.it.i = start_index + 1;
                         res = .Ampersand;
                         break;
                     },
@@ -1100,7 +1085,7 @@ pub const Tokenizer = struct {
             switch (state) {
                 .Start => {},
                 .Identifier => {
-                    const slice = self.it.bytes[self.start_index..];
+                    const slice = self.it.bytes[start_index..];
                     res = Token.keywords.get(slice) orelse .Identifier;
                 },
                 .BinaryNumber,
@@ -1113,7 +1098,7 @@ pub const Tokenizer = struct {
                 .String => {
                     if (self.repl) {
                         // if running in repl this might be a multiline string
-                        self.it.i = self.start_index;
+                        self.it.i = start_index;
                         res = .Eof;
                     } else
                         return self.reportErr("unterminated string", 'a');
@@ -1143,7 +1128,7 @@ pub const Tokenizer = struct {
         }
         return Token{
             .id = res,
-            .start = @truncate(u32, self.start_index),
+            .start = @truncate(u32, start_index),
             .end = @truncate(u32, self.it.i),
         };
     }
@@ -1151,7 +1136,7 @@ pub const Tokenizer = struct {
 
 fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
     var tokenizer = Tokenizer{
-        .tree = undefined,
+        .tokens = undefined,
         .errors = &Errors.init(std.testing.failing_allocator),
         .repl = false,
         .it = .{
@@ -1269,17 +1254,26 @@ test "indentation" {
         \\    if
         \\
         \\        if
+        \\if
+        \\ if
+        \\ if
         \\
     , &[_]Token.Id{
         .Keyword_if,
         .Nl,
-        .Begin,
+        .{ .Indent = 1 },
         .Keyword_if,
         .Nl,
-        .Begin,
+        .{ .Indent = 2 },
         .Keyword_if,
         .Nl,
-        .End,
-        .End,
+        .Keyword_if,
+        .Nl,
+        .{ .Indent = 1 },
+        .Keyword_if,
+        .Nl,
+        .{ .Indent = 1 },
+        .Keyword_if,
+        .Nl,
     });
 }

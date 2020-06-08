@@ -1,3 +1,29 @@
+test "nested blocks and matches" {
+    testCanonical(
+        \\if (false)
+        \\    if (true)
+        \\        match (2)
+        \\            true: a
+        \\            false: b
+        \\
+        \\
+        \\    else
+        \\        2
+        \\
+        \\
+        \\
+    );
+}
+
+test "comments after expression" {
+    testCanonical(
+        \\a
+        \\#foo
+        \\#bar
+        \\
+    );
+}
+
 test "two empty lines after block" {
     testTransform(
         \\const foo = fn(a)
@@ -50,6 +76,8 @@ test "nested blocks" {
         \\    else
         \\        5
         \\
+        \\
+        \\
     );
 }
 
@@ -92,6 +120,8 @@ test "match" {
         \\    let (x, 2): x + 4
         \\    2, 3: 1
         \\    _: ()
+        \\
+        \\
         \\
     );
 }
@@ -136,6 +166,8 @@ test "functions" {
         \\const foo = fn(arg1, arg2, _, arg3) (arg1, arg2, arg3)
         \\const bar = fn(val)
         \\    val * 45
+        \\
+        \\
         \\
     );
 }

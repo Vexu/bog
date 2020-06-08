@@ -6,25 +6,25 @@ const Token = bog.Token;
 const TokenIndex = Token.Index;
 
 pub const Tree = struct {
-    tokens: Token.List,
-    nodes: Node.List,
-    source: []const u8,
-    arena_allocator: std.heap.ArenaAllocator,
+    tokens: []const Token,
+    nodes: []const *Node,
 
-    pub fn deinit(tree: *Tree) void {
-        var arena = tree.arena_allocator;
-        arena.deinit();
+    /// not owned by the tree
+    source: []const u8,
+
+    arena: std.heap.ArenaAllocator.State,
+    gpa: *Allocator,
+
+    pub fn deinit(self: *Tree) void {
+        self.gpa.free(self.tokens);
+        self.arena.promote(self.gpa).deinit();
     }
 
-    pub const tokenize = bog.Tokenizer.tokenize;
     pub const render = @import("render.zig").render;
-    pub const compileRepl = bog.Compiler.compileRepl;
 };
 
 pub const Node = struct {
     id: Id,
-
-    pub const List = std.SegmentedList(*Node, 4);
 
     pub const Id = enum {
         Decl,
@@ -74,7 +74,7 @@ pub const Node = struct {
             .Native => @fieldParentPtr(Node.Native, "base", node).tok,
             .Error => @fieldParentPtr(Node.Error, "base", node).tok,
             .List, .Tuple, .Map => @fieldParentPtr(Node.ListTupleMap, "base", node).l_tok,
-            .Block => @fieldParentPtr(Node.Block, "base", node).stmts.at(0).*.firstToken(),
+            .Block => @fieldParentPtr(Node.Block, "base", node).stmts[0].firstToken(),
             .Grouped => @fieldParentPtr(Node.Grouped, "base", node).l_tok,
             .MapItem => {
                 const map = @fieldParentPtr(Node.MapItem, "base", node);
@@ -89,7 +89,7 @@ pub const Node = struct {
             .Match => @fieldParentPtr(Node.Match, "base", node).match_tok,
             .MatchCatchAll => @fieldParentPtr(Node.Jump, "base", node).tok,
             .MatchLet => @fieldParentPtr(Node.MatchLet, "base", node).let_const,
-            .MatchCase => @fieldParentPtr(Node.MatchCase, "base", node).lhs.at(0).*.firstToken(),
+            .MatchCase => @fieldParentPtr(Node.MatchCase, "base", node).lhs[0].firstToken(),
             .Jump => @fieldParentPtr(Node.Jump, "base", node).tok,
         };
     }
@@ -110,7 +110,7 @@ pub const Node = struct {
             .List, .Tuple, .Map => @fieldParentPtr(Node.ListTupleMap, "base", node).r_tok,
             .Block => {
                 const block = @fieldParentPtr(Node.Block, "base", node);
-                return block.stmts.at(block.stmts.len - 1).*.lastToken();
+                return block.stmts[block.stmts.len - 1].lastToken();
             },
             .Grouped => @fieldParentPtr(Node.Grouped, "base", node).r_tok,
             .MapItem => @fieldParentPtr(Node.MapItem, "base", node).value.lastToken(),
@@ -124,7 +124,7 @@ pub const Node = struct {
             .While => @fieldParentPtr(Node.While, "base", node).body.lastToken(),
             .Match => {
                 const match = @fieldParentPtr(Node.Match, "base", node);
-                return match.body.at(match.body.len - 1).*.lastToken();
+                return match.cases[match.cases.len - 1].lastToken();
             },
             .MatchCatchAll => @fieldParentPtr(Node.MatchCatchAll, "base", node).expr.lastToken(),
             .MatchLet => @fieldParentPtr(Node.MatchLet, "base", node).expr.lastToken(),
@@ -149,7 +149,7 @@ pub const Node = struct {
 
     pub const Fn = struct {
         base: Node = Node{ .id = .Fn },
-        params: List,
+        params: []*Node,
         body: *Node,
         fn_tok: TokenIndex,
         r_paren: TokenIndex,
@@ -236,7 +236,7 @@ pub const Node = struct {
         base: Node = Node{ .id = .Suffix },
         lhs: *Node,
         op: union(enum) {
-            call: List,
+            call: []*Node,
             subscript: *Node,
             member,
         },
@@ -280,14 +280,14 @@ pub const Node = struct {
 
     pub const ListTupleMap = struct {
         base: Node,
-        values: List,
+        values: []*Node,
         l_tok: TokenIndex,
         r_tok: TokenIndex,
     };
 
     pub const Block = struct {
         base: Node,
-        stmts: List,
+        stmts: []*Node,
     };
 
     pub const Grouped = struct {
@@ -351,7 +351,7 @@ pub const Node = struct {
     pub const Match = struct {
         base: Node = Node{ .id = .Match },
         expr: *Node,
-        body: List,
+        cases: []*Node,
         match_tok: TokenIndex,
         r_paren: TokenIndex,
     };
@@ -373,7 +373,7 @@ pub const Node = struct {
 
     pub const MatchCase = struct {
         base: Node = Node{ .id = .MatchCase },
-        lhs: List,
+        lhs: []*Node,
         expr: *Node,
         colon: TokenIndex,
     };

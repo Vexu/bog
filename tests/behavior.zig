@@ -25,9 +25,10 @@ test "this" {
         \\let x = {
         \\    a: 69,
         \\    y: 420,
-        \\    foo: fn()
+        \\    foo: fn() (
         \\        [0][0] # last_get is now referencing this list
         \\        return this.a * this.y # TODO this return should not be needed
+        \\    ),
         \\
         \\}
         \\return x.foo()
@@ -279,7 +280,7 @@ test "catch" {
     );
 }
 
-test "strigs" {
+test "strings" {
     expectOutput(
         \\const a = "hello"
         \\return if (a == "world") 2 as str else 1.5 as str
@@ -288,7 +289,7 @@ test "strigs" {
     );
 }
 
-test "comparision" {
+test "comparison" {
     expectOutput(
         \\let a = 0
         \\while (a != 1000)

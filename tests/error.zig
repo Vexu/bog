@@ -1,3 +1,11 @@
+test "break outside loop" {
+    expectError(
+        \\break
+    ,
+        \\break outside of loop
+    );
+}
+
 test "invalid type" {
     expectError(
         \\foo
