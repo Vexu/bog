@@ -363,10 +363,10 @@ const Renderer = struct {
 
     fn renderComments(self: *Renderer, token: TokenIndex, stream: var, indent: u32, space: Space) !void {
         var i = token;
-        while (true) {
+        while (true) : (i += 1) {
             switch (self.tokens[i].id) {
                 .Nl, .Indent => continue,
-                .Comment => i += 1,
+                .Comment => {},
                 else => break,
             }
             var tok = self.tokens[i];

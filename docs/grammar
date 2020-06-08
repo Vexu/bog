@@ -1,7 +1,7 @@
 root : (stmt NL)* EOF
 
 stmt
-    : decl "=" expr
+    : decl "=" block_or_expr
     | expr
 
 decl : ("let" | "const") primary_expr
@@ -10,15 +10,16 @@ expr
     : fn
     | jump_expr
     | bool_expr assign?
-    | block
+
+block_or_expr : block | expr
 
 block : NL BEGIN (stmt NL)+ END
 
-assign : ("=" | "+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") expr
+assign : ("=" | "+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") block_or_expr
 
-jump_expr : "return" expr? | "break" | "continue"
+jump_expr : "return" block_or_expr? | "break" | "continue"
 
-fn : "fn" "(" (primary_expr ",")* primary_expr? ")" expr
+fn : "fn" "(" (primary_expr ",")* primary_expr? ")" block_or_expr
 
 bool_expr
     : "not" comparision_expr
@@ -33,7 +34,7 @@ type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" |
 
 range_expr : bit_expr ("..." bit_expr)?
 
-bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)* | ("catch" ("(" decl ")")? expr))?
+bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)* | ("catch" ("(" decl ")")? block_or_expr))?
 
 shift_expr : add_expr (("<<" | ">>") add_expr)?
 
@@ -60,7 +61,7 @@ primary_expr
     | "true"
     | "false"
     | "this"
-    | "(" expr ")"
+    | "(" block_or_expr ")"
     | "(" (expr ",")+ expr? ")"
     | "{" (expr ":" expr ",")* (expr ":" expr)? "}"
     | "[" (expr ",")* expr? "]"
@@ -72,14 +73,14 @@ primary_expr
     | for
     | match
 
-if : "if" "(" (decl "=")? expr ")" expr ("else" expr)?
+if : "if" "(" (decl "=")? expr ")" block_or_expr ("else" block_or_expr)?
 
-while : "while" "(" (decl "=")? expr ")" expr
+while : "while" "(" (decl "=")? expr ")" block_or_expr
 
-for : "for" "(" (decl "in")? expr ")" expr
+for : "for" "(" (decl "in")? expr ")" block_or_expr
 
 match : "match" "(" expr ")" (NL match_case)+ NL
 
 match_case
-    : decl ":" expr
-    | expr ("," expr)* ","? ":" expr
+    : decl ":" block_or_expr
+    | expr ("," expr)* ","? ":" block_or_expr

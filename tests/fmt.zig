@@ -1,3 +1,12 @@
+test "comments after expression" {
+    testCanonical(
+        \\a
+        \\#foo
+        \\#bar
+        \\
+    );
+}
+
 test "two empty lines after block" {
     testTransform(
         \\const foo = fn(a)
