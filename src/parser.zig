@@ -27,8 +27,10 @@ pub fn parse(gpa: *Allocator, source: []const u8, errors: *bog.Errors) (Parser.E
     var nodes = NodeList.init(gpa);
     defer nodes.deinit();
 
-    while (parser.tokens[parser.tok_index].id == .Comment)
-        parser.tok_index += 1;
+    while (true) switch (parser.tokens[parser.tok_index].id) {
+        .Comment, .Nl => parser.tok_index += 1,
+        else => break,
+    };
 
     while (true) {
         _ = try parser.eatIndent(0);
@@ -353,6 +355,7 @@ pub const Parser = struct {
                 .let_const = null,
                 .rhs = undefined,
             };
+            parser.skipNl();
             if (parser.eatToken(.LParen, true)) |_| {
                 node.let_const = parser.eatToken(.Keyword_let, true) orelse
                     try parser.expectToken(.Keyword_const, false);
@@ -464,6 +467,7 @@ pub const Parser = struct {
         var lhs = try parser.prefixExpr(skip_nl, level);
 
         if (parser.eatTokenNoNl(.Keyword_as)) |tok| {
+            parser.skipNl();
             const node = try parser.arena.create(Node.TypeInfix);
             node.* = .{
                 .lhs = lhs,
@@ -574,7 +578,7 @@ pub const Parser = struct {
                     .lhs = lhs,
                     .l_tok = tok,
                     .op = .member,
-                    .r_tok = try parser.expectToken(.Identifier, true),
+                    .r_tok = try parser.expectToken(.Identifier, false),
                 };
                 lhs = &node.base;
             } else {
@@ -1082,7 +1086,7 @@ pub const Parser = struct {
     fn eatTokenNoNl(parser: *Parser, id: TokenId) ?TokenIndex {
         const start = parser.tok_index;
         parser.skipNl();
-        if (parser.eatToken(id, true)) |tok| return tok else {
+        if (parser.eatToken(id, false)) |tok| return tok else {
             parser.tok_index = start;
             return null;
         }

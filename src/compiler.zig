@@ -603,7 +603,7 @@ pub const Compiler = struct {
                         });
                         std.debug.assert(l_val == .empty);
 
-                        if (i + 1 == node.values.len and res.lval != .assign) result_reg = self.registerAlloc();
+                        if (i + 1 != node.values.len and res.lval != .assign) result_reg = self.registerAlloc();
                     }
                     return Value.empty;
                 },
@@ -688,7 +688,7 @@ pub const Compiler = struct {
                         std.debug.assert(l_val == .empty);
                         index.int += 1;
 
-                        if (i + 1 == node.values.len and res.lval != .assign) result_reg = self.registerAlloc();
+                        if (i + 1 != node.values.len and res.lval != .assign) result_reg = self.registerAlloc();
                     }
                     return Value.empty;
                 },
@@ -943,7 +943,7 @@ pub const Compiler = struct {
         const loop_scope = blk: {
             var scope = self.cur_scope;
             while (true) switch (scope.id) {
-                .func => return self.reportErr(if (node.op == .Continue)
+                .module, .func => return self.reportErr(if (node.op == .Continue)
                     "continue outside of loop"
                 else
                     "break outside of loop", node.tok),
