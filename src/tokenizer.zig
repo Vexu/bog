@@ -330,6 +330,42 @@ pub fn tokenize(allocator: *mem.Allocator, source: []const u8, errors: *Errors) 
     }
 }
 
+pub fn tokenizeRepl(repl: *@import("repl.zig").Repl) Tokenizer.Error!bool {
+    // remove previous eof
+    if (repl.tokens.items.len > 0) _ = repl.tokens.pop();
+    const start_len = repl.tokens.items.len;
+
+    var tokenizer = Tokenizer{
+        .tokens = repl.tokens,
+        .errors = &repl.vm.errors,
+        .it = .{
+            .i = repl.byte_index,
+            .bytes = repl.buffer.items,
+        },
+        .repl = true,
+    };
+    defer {
+        repl.byte_index = tokenizer.it.i;
+        repl.tokens = tokenizer.tokens;
+    }
+    while (true) {
+        const tok = try tokenizer.tokens.addOne();
+        tok.* = try tokenizer.next();
+        if (tok.id == .Eof) {
+            // check if more input is expected
+            return if (tokenizer.tokens.items.len == start_len + 2)
+                true
+            else if (tokenizer.paren_level != 0 or
+                tokenizer.string or
+                tokenizer.expect_indent or
+                tokenizer.indent_level != 0)
+                false
+            else
+                true;
+        }
+    }
+}
+
 pub const Tokenizer = struct {
     errors: *Errors,
     tokens: Token.List,
@@ -353,30 +389,6 @@ pub const Tokenizer = struct {
     repl: bool,
 
     pub const Error = error{TokenizeError} || mem.Allocator.Error;
-
-    pub fn tokenizeRepl(self: *Tokenizer, input: []const u8) Error!bool {
-        // remove previous eof
-        self.it.bytes = input;
-        _ = self.tokens.pop();
-        self.tree.source = input;
-        const start_len = self.tokens.items.len;
-        while (true) {
-            const tok = try self.tree.tokens.addOne();
-            tok.* = try self.next();
-            if (tok.id == .Eof) {
-                // check if more input is expected
-                return if (self.tree.tokens.items.len == start_len + 2)
-                    true
-                else if (self.paren_level != 0 or
-                    self.string or
-                    self.expect_indent or
-                    self.indent_level != 0)
-                    false
-                else
-                    true;
-            }
-        }
-    }
 
     fn reportErr(self: *Tokenizer, msg: []const u8, c: u21) Error {
         try self.errors.add(

@@ -2,70 +2,13 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const bog = @import("bog.zig");
-const Tree = bog.Tree;
-const Tokenizer = bog.Tokenizer;
-const Compiler = bog.Compiler;
 const Vm = bog.Vm;
 const Errors = bog.Errors;
 
-pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
-    var arena_allocator = std.heap.ArenaAllocator.init(allocator);
-    defer arena_allocator.deinit();
-    const arena = &arena_allocator.allocator;
-    var tree = Tree{
-        .source = undefined,
-        .arena_allocator = arena_allocator,
-        .tokens = bog.Token.List.init(arena),
-        .nodes = bog.Node.List.init(arena),
-    };
+pub fn run(gpa: *Allocator, in_stream: var, out_stream: var) !void {
+    var repl = try Repl.init(gpa);
+    defer repl.deinit();
 
-    // TODO cleanup
-    var repl = Repl{
-        .module = .{
-            .name = "<stdin>",
-            .code = &[0]bog.Instruction{},
-            .strings = "",
-            .entry = 0,
-        },
-        .vm = Vm.init(allocator, .{ .repl = true, .import_files = true }),
-        .buffer = try ArrayList(u8).initCapacity(allocator, std.mem.page_size),
-        .tokenizer = .{
-            .errors = undefined,
-            .tree = &tree,
-            .it = .{
-                .bytes = "",
-                .i = 0,
-            },
-            .repl = true,
-        },
-        .compiler = .{
-            .errors = undefined,
-            .tree = &tree,
-            .arena = arena,
-            .root_scope = .{
-                .base = .{
-                    .id = .module,
-                    .parent = null,
-                    .syms = Compiler.Symbol.List.init(arena),
-                },
-                .code = Compiler.Code.init(allocator),
-            },
-            .string_interner = std.StringHashMap(u32).init(arena),
-            .module_code = Compiler.Code.init(allocator),
-            .strings = std.ArrayList(u8).init(allocator),
-            .code = undefined,
-            .cur_scope = undefined,
-        },
-    };
-    repl.compiler.errors = &repl.vm.errors;
-    repl.tokenizer.errors = &repl.vm.errors;
-    repl.compiler.code = &repl.compiler.root_scope.code;
-    repl.compiler.cur_scope = &repl.compiler.root_scope.base;
-    defer repl.vm.deinit();
-    defer repl.buffer.deinit();
-    defer repl.compiler.strings.deinit();
-    defer repl.compiler.root_scope.code.deinit();
-    defer repl.compiler.string_interner.deinit();
     try bog.std.registerAll(&repl.vm.native_registry);
 
     while (true) {
@@ -73,7 +16,7 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
             error.EndOfStream => return,
             error.TokenizeError, error.ParseError, error.CompileError => try repl.vm.errors.render(repl.buffer.items, out_stream),
             error.RuntimeError => {
-                repl.vm.ip = repl.module.code.len;
+                (try repl.vm.gc.stackRef(0)).* = &bog.Value.None;
                 try repl.vm.errors.render(repl.buffer.items, out_stream);
             },
             else => |e| return e,
@@ -81,24 +24,90 @@ pub fn run(allocator: *Allocator, in_stream: var, out_stream: var) !void {
     }
 }
 
-const Repl = struct {
+pub const Repl = struct {
+    gpa: *Allocator,
+    arena: std.heap.ArenaAllocator,
     vm: Vm,
-    tokenizer: Tokenizer,
     buffer: ArrayList(u8),
-    module: bog.Module,
-    compiler: Compiler,
+    tokens: bog.Token.List,
+    root_scope: @import("compiler.zig").ModuleScope,
+    strings: std.ArrayList(u8),
+    module_code: bog.Compiler.Code,
+    string_interner: std.StringHashMap(u32),
+
+    byte_index: usize = 0,
+    tok_index: bog.Token.Index = 0,
+    /// 1 for "ans"
+    used_regs: bog.RegRef = 1,
+
+    const tokenize = @import("tokenizer.zig").tokenizeRepl;
+    const parse = @import("parser.zig").parseRepl;
+    const compile = @import("compiler.zig").compileRepl;
+
+    fn init(gpa: *Allocator) !Repl {
+        const buffer = try ArrayList(u8).initCapacity(gpa, std.mem.page_size);
+        errdefer buffer.deinit();
+        var vm = Vm.init(gpa, .{ .repl = true, .import_files = true });
+        errdefer vm.deinit();
+        var syms = bog.Compiler.Symbol.List.init(gpa);
+        errdefer syms.deinit();
+
+        // declare 'ans' for the result of the previous input
+        try syms.push(.{
+            .name = "ans",
+            .reg = 0,
+            .mutable = false,
+        });
+
+        const ans = try vm.gc.stackRef(0);
+        ans.* = &bog.Value.None;
+
+        return Repl{
+            .gpa = gpa,
+            .arena = std.heap.ArenaAllocator.init(gpa),
+            .vm = vm,
+            .buffer = buffer,
+            .tokens = bog.Token.List.init(gpa),
+            .root_scope = .{
+                .base = .{
+                    .id = .module,
+                    .parent = null,
+                    .syms = syms,
+                },
+                .code = bog.Compiler.Code.init(gpa),
+            },
+            .strings = ArrayList(u8).init(gpa),
+            .module_code = bog.Compiler.Code.init(gpa),
+            .string_interner = std.StringHashMap(u32).init(gpa),
+        };
+    }
+
+    fn deinit(repl: *Repl) void {
+        repl.vm.deinit();
+        repl.arena.deinit();
+        repl.buffer.deinit();
+        repl.strings.deinit();
+        repl.module_code.deinit();
+        repl.string_interner.deinit();
+        repl.root_scope.code.deinit();
+        repl.root_scope.base.syms.deinit();
+    }
 
     fn handleLine(repl: *Repl, in_stream: var, out_stream: var) !void {
-        var begin_index = repl.compiler.tree.tokens.len;
-        if (begin_index != 0) begin_index -= 1;
+        defer {
+            repl.arena.deinit();
+            repl.arena = std.heap.ArenaAllocator.init(repl.gpa);
+        }
         try repl.readLine(">>> ", in_stream, out_stream);
-        while (!(try repl.tokenizer.tokenizeRepl(repl.buffer.items))) {
+        while (!(try repl.tokenize())) {
             try repl.readLine("... ", in_stream, out_stream);
         }
-        const node = (try bog.Parser.parseRepl(repl.compiler.tree, begin_index, &repl.vm.errors)) orelse return;
-        repl.vm.ip += try repl.compiler.compileRepl(node, &repl.module);
+        const node = (try repl.parse()) orelse return;
+        var mod = try repl.compile(node);
+        repl.vm.ip = mod.entry;
 
-        const res = try repl.vm.exec(&repl.module);
+        const res = try repl.vm.exec(&mod);
+        (try repl.vm.gc.stackRef(0)).* = res;
         if (res.* == .none) return;
         try res.dump(out_stream, 2);
         try out_stream.writeByte('\n');

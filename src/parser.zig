@@ -53,6 +53,23 @@ pub fn parse(gpa: *Allocator, source: []const u8, errors: *bog.Errors) (Parser.E
     return tree;
 }
 
+pub fn parseRepl(repl: *@import("repl.zig").Repl) Parser.Error!?*Node {
+    var parser = Parser{
+        .arena = &repl.arena.allocator,
+        .gpa = repl.gpa,
+        .errors = &repl.vm.errors,
+        .tokens = repl.tokens.items,
+        .tok_index = repl.tok_index,
+    };
+    defer repl.tok_index = @intCast(u32, parser.tokens.len - 1);
+
+    if (parser.eatToken(.Eof, true)) |_| return null;
+    const ret = try parser.stmt(0);
+    _ = try parser.expectToken(.Nl, false);
+    _ = try parser.expectToken(.Eof, true);
+    return ret;
+}
+
 pub const Parser = struct {
     arena: *Allocator,
     gpa: *Allocator,
@@ -61,20 +78,6 @@ pub const Parser = struct {
     tok_index: TokenIndex = 0,
 
     pub const Error = error{ParseError} || Allocator.Error;
-
-    pub fn parseRepl(tree: *Tree, start_index: usize, errors: *bog.Errors) Error!?*Node {
-        var parser = Parser{
-            .arena = &tree.arena_allocator.allocator,
-            .it = tree.tokens.iterator(start_index),
-            .tree = tree,
-            .errors = errors,
-        };
-        if (parser.eatToken(.Eof, true)) |_| return null;
-        const ret = try parser.stmt();
-        try tree.nodes.push(ret);
-        _ = try parser.expectToken(.Eof, true);
-        return ret;
-    }
 
     /// stmt
     ///     : decl "=" block_or_expr

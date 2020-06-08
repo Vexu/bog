@@ -280,7 +280,7 @@ test "catch" {
     );
 }
 
-test "strigs" {
+test "strings" {
     expectOutput(
         \\const a = "hello"
         \\return if (a == "world") 2 as str else 1.5 as str
@@ -289,7 +289,7 @@ test "strigs" {
     );
 }
 
-test "comparision" {
+test "comparison" {
     expectOutput(
         \\let a = 0
         \\while (a != 1000)

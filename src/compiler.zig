@@ -5,7 +5,6 @@ const assert = std.debug.assert;
 const bog = @import("bog.zig");
 const Node = bog.Node;
 const Tree = bog.Tree;
-const TokenList = bog.Token.List;
 const TokenIndex = bog.Token.Index;
 const RegRef = bog.RegRef;
 const Errors = bog.Errors;
@@ -13,31 +12,33 @@ const util = @import("util.zig");
 
 pub const max_params = 32;
 
+// made pub here to not expose it from bog.zig
+pub const ModuleScope = Compiler.Scope.Module;
+
 pub fn compile(gpa: *Allocator, source: []const u8, errors: *Errors) (Compiler.Error || bog.Parser.Error || bog.Tokenizer.Error)!*bog.Module {
     var tree = try bog.parse(gpa, source, errors);
     defer tree.deinit();
 
     const arena = &tree.arena.promote(gpa).allocator;
+    var root_scope: ModuleScope = .{
+        .base = .{
+            .syms = Compiler.Symbol.List.init(arena),
+            .id = .module,
+            .parent = null,
+        },
+        .code = Compiler.Code.init(arena),
+    };
     var compiler = Compiler{
         .errors = errors,
-        .tree = tree,
+        .tokens = tree.tokens,
+        .source = source,
         .arena = arena,
-        .root_scope = .{
-            .base = .{
-                .id = .module,
-                .parent = null,
-                .syms = Compiler.Symbol.List.init(arena),
-            },
-            .code = Compiler.Code.init(arena),
-        },
         .module_code = Compiler.Code.init(gpa),
         .strings = std.ArrayList(u8).init(gpa),
-        .code = undefined,
-        .cur_scope = undefined,
+        .code = &root_scope.code,
+        .cur_scope = &root_scope.base,
         .string_interner = std.StringHashMap(u32).init(gpa),
     };
-    compiler.code = &compiler.root_scope.code;
-    compiler.cur_scope = &compiler.root_scope.base;
     defer compiler.string_interner.deinit();
 
     for (tree.nodes) |node| {
@@ -67,11 +68,51 @@ pub fn compile(gpa: *Allocator, source: []const u8, errors: *Errors) (Compiler.E
     return mod;
 }
 
+pub fn compileRepl(repl: *@import("repl.zig").Repl, node: *Node) Compiler.Error!bog.Module {
+    var compiler = Compiler{
+        .tokens = repl.tokens.items,
+        .source = repl.buffer.items,
+        .errors = &repl.vm.errors,
+        .arena = &repl.arena.allocator,
+        .module_code = repl.module_code,
+        .strings = repl.strings,
+        .code = &repl.root_scope.code,
+        .cur_scope = &repl.root_scope.base,
+        .string_interner = repl.string_interner,
+        .used_regs = repl.used_regs,
+    };
+    defer {
+        repl.used_regs = compiler.used_regs;
+        repl.strings = compiler.strings;
+        repl.string_interner = compiler.string_interner;
+    }
+    const start_len = repl.module_code.items.len;
+
+    try compiler.autoForwardDecl(node);
+    try compiler.addLineInfo(node);
+    const val = try compiler.genNode(node, .discard);
+    if (val != .empty) {
+        const reg = try val.toRt(&compiler);
+        defer val.free(&compiler, reg);
+
+        try compiler.emitSingle(.discard_single, reg);
+    }
+    try compiler.module_code.appendSlice(compiler.code.items);
+    compiler.code.resize(0) catch unreachable;
+
+    return bog.Module{
+        .name = "<stdin>",
+        .code = compiler.module_code.items,
+        .strings = compiler.strings.items,
+        .entry = @intCast(u32, start_len),
+    };
+}
+
 pub const Compiler = struct {
-    tree: *Tree,
+    tokens: []const bog.Token,
+    source: []const u8,
     errors: *Errors,
     arena: *Allocator,
-    root_scope: Scope.Module,
     cur_scope: *Scope,
     used_regs: RegRef = 0,
     code: *Code,
@@ -84,9 +125,9 @@ pub const Compiler = struct {
     pub const Error = error{CompileError} || Allocator.Error;
 
     fn registerAlloc(self: *Compiler) RegRef {
-        const reg = self.used_regs;
-        self.used_regs += 1;
-        return reg;
+        defer self.used_regs += 1;
+        if (self.used_regs == 0xff) @panic("TODO: ran out of registers");
+        return self.used_regs;
     }
 
     fn registerFree(self: *Compiler, reg: RegRef) void {
@@ -469,34 +510,13 @@ pub const Compiler = struct {
         }
     };
 
-    pub fn compileRepl(self: *Compiler, node: *Node, module: *bog.Module) Error!usize {
-        try self.autoForwardDecl(node);
-
-        const start_len = self.module_code.items.len;
-        try self.addLineInfo(node);
-        const val = try self.genNode(node, .discard);
-        if (val != .empty) {
-            const reg = try val.toRt(self);
-            defer val.free(self, reg);
-
-            try self.emitSingle(.discard_single, reg);
-        }
-        const final_len = self.module_code.items.len;
-        try self.module_code.appendSlice(self.code.items);
-
-        module.code = self.module_code.items;
-        self.module_code.resize(final_len) catch unreachable;
-        module.strings = self.strings.items;
-        return final_len - start_len;
-    }
-
     fn autoForwardDecl(self: *Compiler, node: *Node) error{OutOfMemory}!void {
         if (node.id != .Decl) return;
         const decl = @fieldParentPtr(Node.Decl, "base", node);
 
         // only forward declarations like
         // `const IDENTIFIER = fn ...`
-        if (self.tree.tokens[decl.let_const].id == .Keyword_const and
+        if (self.tokens[decl.let_const].id == .Keyword_const and
             decl.capture.id != .Identifier or decl.value.id != .Fn)
             return;
 
@@ -859,7 +879,7 @@ pub const Compiler = struct {
             if_skip = try self.emitJump(.jump_none, cond_reg);
 
             self.cur_scope = &capture_scope;
-            const lval_res = if (self.tree.tokens[node.let_const.?].id == .Keyword_let)
+            const lval_res = if (self.tokens[node.let_const.?].id == .Keyword_let)
                 Result{ .lval = .{ .let = &Value{ .rt = cond_reg } } }
             else
                 Result{ .lval = .{ .Const = &Value{ .rt = cond_reg } } };
@@ -988,7 +1008,7 @@ pub const Compiler = struct {
             // jump past exit loop if cond == .none
             cond_jump = try self.emitJump(.jump_none, cond_reg);
 
-            const lval_res = if (self.tree.tokens[node.let_const.?].id == .Keyword_let)
+            const lval_res = if (self.tokens[node.let_const.?].id == .Keyword_let)
                 Result{ .lval = .{ .let = &Value{ .rt = cond_reg } } }
             else
                 Result{ .lval = .{ .Const = &Value{ .rt = cond_reg } } };
@@ -1073,7 +1093,7 @@ pub const Compiler = struct {
         try self.code.append(.{ .bare = 0 });
 
         if (node.capture != null) {
-            const lval_res = if (self.tree.tokens[node.let_const.?].id == .Keyword_let)
+            const lval_res = if (self.tokens[node.let_const.?].id == .Keyword_let)
                 Result{ .lval = .{ .let = &Value{ .rt = iter_val_reg } } }
             else
                 Result{ .lval = .{ .Const = &Value{ .rt = iter_val_reg } } };
@@ -1138,7 +1158,7 @@ pub const Compiler = struct {
             try self.emitDouble(.unwrap_error_double, unwrap_reg, sub_res.rt);
 
             self.cur_scope = &capture_scope;
-            const lval_res = if (self.tree.tokens[node.let_const.?].id == .Keyword_let)
+            const lval_res = if (self.tokens[node.let_const.?].id == .Keyword_let)
                 Result{ .lval = .{ .let = &Value{ .rt = unwrap_reg } } }
             else
                 Result{ .lval = .{ .Const = &Value{ .rt = unwrap_reg } } };
@@ -1754,7 +1774,7 @@ pub const Compiler = struct {
         assert(res != .lval);
         const r_val = try self.genNodeNonEmpty(node.value, .value);
 
-        const lval_kind = if (self.tree.tokens[node.let_const].id == .Keyword_let)
+        const lval_kind = if (self.tokens[node.let_const].id == .Keyword_let)
             Result{ .lval = .{ .let = &r_val } }
         else
             Result{ .lval = .{ .Const = &r_val } };
@@ -1909,7 +1929,7 @@ pub const Compiler = struct {
     }
 
     fn addLineInfo(self: *Compiler, node: *Node) !void {
-        const tok = self.tree.tokens[node.firstToken()];
+        const tok = self.tokens[node.firstToken()];
 
         try self.code.append(.{ .op = .{ .op = .line_info } });
         try self.code.append(.{ .bare = tok.start });
@@ -1937,8 +1957,8 @@ pub const Compiler = struct {
     }
 
     fn tokenSlice(self: *Compiler, token: TokenIndex) []const u8 {
-        const tok = self.tree.tokens[token];
-        return self.tree.source[tok.start..tok.end];
+        const tok = self.tokens[token];
+        return self.source[tok.start..tok.end];
     }
 
     fn parseStr(self: *Compiler, tok: TokenIndex) ![]u8 {
@@ -1972,7 +1992,7 @@ pub const Compiler = struct {
     }
 
     fn reportErr(self: *Compiler, msg: []const u8, tok: TokenIndex) Error {
-        try self.errors.add(msg, self.tree.tokens[tok].start, .err);
+        try self.errors.add(msg, self.tokens[tok].start, .err);
         return error.CompileError;
     }
 };
