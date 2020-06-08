@@ -124,7 +124,7 @@ pub const Node = struct {
             .While => @fieldParentPtr(Node.While, "base", node).body.lastToken(),
             .Match => {
                 const match = @fieldParentPtr(Node.Match, "base", node);
-                return match.body[match.body.len - 1].lastToken();
+                return match.cases[match.cases.len - 1].lastToken();
             },
             .MatchCatchAll => @fieldParentPtr(Node.MatchCatchAll, "base", node).expr.lastToken(),
             .MatchLet => @fieldParentPtr(Node.MatchLet, "base", node).expr.lastToken(),
@@ -351,7 +351,7 @@ pub const Node = struct {
     pub const Match = struct {
         base: Node = Node{ .id = .Match },
         expr: *Node,
-        body: []*Node,
+        cases: []*Node,
         match_tok: TokenIndex,
         r_paren: TokenIndex,
     };

@@ -892,7 +892,10 @@ pub const Parser = struct {
         var last_nl = parser.tok_index;
         while (true) {
             try stmts.append(try parser.stmt(new_level));
-            last_nl = try parser.expectToken(.Nl, false);
+            last_nl = parser.eatToken(.Nl, false) orelse {
+                last_nl = try parser.expectToken(.Eof, false);
+                break;
+            };
             if (!try parser.eatIndent(new_level)) break;
         }
 
@@ -909,7 +912,7 @@ pub const Parser = struct {
 
     /// if : "if" "(" (decl "=")? expr ")" block_or_expr ("else" block_or_expr)?
     fn ifExpr(parser: *Parser, skip_nl: bool, level: u16) Error!?*Node {
-        const tok = parser.eatToken(.Keyword_if, skip_nl) orelse return null;
+        const tok = parser.eatToken(.Keyword_if, true) orelse return null;
         _ = try parser.expectToken(.LParen, true);
         const let_const = parser.eatToken(.Keyword_let, true) orelse
             parser.eatToken(.Keyword_const, true);
@@ -933,7 +936,7 @@ pub const Parser = struct {
 
     /// while : "while" "(" (decl "=")? expr ")" block_or_expr
     fn whileExpr(parser: *Parser, skip_nl: bool, level: u16) Error!?*Node {
-        const tok = parser.eatToken(.Keyword_while, skip_nl) orelse return null;
+        const tok = parser.eatToken(.Keyword_while, true) orelse return null;
         _ = try parser.expectToken(.LParen, true);
         const let_const = parser.eatToken(.Keyword_let, true) orelse
             parser.eatToken(.Keyword_const, true);
@@ -952,7 +955,7 @@ pub const Parser = struct {
 
     /// for : "for" "(" (decl "in")? expr ")" block_or_expr
     fn forExpr(parser: *Parser, skip_nl: bool, level: u16) Error!?*Node {
-        const tok = parser.eatToken(.Keyword_for, skip_nl) orelse return null;
+        const tok = parser.eatToken(.Keyword_for, true) orelse return null;
         _ = try parser.expectToken(.LParen, true);
         const let_const = parser.eatToken(.Keyword_let, true) orelse
             parser.eatToken(.Keyword_const, true);
@@ -971,26 +974,38 @@ pub const Parser = struct {
 
     /// match : "match" "(" expr ")" (NL match_case)+ NL
     fn matchExpr(parser: *Parser, skip_nl: bool, level: u16) Error!?*Node {
-        const tok = parser.eatToken(.Keyword_match, skip_nl) orelse return null;
+        const tok = parser.eatToken(.Keyword_match, true) orelse return null;
         _ = try parser.expectToken(.LParen, true);
+        const cond = try parser.expr(true, level);
+        const r_paren = try parser.expectToken(.RParen, false);
+        _ = try parser.expectToken(.Nl, false);
 
-        const r_paren = try parser.expectToken(.RParen, true);
         var cases = NodeList.init(parser.gpa);
         defer cases.deinit();
 
-        _ = try parser.expectToken(.Nl, false);
-        const new_level = level + 1;
+        const indent = parser.eatToken(.Indent, false);
+        if (indent == null or parser.tokens[indent.?].id.Indent <= level)
+            return parser.reportErr("expected indentation", parser.tokens[parser.tok_index]);
+
+        const new_level = parser.tokens[indent.?].id.Indent;
+        var last_nl = parser.tok_index;
         while (true) {
-            if (try parser.eatIndent(new_level))
-                try cases.append(try parser.matchCase(new_level));
-            _ = parser.eatToken(.Nl, false) orelse break;
+            try cases.append(try parser.matchCase(new_level));
+            last_nl = parser.eatToken(.Nl, false) orelse {
+                last_nl = try parser.expectToken(.Eof, false);
+                break;
+            };
+            if (!try parser.eatIndent(new_level)) break;
         }
+
+        // reset to previous new line since all statements are expected to end in a newline
+        parser.tok_index = last_nl;
 
         const node = try parser.arena.create(Node.Match);
         node.* = .{
             .match_tok = tok,
-            .expr = try parser.expr(true, level),
-            .body = try parser.arena.dupe(*Node, cases.items),
+            .expr = cond,
+            .cases = try parser.arena.dupe(*Node, cases.items),
             .r_paren = r_paren,
         };
         return &node.base;
@@ -1000,8 +1015,8 @@ pub const Parser = struct {
     ///     : decl ":" block_or_expr
     ///     | expr ("," expr)* ","? ":" block_or_expr
     fn matchCase(parser: *Parser, level: u16) Error!*Node {
-        if (parser.eatToken(.Keyword_let, false) orelse
-            parser.eatToken(.Keyword_const, false)) |let_const|
+        if (parser.eatToken(.Keyword_let, true) orelse
+            parser.eatToken(.Keyword_const, true)) |let_const|
         {
             if (parser.eatToken(.Identifier, true)) |_| {
                 const node = try parser.arena.create(Node.MatchCatchAll);
@@ -1021,7 +1036,7 @@ pub const Parser = struct {
                 .expr = try parser.blockOrExpr(false, level),
             };
             return &node.base;
-        } else if (parser.eatToken(.Underscore, false)) |u| {
+        } else if (parser.eatToken(.Underscore, true)) |u| {
             const node = try parser.arena.create(Node.MatchCatchAll);
             node.* = .{
                 .tok = u,
