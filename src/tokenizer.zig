@@ -128,6 +128,7 @@ pub const Token = struct {
         PipeEqual,
         Equal,
         EqualEqual,
+        EqualArr,
         BangEqual,
         LParen,
         RParen,
@@ -194,6 +195,13 @@ pub const Token = struct {
         Keyword_const,
         Keyword_native,
         Keyword_this,
+        Keyword_any,
+        Keyword_int,
+        Keyword_num,
+        Keyword_str,
+        Keyword_none,
+        Keyword_type,
+        Keyword_bool,
     };
 
     pub const keywords = std.ComptimeStringMap(Id, .{
@@ -222,6 +230,13 @@ pub const Token = struct {
         .{ "const", .Keyword_const },
         .{ "native", .Keyword_native },
         .{ "this", .Keyword_this },
+        .{ "any", .Keyword_any },
+        .{ "int", .Keyword_int },
+        .{ "num", .Keyword_num },
+        .{ "str", .Keyword_str },
+        .{ "none", .Keyword_none },
+        .{ "type", .Keyword_type },
+        .{ "bool", .Keyword_bool },
         .{ "_", .Underscore },
     });
 
@@ -734,6 +749,10 @@ pub const Tokenizer = struct {
                         res = .EqualEqual;
                         break;
                     },
+                    '>' => {
+                        res = .EqualArr;
+                        break;
+                    },
                     else => {
                         self.it.i = start_index + 1;
                         res = .Equal;
@@ -1145,7 +1164,7 @@ fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
 
 test "operators" {
     expectTokens(
-        \\!= | |= = ==
+        \\!= | |= = == =>
         \\( ) { } [ ] . ...
         \\^ ^= + += - -=
         \\* *= ** **= % %= / /= // //=
@@ -1158,6 +1177,7 @@ test "operators" {
         .PipeEqual,
         .Equal,
         .EqualEqual,
+        .EqualArr,
         .Nl,
         .LParen,
         .RParen,

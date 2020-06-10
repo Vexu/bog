@@ -2,9 +2,30 @@ root : (stmt NL)* EOF
 
 stmt
     : decl "=" block_or_expr
+    | "type" IDENTIFIER "=" type_expr
     | expr
 
-decl : ("let" | "const") primary_expr
+decl : ("let" | "const") primary_expr (":" type_expr)?
+
+type_expr
+    : type_primitive
+    | IDENTIFIER (":" type_expr)? ("|" IDENTIFIER (":" type_expr)?)
+
+type_primitive
+    : "any"
+    | "int"
+    | "num"
+    | "str"
+    | "none"
+    | "type"
+    | "bool"
+    | IDENTIFIER
+    | "[" type_expr "]"
+    | "(" type_expr ")"
+    | "(" (type_expr ",")+ type_expr? ")"
+    | "{" (expr ":" type_expr ",")* (expr ":" type_expr)? "}"
+    | "fn" "(" (type_expr ",")* type_expr? ")" ":" type_expr
+    | "error" "(" type_expr ")"
 
 expr
     : fn
@@ -19,7 +40,7 @@ assign : ("=" | "+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>="
 
 jump_expr : "return" block_or_expr? | "break" | "continue"
 
-fn : "fn" "(" (primary_expr ",")* primary_expr? ")" block_or_expr
+fn : "fn" "(" (primary_expr (":" type_expr)? ",")* (primary_expr (":" type_expr)?)? ")" (":" type_expr)? block_or_expr
 
 bool_expr
     : "not" comparision_expr
@@ -28,9 +49,7 @@ bool_expr
 
 comparision_expr
     : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in") range_expr)?
-    | range_expr ("is" type_name)?
-
-type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
+    | range_expr ("is" type_expr)?
 
 range_expr : bit_expr ("..." bit_expr)?
 
@@ -42,7 +61,7 @@ add_expr : mul_expr (("-" | "+") mul_expr)*
 
 mul_expr : cast_expr (("*" | "/" | "//" | "%") cast_expr)*
 
-cast_expr : prefix_expr ("as" type_name)?
+cast_expr : prefix_expr ("as" type_expr)?
 
 prefix_expr : ("try" | "-" | "+" | "~")? power_expr
 
@@ -61,13 +80,14 @@ primary_expr
     | "true"
     | "false"
     | "this"
+    | "." IDENTIFIER ("=" expr)?
     | "(" block_or_expr ")"
     | "(" (expr ",")+ expr? ")"
     | "{" (expr ":" expr ",")* (expr ":" expr)? "}"
     | "[" (expr ",")* expr? "]"
     | "error" "(" expr ")"
     | "import" "(" STRING ")"
-    | "native" "(" STRING ")"
+    | "native" "(" STRING ("," type_expr)? ")" 
     | if
     | while
     | for
@@ -82,5 +102,5 @@ for : "for" "(" (decl "in")? expr ")" block_or_expr
 match : "match" "(" expr ")" (NL match_case)+ NL
 
 match_case
-    : decl ":" block_or_expr
-    | expr ("," expr)* ","? ":" block_or_expr
+    : decl "=>" block_or_expr
+    | expr ("," expr)* ","? "=>" block_or_expr
