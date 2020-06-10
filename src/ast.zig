@@ -55,16 +55,29 @@ pub const Node = struct {
         MatchLet,
         MatchCase,
         Jump,
+        TypeDecl,
+        Union,
+        Param,
     };
 
     pub fn firstToken(node: *Node) TokenIndex {
         return switch (node.id) {
             .Decl => @fieldParentPtr(Node.Decl, "base", node).let_const,
+            .TypeDecl => @fieldParentPtr(Node.Type, "base", node).identifier - 1,
             .Fn => @fieldParentPtr(Node.Fn, "base", node).fn_tok,
+            .Param => {
+                const param = @fieldParentPtr(Node.Union, "base", node);
+                return param.capture.firstToken();
+            },
+            .TypeUnion => {
+                const first = @fieldParentPtr(Node.Union, "base", node).cases[0];
+                if (first.pipe) |some| return some;
+                if (first.name) |some| return some;
+                return first.expr.firstToken();
+            },
             .Identifier, .Discard, .This => @fieldParentPtr(Node.SingleToken, "base", node).tok,
             .Prefix => @fieldParentPtr(Node.Prefix, "base", node).tok,
             .Infix => @fieldParentPtr(Node.Infix, "base", node).lhs.firstToken(),
-            .TypeInfix => @fieldParentPtr(Node.TypeInfix, "base", node).lhs.firstToken(),
             .Suffix => @fieldParentPtr(Node.Suffix, "base", node).l_tok,
             .Literal => {
                 const lit = @fieldParentPtr(Node.Literal, "base", node);
@@ -97,11 +110,25 @@ pub const Node = struct {
     pub fn lastToken(node: *Node) TokenIndex {
         return switch (node.id) {
             .Decl => @fieldParentPtr(Node.Decl, "base", node).value.lastToken(),
-            .Fn => @fieldParentPtr(Node.Fn, "base", node).body.lastToken(),
+            .TypeDecl => @fieldParentPtr(Node.Type, "base", node).expr.lastToken(),
+            .Fn => {
+                const fn_node = @fieldParentPtr(Node.Fn, "base", node);
+                if (fn_node.body) |some| return some.lastToken();
+                if (fn_node.param_type) |some| return some.lastToken();
+                return fn_node.r_paren;
+            },
+            .Param => {
+                const param = @fieldParentPtr(Node.Param, "base", node);
+                if (param.param_type) |some|  return some;
+                return param.capture.lastToken();
+            },
+            .Union => {
+                const union_node = @fieldParentPtr(Node.Union, "base", node);
+                return union_node.cases[type_union.cases.len - 1].expr.lastToken();
+            },
             .Identifier, .Discard, .This => @fieldParentPtr(Node.SingleToken, "base", node).tok,
             .Prefix => @fieldParentPtr(Node.Prefix, "base", node).rhs.lastToken(),
             .Infix => @fieldParentPtr(Node.Infix, "base", node).rhs.lastToken(),
-            .TypeInfix => @fieldParentPtr(Node.TypeInfix, "base", node).type_tok,
             .Suffix => @fieldParentPtr(Node.Suffix, "base", node).r_tok,
             .Literal => @fieldParentPtr(Node.Literal, "base", node).tok,
             .Import => @fieldParentPtr(Node.Import, "base", node).r_paren,
@@ -147,12 +174,36 @@ pub const Node = struct {
         eq_tok: TokenIndex,
     };
 
+    pub const TypeDecl = struct {
+        base: Node = Node{ .id = .TypeDecl },
+        name: TokenIndex,
+        expr: *Node,
+    };
+
+    pub const Union = struct {
+        base: Node = Node{ .id = .Union },
+        cases: []Case,
+
+        pub const Case = struct {
+            pipe: ?TokenIndex,
+            name: ?TokenIndex,
+            expr: *Node,
+        };
+    };
+
     pub const Fn = struct {
         base: Node = Node{ .id = .Fn },
         params: []*Node,
-        body: *Node,
+        body: ?*Node,
         fn_tok: TokenIndex,
         r_paren: TokenIndex,
+        ret_type: ?*Node,
+    };
+
+    pub const Param = struct {
+        base: Node = Node{ .id = .Param },
+        capture: *Node,
+        param_type: ?*Node,
     };
 
     pub const SingleToken = struct {
@@ -173,17 +224,6 @@ pub const Node = struct {
             plus,
             Try,
         };
-    };
-
-    pub const TypeInfix = struct {
-        base: Node = Node{ .id = .TypeInfix },
-        op: enum {
-            is,
-            as,
-        },
-        lhs: *Node,
-        tok: TokenIndex,
-        type_tok: TokenIndex,
     };
 
     pub const Infix = struct {
@@ -226,6 +266,9 @@ pub const Node = struct {
             BitAndAssign,
             BitOrAssign,
             BitXOrAssign,
+
+            is,
+            as,
         },
         tok: TokenIndex,
         lhs: *Node,
@@ -269,6 +312,7 @@ pub const Node = struct {
         tok: TokenIndex,
         str_tok: TokenIndex,
         r_paren: TokenIndex,
+        type_expr: ?*Node,
     };
 
     pub const Error = struct {
@@ -291,7 +335,7 @@ pub const Node = struct {
     };
 
     pub const Grouped = struct {
-        base: Node = Node{ .id = .Grouped },
+        base: Node,
         expr: *Node,
         l_tok: TokenIndex,
         r_tok: TokenIndex,
