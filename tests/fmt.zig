@@ -6,6 +6,7 @@ test "types" {
         \\    | foo
         \\    | bar: num
         \\    | ll: [str]
+        \\    | func: fn(num): [str]
         \\
         \\
         \\

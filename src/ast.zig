@@ -122,7 +122,7 @@ pub const Node = struct {
             },
             .Param => {
                 const param = @fieldParentPtr(Node.Param, "base", node);
-                if (param.param_type) |some|  return some.lastToken();
+                if (param.param_type) |some| return some.lastToken();
                 return param.capture.lastToken();
             },
             .Case => return @fieldParentPtr(Node.Case, "base", node).expr.lastToken(),
