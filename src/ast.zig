@@ -31,10 +31,10 @@ pub const Node = struct {
         Fn,
         Discard,
         Identifier,
+        Primitive,
         This,
         Prefix,
         Infix,
-        TypeInfix,
         Suffix,
         Literal,
         Import,
@@ -45,6 +45,7 @@ pub const Node = struct {
         Map,
         Block,
         Grouped,
+        ListType,
         MapItem,
         Catch,
         If,
@@ -57,38 +58,40 @@ pub const Node = struct {
         Jump,
         TypeDecl,
         Union,
+        Case,
         Param,
     };
 
     pub fn firstToken(node: *Node) TokenIndex {
         return switch (node.id) {
             .Decl => @fieldParentPtr(Node.Decl, "base", node).let_const,
-            .TypeDecl => @fieldParentPtr(Node.Type, "base", node).identifier - 1,
+            .TypeDecl => @fieldParentPtr(Node.TypeDecl, "base", node).tok,
             .Fn => @fieldParentPtr(Node.Fn, "base", node).fn_tok,
             .Param => {
                 const param = @fieldParentPtr(Node.Union, "base", node);
                 return param.capture.firstToken();
             },
-            .TypeUnion => {
-                const first = @fieldParentPtr(Node.Union, "base", node).cases[0];
-                if (first.pipe) |some| return some;
-                if (first.name) |some| return some;
-                return first.expr.firstToken();
+            .Case => {
+                const case = @fieldParentPtr(Node.Case, "base", node);
+                if (case.pipe) |some| return some;
+                if (case.name) |some| return some;
+                return case.expr.firstToken();
             },
-            .Identifier, .Discard, .This => @fieldParentPtr(Node.SingleToken, "base", node).tok,
+            .Primitive, .Identifier, .Discard, .This => @fieldParentPtr(Node.SingleToken, "base", node).tok,
             .Prefix => @fieldParentPtr(Node.Prefix, "base", node).tok,
             .Infix => @fieldParentPtr(Node.Infix, "base", node).lhs.firstToken(),
             .Suffix => @fieldParentPtr(Node.Suffix, "base", node).l_tok,
             .Literal => {
                 const lit = @fieldParentPtr(Node.Literal, "base", node);
+                // TODO: cannot use -1
                 return if (lit.kind != .none) lit.tok else lit.tok - 1;
             },
             .Import => @fieldParentPtr(Node.Import, "base", node).tok,
             .Native => @fieldParentPtr(Node.Native, "base", node).tok,
             .Error => @fieldParentPtr(Node.Error, "base", node).tok,
             .List, .Tuple, .Map => @fieldParentPtr(Node.ListTupleMap, "base", node).l_tok,
-            .Block => @fieldParentPtr(Node.Block, "base", node).stmts[0].firstToken(),
-            .Grouped => @fieldParentPtr(Node.Grouped, "base", node).l_tok,
+            .Union, .Block => @fieldParentPtr(Node.Block, "base", node).stmts[0].firstToken(),
+            .ListType, .Grouped => @fieldParentPtr(Node.Grouped, "base", node).l_tok,
             .MapItem => {
                 const map = @fieldParentPtr(Node.MapItem, "base", node);
 
@@ -110,23 +113,20 @@ pub const Node = struct {
     pub fn lastToken(node: *Node) TokenIndex {
         return switch (node.id) {
             .Decl => @fieldParentPtr(Node.Decl, "base", node).value.lastToken(),
-            .TypeDecl => @fieldParentPtr(Node.Type, "base", node).expr.lastToken(),
+            .TypeDecl => @fieldParentPtr(Node.TypeDecl, "base", node).expr.lastToken(),
             .Fn => {
                 const fn_node = @fieldParentPtr(Node.Fn, "base", node);
                 if (fn_node.body) |some| return some.lastToken();
-                if (fn_node.param_type) |some| return some.lastToken();
+                if (fn_node.ret_type) |some| return some.lastToken();
                 return fn_node.r_paren;
             },
             .Param => {
                 const param = @fieldParentPtr(Node.Param, "base", node);
-                if (param.param_type) |some|  return some;
+                if (param.param_type) |some|  return some.lastToken();
                 return param.capture.lastToken();
             },
-            .Union => {
-                const union_node = @fieldParentPtr(Node.Union, "base", node);
-                return union_node.cases[type_union.cases.len - 1].expr.lastToken();
-            },
-            .Identifier, .Discard, .This => @fieldParentPtr(Node.SingleToken, "base", node).tok,
+            .Case => return @fieldParentPtr(Node.Case, "base", node).expr.lastToken(),
+            .Primitive, .Identifier, .Discard, .This => @fieldParentPtr(Node.SingleToken, "base", node).tok,
             .Prefix => @fieldParentPtr(Node.Prefix, "base", node).rhs.lastToken(),
             .Infix => @fieldParentPtr(Node.Infix, "base", node).rhs.lastToken(),
             .Suffix => @fieldParentPtr(Node.Suffix, "base", node).r_tok,
@@ -135,11 +135,11 @@ pub const Node = struct {
             .Native => @fieldParentPtr(Node.Native, "base", node).r_paren,
             .Error => @fieldParentPtr(Node.Error, "base", node).r_paren,
             .List, .Tuple, .Map => @fieldParentPtr(Node.ListTupleMap, "base", node).r_tok,
-            .Block => {
+            .Union, .Block => {
                 const block = @fieldParentPtr(Node.Block, "base", node);
                 return block.stmts[block.stmts.len - 1].lastToken();
             },
-            .Grouped => @fieldParentPtr(Node.Grouped, "base", node).r_tok,
+            .ListType, .Grouped => @fieldParentPtr(Node.Grouped, "base", node).r_tok,
             .MapItem => @fieldParentPtr(Node.MapItem, "base", node).value.lastToken(),
             .Catch => @fieldParentPtr(Node.Catch, "base", node).rhs.lastToken(),
             .If => {
@@ -170,25 +170,23 @@ pub const Node = struct {
         base: Node = Node{ .id = .Decl },
         capture: *Node,
         value: *Node,
+        type_expr: ?*Node,
         let_const: TokenIndex,
         eq_tok: TokenIndex,
     };
 
     pub const TypeDecl = struct {
         base: Node = Node{ .id = .TypeDecl },
+        tok: TokenIndex,
         name: TokenIndex,
         expr: *Node,
     };
 
-    pub const Union = struct {
-        base: Node = Node{ .id = .Union },
-        cases: []Case,
-
-        pub const Case = struct {
-            pipe: ?TokenIndex,
-            name: ?TokenIndex,
-            expr: *Node,
-        };
+    pub const Case = struct {
+        base: Node = Node{ .id = .Case },
+        pipe: ?TokenIndex,
+        name: ?TokenIndex,
+        expr: *Node,
     };
 
     pub const Fn = struct {

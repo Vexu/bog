@@ -81,9 +81,21 @@ pub const Parser = struct {
 
     /// stmt
     ///     : decl "=" block_or_expr
+    ///     | "type" IDENTIFIER "=" union_block_or_type_expr
     ///     | expr
     fn stmt(parser: *Parser, level: u16) Error!*Node {
         if (try parser.decl(level)) |node| return node;
+        if (parser.eatToken(.Keyword_type, true)) |tok| {
+            const name = try parser.expectToken(.Identifier, true);
+            _ = try parser.expectToken(.Equal, false);
+            const node = try parser.arena.create(Node.TypeDecl);
+            node.* = .{
+                .tok = tok,
+                .name = name,
+                .expr = try parser.unionOrTypeExpr(false, level),
+            };
+            return &node.base;
+        }
         return parser.expr(false, level);
     }
 
@@ -91,17 +103,130 @@ pub const Parser = struct {
     fn decl(parser: *Parser, level: u16) Error!?*Node {
         const tok = parser.eatToken(.Keyword_let, true) orelse
             parser.eatToken(.Keyword_const, true) orelse return null;
-        const capture = try parser.primaryExpr(true, level);
-        const eq_tok = try parser.expectToken(.Equal, true);
-        const value = try parser.blockOrExpr(false, level);
         const node = try parser.arena.create(Node.Decl);
         node.* = .{
             .let_const = tok,
-            .capture = capture,
-            .eq_tok = eq_tok,
-            .value = value,
+            .capture = try parser.primaryExpr(true, level),
+            .type_expr = try parser.typeAnnotation(true, level),
+            .eq_tok = try parser.expectToken(.Equal, false),
+            .value = try parser.blockOrExpr(false, level),
         };
         return &node.base;
+    }
+
+    /// type : ":" type_expr
+    fn typeAnnotation(parser: *Parser, skip_nl: bool, level: u16) !?*Node {
+        _ = parser.eatToken(.Colon, true) orelse return null;
+        return try parser.typeExpr(skip_nl, level);
+    }
+
+    /// union_block_or_type_expr
+    ///     : NL (INDENT "|" (IDENTIFIER ":")? type_primary NL)+
+    ///     | type_expr
+    fn unionOrTypeExpr(parser: *Parser, skip_nl: bool, level: u16) !*Node {
+        if (parser.eatToken(.Nl, false)) |_| {
+            const node = try parser.arena.create(Node.Block);
+            node.* = .{
+                .base = .{ .id = .Union },
+                .stmts = try parser.blockParser(level, unionCase),
+            };
+            if (skip_nl) parser.skipNl();
+            return &node.base;
+        }
+        return try parser.typeExpr(skip_nl, level);
+    }
+
+    /// (IDENTIFIER ":")? type_primary
+    fn unionCase(parser: *Parser, level: u16) Error!*Node {
+        const node = try parser.arena.create(Node.Case);
+        node.* = .{
+            .pipe = try parser.expectToken(.Pipe, true),
+            .name = blk: {
+                const start = parser.tok_index;
+                const name = parser.eatToken(.Identifier, false) orelse
+                    break :blk null;
+                _ = parser.eatToken(.Colon, true) orelse {
+                    parser.tok_index = start;
+                    break :blk null;
+                };
+                break :blk name;
+            },
+            .expr = try parser.typeExpr(false, level),
+        };
+        return &node.base;
+    }
+
+    /// type_expr : (IDENTIFIER ":")? type_primary ("|" (IDENTIFIER ":")? type_primary)*
+    fn typeExpr(parser: *Parser, skip_nl: bool, level: u16) Error!*Node {
+        const first = try parser.typePrimary(skip_nl, level);
+        if (parser.eatToken(.Pipe, true) == null) return first;
+
+        @panic("TODO");
+    }
+
+    /// type_primary
+    ///     : "any"
+    ///     | "int"
+    ///     | "num"
+    ///     | "str"
+    ///     | "none"
+    ///     | "type"
+    ///     | "bool"
+    ///     | IDENTIFIER
+    ///     | "[" union_block_or_type_expr "]"
+    ///     | "(" union_block_or_type_expr ")"
+    ///     | "(" (type_expr ",")+ type_expr? ")"
+    ///     | "{" ((expr ":")? type_expr ",")* ((expr ":")? type_expr)? "}"
+    ///     | "fn" "(" (type_expr ",")* type_expr? ")" type?
+    ///     | "error" "(" union_block_or_type_expr ")"
+    fn typePrimary(parser: *Parser, skip_nl: bool, level: u16) Error!*Node {
+        const tok = parser.nextToken(false);
+        const id = parser.tokens[tok].id;
+        switch (id) {
+            .Keyword_any, .Keyword_int, .Keyword_num, .Keyword_str, .Keyword_none, .Keyword_type, .Keyword_bool, .Identifier => {
+                const node = try parser.arena.create(Node.SingleToken);
+                node.* = .{
+                    .base = .{ .id = .Primitive },
+                    .tok = tok,
+                };
+                return &node.base;
+            },
+            .Keyword_error => {
+                _ = try parser.expectToken(.LParen, true);
+                const node = try parser.arena.create(Node.Error);
+                node.* = .{
+                    .tok = tok,
+                    .value = try parser.unionOrTypeExpr(true, level),
+                    .r_paren = try parser.expectToken(.RParen, skip_nl),
+                };
+                return &node.base;
+            },
+            .LParen => {
+                @panic("TODO");
+            },
+            .LBrace => {
+                parser.skipNl();
+                @panic("TODO");
+            },
+            .LBracket => {
+                const node = try parser.arena.create(Node.Grouped);
+                node.* = .{
+                    .base = .{ .id = .ListType },
+                    .l_tok = tok,
+                    .expr = try parser.unionOrTypeExpr(true, level),
+                    .r_tok = try parser.expectToken(.RBracket, skip_nl),
+                };
+                return &node.base;
+            },
+            .Keyword_fn => {
+                parser.skipNl();
+                @panic("TODO");
+            },
+            else => {
+                parser.tok_index = tok;
+            },
+        }
+        return parser.reportErr("expected primitive type, '(', '{{', '[', error, or fn", parser.tokens[parser.tok_index]);
     }
 
     /// expr
@@ -146,6 +271,7 @@ pub const Parser = struct {
             .fn_tok = tok,
             .params = try parser.arena.dupe(*Node, params.items),
             .r_paren = r_paren,
+            .ret_type = try parser.typeAnnotation(skip_nl, level),
             .body = try parser.blockOrExpr(skip_nl, level),
         };
         return &node.base;
@@ -260,12 +386,12 @@ pub const Parser = struct {
                 return &node.base;
             },
             .Keyword_is => {
-                const node = try parser.arena.create(Node.TypeInfix);
+                const node = try parser.arena.create(Node.Infix);
                 node.* = .{
                     .lhs = lhs,
                     .op = .is,
                     .tok = tok,
-                    .type_tok = try parser.typeName(),
+                    .rhs = try parser.typeExpr(skip_nl, level),
                 };
                 return &node.base;
             },
@@ -274,14 +400,6 @@ pub const Parser = struct {
                 return lhs;
             },
         }
-    }
-
-    /// type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
-    fn typeName(parser: *Parser) Error!TokenIndex {
-        return parser.eatToken(.Keyword_error, true) orelse
-            parser.eatToken(.Keyword_fn, true) orelse
-            parser.eatToken(.Identifier, true) orelse
-            parser.reportErr("expected type name", parser.tokens[parser.tok_index]);
     }
 
     /// range_expr : bit_expr ("..." bit_expr)?
@@ -474,12 +592,12 @@ pub const Parser = struct {
 
         if (parser.eatTokenNoNl(.Keyword_as)) |tok| {
             parser.skipNl();
-            const node = try parser.arena.create(Node.TypeInfix);
+            const node = try parser.arena.create(Node.Infix);
             node.* = .{
                 .lhs = lhs,
                 .op = .as,
                 .tok = tok,
-                .type_tok = try parser.typeName(),
+                .rhs = try parser.typeExpr(skip_nl, level),
             };
             lhs = &node.base;
         }
@@ -734,6 +852,7 @@ pub const Parser = struct {
                 node.* = .{
                     .tok = tok,
                     .str_tok = try parser.expectToken(.String, true),
+                    .type_expr = try parser.typeAnnotation(true, level),
                     .r_paren = try parser.expectToken(.RParen, skip_nl),
                 };
                 return &node.base;
@@ -751,6 +870,7 @@ pub const Parser = struct {
                         parser.skipNl();
                         const node = try parser.arena.create(Node.Grouped);
                         node.* = .{
+                            .base = .{ .id = .Grouped },
                             .l_tok = tok,
                             .expr = b,
                             .r_tok = try parser.expectToken(.RParen, skip_nl),
@@ -762,6 +882,7 @@ pub const Parser = struct {
                     if (parser.eatToken(.RParen, true)) |r_tok| {
                         const node = try parser.arena.create(Node.Grouped);
                         node.* = .{
+                            .base = .{ .id = .Grouped },
                             .l_tok = tok,
                             .expr = first,
                             .r_tok = r_tok,
@@ -877,38 +998,17 @@ pub const Parser = struct {
         if (try parser.ifExpr(skip_nl, level)) |res| return res;
         if (try parser.whileExpr(skip_nl, level)) |res| return res;
         if (try parser.forExpr(skip_nl, level)) |res| return res;
-        if (try parser.matchExpr(skip_nl, level)) |res| return res;
+        if (try parser.matchExpr(level)) |res| return res;
         return parser.reportErr("expected Identifier, String, Number, true, false, '(', '{{', '[', error, import, if, while, for or match", parser.tokens[parser.tok_index]);
     }
 
     /// block : NL BEGIN (stmt NL)+ END
     fn block(parser: *Parser, level: u16) Error!?*Node {
         _ = parser.eatToken(.Nl, false) orelse return null;
-        var stmts = NodeList.init(parser.gpa);
-        defer stmts.deinit();
-
-        const indent = parser.eatToken(.Indent, false);
-        if (indent == null or parser.tokens[indent.?].id.Indent <= level)
-            return parser.reportErr("expected indentation", parser.tokens[parser.tok_index]);
-
-        const new_level = parser.tokens[indent.?].id.Indent;
-        var last_nl = parser.tok_index;
-        while (true) {
-            try stmts.append(try parser.stmt(new_level));
-            last_nl = parser.eatToken(.Nl, false) orelse {
-                last_nl = try parser.expectToken(.Eof, false);
-                break;
-            };
-            if (!try parser.eatIndent(new_level)) break;
-        }
-
-        // reset to previous new line since all statements are expected to end in a newline
-        parser.tok_index = last_nl;
-
         const node = try parser.arena.create(Node.Block);
         node.* = .{
             .base = .{ .id = .Block },
-            .stmts = try parser.arena.dupe(*Node, stmts.items),
+            .stmts = try parser.blockParser(level, stmt),
         };
         return &node.base;
     }
@@ -976,40 +1076,19 @@ pub const Parser = struct {
     }
 
     /// match : "match" "(" expr ")" (NL match_case)+ NL
-    fn matchExpr(parser: *Parser, skip_nl: bool, level: u16) Error!?*Node {
+    fn matchExpr(parser: *Parser, level: u16) Error!?*Node {
         const tok = parser.eatToken(.Keyword_match, true) orelse return null;
         _ = try parser.expectToken(.LParen, true);
         const cond = try parser.expr(true, level);
         const r_paren = try parser.expectToken(.RParen, false);
         _ = try parser.expectToken(.Nl, false);
 
-        var cases = NodeList.init(parser.gpa);
-        defer cases.deinit();
-
-        const indent = parser.eatToken(.Indent, false);
-        if (indent == null or parser.tokens[indent.?].id.Indent <= level)
-            return parser.reportErr("expected indentation", parser.tokens[parser.tok_index]);
-
-        const new_level = parser.tokens[indent.?].id.Indent;
-        var last_nl = parser.tok_index;
-        while (true) {
-            try cases.append(try parser.matchCase(new_level));
-            last_nl = parser.eatToken(.Nl, false) orelse {
-                last_nl = try parser.expectToken(.Eof, false);
-                break;
-            };
-            if (!try parser.eatIndent(new_level)) break;
-        }
-
-        // reset to previous new line since all statements are expected to end in a newline
-        parser.tok_index = last_nl;
-
         const node = try parser.arena.create(Node.Match);
         node.* = .{
             .match_tok = tok,
             .expr = cond,
-            .cases = try parser.arena.dupe(*Node, cases.items),
             .r_paren = r_paren,
+            .cases = try parser.blockParser(level, matchCase),
         };
         return &node.base;
     }
@@ -1072,6 +1151,31 @@ pub const Parser = struct {
             };
             return &node.base;
         }
+    }
+
+    /// NL (INDENT PARSE_FN NL)+
+    fn blockParser(parser: *Parser, level: u16, parseFn: fn (*Parser, u16) Error!*Node) Error![]*Node {
+        var nodes = NodeList.init(parser.gpa);
+        defer nodes.deinit();
+
+        const indent = parser.eatToken(.Indent, false);
+        if (indent == null or parser.tokens[indent.?].id.Indent <= level)
+            return parser.reportErr("expected indentation", parser.tokens[parser.tok_index]);
+
+        const new_level = parser.tokens[indent.?].id.Indent;
+        var last_nl = parser.tok_index;
+        while (true) {
+            try nodes.append(try parseFn(parser, new_level));
+            last_nl = parser.eatToken(.Nl, false) orelse {
+                last_nl = try parser.expectToken(.Eof, false);
+                break;
+            };
+            if (!try parser.eatIndent(new_level)) break;
+        }
+
+        // reset to previous new line since all statements are expected to end in a newline
+        parser.tok_index = last_nl;
+        return try parser.arena.dupe(*Node, nodes.items);
     }
 
     fn reportErr(parser: *Parser, msg: []const u8, tok: Token) Error {

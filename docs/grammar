@@ -10,14 +10,14 @@ decl : ("let" | "const") primary_expr type?
 type : ":" type_expr
 
 union_block_or_type_expr
-    : NL (INDENT "|" IDENTIFIER type? NL)+
+    : NL (INDENT "|" (IDENTIFIER ":")? type_primary NL)+
     | type_expr
 
 type_expr
-    : type_primitive
+    : type_primary
     | IDENTIFIER type? ("|" IDENTIFIER type?)
 
-type_primitive
+type_primary
     : "any"
     | "int"
     | "num"

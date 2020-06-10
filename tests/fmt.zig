@@ -1,3 +1,17 @@
+test "types" {
+    testCanonical(
+        \\const foo: any = 4
+        \\const val = native("my_lib.constant": num)
+        \\type id =
+        \\    | foo
+        \\    | bar: num
+        \\    | ll: [str]
+        \\
+        \\
+        \\
+    );
+}
+
 test "nested blocks and matches" {
     testCanonical(
         \\if (false)

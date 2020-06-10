@@ -95,21 +95,16 @@ const Renderer = struct {
                 }
                 return self.renderNode(prefix.rhs, stream, indent, space);
             },
-            .Grouped => {
+            .ListType, .Grouped => {
                 const grouped = @fieldParentPtr(Node.Grouped, "base", node);
 
-                try self.renderToken(grouped.l_tok, stream, indent, getBlockIndent(grouped.expr, .none));
+                const expr_space = getBlockIndent(grouped.expr, .none);
+                try self.renderToken(grouped.l_tok, stream, indent, expr_space);
                 try self.renderNode(grouped.expr, stream, indent, .none);
+                if (expr_space != .none) try stream.writeByteNTimes(' ', indent);
                 return self.renderToken(grouped.r_tok, stream, indent, space);
             },
-            .TypeInfix => {
-                const type_infix = @fieldParentPtr(Node.TypeInfix, "base", node);
-
-                try self.renderNode(type_infix.lhs, stream, indent, .space);
-                try self.renderToken(type_infix.tok, stream, indent, .space);
-                return self.renderToken(type_infix.type_tok, stream, indent, space);
-            },
-            .Discard, .Identifier, .This => {
+            .Primitive, .Discard, .Identifier, .This => {
                 const single = @fieldParentPtr(Node.SingleToken, "base", node);
 
                 return self.renderToken(single.tok, stream, indent, space);
@@ -130,9 +125,23 @@ const Renderer = struct {
                 const decl = @fieldParentPtr(Node.Decl, "base", node);
 
                 try self.renderToken(decl.let_const, stream, indent, .space);
-                try self.renderNode(decl.capture, stream, indent, .space);
+                if (decl.type_expr) |some| {
+                    try self.renderNode(decl.capture, stream, indent, .none);
+                    try self.renderToken(self.nextToken(decl.capture.lastToken()), stream, indent, .space);
+                    try self.renderNode(some, stream, indent, .space);
+                } else {
+                    try self.renderNode(decl.capture, stream, indent, .space);
+                }
                 try self.renderToken(decl.eq_tok, stream, indent, getBlockIndent(decl.value, .space));
                 return self.renderNode(decl.value, stream, indent, space);
+            },
+            .TypeDecl => {
+                const decl = @fieldParentPtr(Node.TypeDecl, "base", node);
+
+                try self.renderToken(decl.tok, stream, indent, .space);
+                try self.renderToken(decl.name, stream, indent, .space);
+                try self.renderToken(self.nextToken(decl.name), stream, indent, getBlockIndent(decl.expr, .space));
+                return self.renderNode(decl.expr, stream, indent, space);
             },
             .Import => {
                 const import = @fieldParentPtr(Node.Import, "base", node);
@@ -148,6 +157,10 @@ const Renderer = struct {
                 try self.renderToken(native.tok, stream, indent, .none);
                 try self.renderToken(self.nextToken(native.tok), stream, indent, .none);
                 try self.renderToken(native.str_tok, stream, indent, .none);
+                if (native.type_expr) |some| {
+                    try self.renderToken(self.nextToken(native.str_tok), stream, indent, .space);
+                    try self.renderNode(some, stream, indent, .none);
+                }
                 return self.renderToken(native.r_paren, stream, indent, space);
             },
             .Error => {
@@ -210,8 +223,27 @@ const Renderer = struct {
 
                 try self.renderCommaList(fn_expr.params, fn_expr.r_paren, stream, indent, space);
 
-                try self.renderToken(fn_expr.r_paren, stream, indent, getBlockIndent(fn_expr.body, .space));
-                return self.renderNode(fn_expr.body, stream, indent, space);
+                const before_body_space = if (fn_expr.body) |some| getBlockIndent(some, .space) else space;
+
+                if (fn_expr.ret_type) |some| {
+                    try self.renderToken(fn_expr.r_paren, stream, indent, .none);
+                    try self.renderToken(self.nextToken(fn_expr.r_paren), stream, indent, getBlockIndent(some, .space));
+                    try self.renderNode(some, stream, indent, before_body_space);
+                } else {
+                    try self.renderToken(fn_expr.r_paren, stream, indent, before_body_space);
+                }
+                if (fn_expr.body) |some| try self.renderNode(some, stream, indent, space);
+            },
+            .Param => {
+                const param = @fieldParentPtr(Node.Param, "base", node);
+
+                if (param.param_type) |some| {
+                    try self.renderNode(param.capture, stream, indent, .none);
+                    try self.renderToken(self.nextToken(param.capture.lastToken()), stream, indent, getBlockIndent(some, .space));
+                    try self.renderNode(some, stream, indent, space);
+                } else {
+                    try self.renderNode(param.capture, stream, indent, space);
+                }
             },
             .List, .Tuple, .Map => {
                 const ltm = @fieldParentPtr(Node.ListTupleMap, "base", node);
@@ -221,7 +253,7 @@ const Renderer = struct {
 
                 return self.renderToken(ltm.r_tok, stream, indent, space);
             },
-            .Block => {
+            .Union, .Block => {
                 const blk = @fieldParentPtr(Node.Block, "base", node);
 
                 const new_indent = indent + indent_delta;
@@ -241,6 +273,15 @@ const Renderer = struct {
                         try stream.writeByte('\n');
                     }
                 }
+            },
+            .Case => {
+                const case = @fieldParentPtr(Node.Case, "base", node);
+                if (case.pipe) |some| try self.renderToken(some, stream, indent, .space);
+                if (case.name) |some| {
+                    try self.renderToken(some, stream, indent, .none);
+                    try self.renderToken(self.nextToken(some), stream, indent, .space);
+                }
+                return self.renderNode(case.expr, stream, indent, space);
             },
             .MapItem => {
                 const item = @fieldParentPtr(Node.MapItem, "base", node);
@@ -279,14 +320,12 @@ const Renderer = struct {
                 }
 
                 try self.renderNode(if_expr.cond, stream, indent, .none);
-                try self.renderToken(if_expr.r_paren, stream, indent, getBlockIndent(if_expr.if_body, .space));
+                const if_space = getBlockIndent(if_expr.if_body, .space);
+                try self.renderToken(if_expr.r_paren, stream, indent, if_space);
 
                 if (if_expr.else_body) |some| {
                     try self.renderNode(if_expr.if_body, stream, indent, .space);
-                    switch (if_expr.if_body.id) {
-                        .Block, .Match => try stream.writeByteNTimes(' ', indent),
-                        else => {},
-                    }
+                    if (if_space != .space) try stream.writeByteNTimes(' ', indent);
 
                     try self.renderToken(if_expr.else_tok.?, stream, indent, getBlockIndent(some, .space));
                     return self.renderNode(some, stream, indent, space);
@@ -394,6 +433,12 @@ const Renderer = struct {
     fn getBlockIndent(node: *Node, space: Space) Space {
         return switch (node.id) {
             .Block, .Match => .newline,
+            .Union => {
+                const union_node = @fieldParentPtr(Node.Block, "base", node);
+                const first = @fieldParentPtr(Node.Case, "base", union_node.stmts[0]);
+                if (first.pipe == null) return space;
+                return .newline;
+            },
             else => space,
         };
     }
@@ -407,6 +452,11 @@ const Renderer = struct {
             .Block => {
                 const block_node = @fieldParentPtr(Node.Block, "base", node);
                 return !isBlock(block_node.stmts[block_node.stmts.len - 1]);
+            },
+            .Union => {
+                const union_node = @fieldParentPtr(Node.Block, "base", node);
+                const first = @fieldParentPtr(Node.Case, "base", union_node.stmts[0]);
+                return first.pipe != null;
             },
             .If => {
                 const if_node = @fieldParentPtr(Node.If, "base", node);
@@ -426,9 +476,13 @@ const Renderer = struct {
                 const decl = @fieldParentPtr(Node.Decl, "base", node);
                 return isBlock(decl.value);
             },
+            .TypeDecl => {
+                const decl = @fieldParentPtr(Node.TypeDecl, "base", node);
+                return isBlock(decl.expr);
+            },
             .Fn => {
                 const fn_node = @fieldParentPtr(Node.Fn, "base", node);
-                return isBlock(fn_node.body);
+                return isBlock(fn_node.body orelse return false);
             },
             .Catch => {
                 const catch_node = @fieldParentPtr(Node.Catch, "base", node);
