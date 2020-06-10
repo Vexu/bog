@@ -70,7 +70,7 @@ pub fn compile(gpa: *Allocator, source: []const u8, errors: *Errors) (Compiler.E
 
 pub fn compileRepl(repl: *@import("repl.zig").Repl, node: *Node) Compiler.Error!bog.Module {
     var compiler = Compiler{
-        .tokens = repl.tokens.items,
+        .tokens = repl.tokenizer.tokens.items,
         .source = repl.buffer.items,
         .errors = &repl.vm.errors,
         .arena = &repl.arena.allocator,

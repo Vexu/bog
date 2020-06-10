@@ -332,33 +332,24 @@ pub fn tokenize(allocator: *mem.Allocator, source: []const u8, errors: *Errors) 
 
 pub fn tokenizeRepl(repl: *@import("repl.zig").Repl) Tokenizer.Error!bool {
     // remove previous eof
-    if (repl.tokens.items.len > 0) _ = repl.tokens.pop();
-    const start_len = repl.tokens.items.len;
+    const self = &repl.tokenizer;
+    self.it.bytes = repl.buffer.items;
+    self.errors = &repl.vm.errors;
 
-    var tokenizer = Tokenizer{
-        .tokens = repl.tokens,
-        .errors = &repl.vm.errors,
-        .it = .{
-            .i = repl.byte_index,
-            .bytes = repl.buffer.items,
-        },
-        .repl = true,
-    };
-    defer {
-        repl.byte_index = tokenizer.it.i;
-        repl.tokens = tokenizer.tokens;
-    }
+    if (self.tokens.items.len > 0) _ = self.tokens.pop();
+    const start_len = self.tokens.items.len;
+
     while (true) {
-        const tok = try tokenizer.tokens.addOne();
-        tok.* = try tokenizer.next();
+        const tok = try self.tokens.addOne();
+        tok.* = try self.next();
         if (tok.id == .Eof) {
             // check if more input is expected
-            return if (tokenizer.tokens.items.len == start_len + 2)
+            return if (self.tokens.items.len == start_len + 2)
                 true
-            else if (tokenizer.paren_level != 0 or
-                tokenizer.string or
-                tokenizer.expect_indent or
-                tokenizer.indent_level != 0)
+            else if (self.paren_level != 0 or
+                self.string or
+                self.expect_indent or
+                self.indent_level != 0)
                 false
             else
                 true;

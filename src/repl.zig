@@ -29,13 +29,12 @@ pub const Repl = struct {
     arena: std.heap.ArenaAllocator,
     vm: Vm,
     buffer: ArrayList(u8),
-    tokens: bog.Token.List,
     root_scope: @import("compiler.zig").ModuleScope,
     strings: std.ArrayList(u8),
     module_code: bog.Compiler.Code,
     string_interner: std.StringHashMap(u32),
+    tokenizer: bog.Tokenizer,
 
-    byte_index: usize = 0,
     tok_index: bog.Token.Index = 0,
     /// 1 for "ans"
     used_regs: bog.RegRef = 1,
@@ -67,7 +66,15 @@ pub const Repl = struct {
             .arena = std.heap.ArenaAllocator.init(gpa),
             .vm = vm,
             .buffer = buffer,
-            .tokens = bog.Token.List.init(gpa),
+            .tokenizer = .{
+                .tokens = bog.Token.List.init(gpa),
+                .errors = undefined,
+                .it = .{
+                    .i = 0,
+                    .bytes = "",
+                },
+                .repl = true,
+            },
             .root_scope = .{
                 .base = .{
                     .id = .module,
@@ -90,6 +97,7 @@ pub const Repl = struct {
         repl.module_code.deinit();
         repl.string_interner.deinit();
         repl.root_scope.code.deinit();
+        repl.tokenizer.tokens.deinit();
         repl.root_scope.base.syms.deinit();
     }
 

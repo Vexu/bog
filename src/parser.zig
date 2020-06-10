@@ -58,14 +58,14 @@ pub fn parseRepl(repl: *@import("repl.zig").Repl) Parser.Error!?*Node {
         .arena = &repl.arena.allocator,
         .gpa = repl.gpa,
         .errors = &repl.vm.errors,
-        .tokens = repl.tokens.items,
+        .tokens = repl.tokenizer.tokens.items,
         .tok_index = repl.tok_index,
     };
     defer repl.tok_index = @intCast(u32, parser.tokens.len - 1);
 
     if (parser.eatToken(.Eof, true)) |_| return null;
     const ret = try parser.stmt(0);
-    _ = try parser.expectToken(.Nl, false);
+    _ = try parser.expectToken(.Nl, true);
     _ = try parser.expectToken(.Eof, true);
     return ret;
 }
