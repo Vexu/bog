@@ -5,17 +5,15 @@ stmt
     | "type" IDENTIFIER "=" union_block_or_type_expr
     | expr
 
-decl : ("let" | "const") primary_expr type?
+decl : ("let" | "const") primary_expr
 
 type : ":" type_expr
 
 union_block_or_type_expr
-    : NL (INDENT "|" (IDENTIFIER ":")? type_primary NL)+
+    : NL (INDENT "|" IDENTIFIER type? NL)+
     | type_expr
 
-type_expr
-    : type_primary
-    | IDENTIFIER type? ("|" IDENTIFIER type?)
+type_expr : type_primary ("|" type_primary)*
 
 type_primary
     : "any"
@@ -46,9 +44,9 @@ assign : ("=" | "+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>="
 
 jump_expr : "return" block_or_expr? | "break" | "continue"
 
-fn : "fn" "(" (param ",")* param? ")" (":" type_expr)? block_or_expr
+fn : "fn" "(" (param ",")* param? ")" type? block_or_expr
 
-param : primary_expr (":" type_expr)? 
+param : primary_expr type?
 
 bool_expr
     : "not" comparision_expr
@@ -91,7 +89,7 @@ primary_expr
     | "." IDENTIFIER ("=" expr)?
     | "(" block_or_expr ")"
     | "(" (expr ",")+ expr? ")"
-    | "{" (expr type? "=" expr ",")* (expr type? "=" expr)? "}"
+    | "{" (expr "=" expr ",")* (expr "=" expr)? "}"
     | "[" (expr ",")* expr? "]"
     | "error" "(" expr ")"
     | "import" "(" STRING ")"

@@ -107,7 +107,6 @@ pub const Parser = struct {
         node.* = .{
             .let_const = tok,
             .capture = try parser.primaryExpr(true, level),
-            .type_expr = try parser.typeAnnotation(true, level),
             .eq_tok = try parser.expectToken(.Equal, false),
             .value = try parser.blockOrExpr(false, level),
         };
@@ -137,32 +136,37 @@ pub const Parser = struct {
         return try parser.typeExpr(skip_nl, level);
     }
 
-    /// (IDENTIFIER ":")? type_primary
+    /// IDENTIFIER type?
     fn unionCase(parser: *Parser, level: u16) Error!*Node {
         const node = try parser.arena.create(Node.Case);
         node.* = .{
             .pipe = try parser.expectToken(.Pipe, true),
-            .name = blk: {
-                const start = parser.tok_index;
-                const name = parser.eatToken(.Identifier, false) orelse
-                    break :blk null;
-                _ = parser.eatToken(.Colon, true) orelse {
-                    parser.tok_index = start;
-                    break :blk null;
-                };
-                break :blk name;
-            },
-            .expr = try parser.typeExpr(false, level),
+            .name = try parser.expectToken(.Identifier, false),
+            .expr = try parser.typeAnnotation(false, level),
         };
         return &node.base;
     }
 
-    /// type_expr : (IDENTIFIER ":")? type_primary ("|" (IDENTIFIER ":")? type_primary)*
+    /// type_expr : type_primary ("|" type_primary)*
     fn typeExpr(parser: *Parser, skip_nl: bool, level: u16) Error!*Node {
         const first = try parser.typePrimary(skip_nl, level);
         if (parser.eatToken(.Pipe, true) == null) return first;
 
-        @panic("TODO");
+        var cases = std.ArrayList(*Node).init(parser.gpa);
+        defer cases.deinit();
+
+        try cases.append(first);
+        while (true) {
+            try cases.append(try parser.typePrimary(skip_nl, level));
+            if (parser.eatToken(.Pipe, true) == null) break;
+        }
+
+        const node = try parser.arena.create(Node.Block);
+        node.* = .{
+            .base = .{ .id = .Union },
+            .stmts = try parser.arena.dupe(*Node, cases.items),
+        };
+        return &node.base;
     }
 
     /// type_primary
@@ -257,12 +261,12 @@ pub const Parser = struct {
         return try parser.expr(skip_nl, level);
     }
 
-    /// fn : "fn" "(" (primary_expr ",")* primary_expr? ")" block_or_expr
+    /// fn : "fn" "(" (param ",")* param? ")" type? block_or_expr
     fn func(parser: *Parser, skip_nl: bool, level: u16) Error!?*Node {
         const tok = parser.eatToken(.Keyword_fn, true) orelse return null;
 
         _ = try parser.expectToken(.LParen, true);
-        const params = try parser.listParser(skip_nl, level, primaryExpr, .RParen);
+        const params = try parser.listParser(skip_nl, level, param, .RParen);
         const node = try parser.arena.create(Node.Fn);
         node.* = .{
             .fn_tok = tok,
@@ -270,6 +274,16 @@ pub const Parser = struct {
             .r_paren = params.term,
             .ret_type = try parser.typeAnnotation(skip_nl, level),
             .body = try parser.blockOrExpr(skip_nl, level),
+        };
+        return &node.base;
+    }
+
+    /// param : primary_expr type?
+    fn param(parser: *Parser, skip_nl: bool, level: u16) Error!*Node {
+        const node = try parser.arena.create(Node.Param);
+        node.* = .{
+            .capture = try parser.primaryExpr(true, level),
+            .param_type = try parser.typeAnnotation(true, level),
         };
         return &node.base;
     }
@@ -752,7 +766,7 @@ pub const Parser = struct {
     ///     | "false"
     ///     | "(" block_or_expr ")"
     ///     | "(" (expr ",")+ expr? ")"
-    ///     | "{" (expr (":" expr)? ",")* (expr (":" expr)?)? "}"
+    ///     | "{" (expr ("=" expr)? ",")* (expr ("=" expr)?)? "}"
     ///     | "[" (expr ",")* expr? "]"
     ///     | "error" "(" expr ")"
     ///     | "import" "(" STRING ")"
@@ -934,12 +948,12 @@ pub const Parser = struct {
         return parser.reportErr("expected Identifier, String, Number, true, false, '(', '{{', '[', error, import, if, while, for or match", parser.tokens[parser.tok_index]);
     }
 
-    /// expr (":" expr)?
+    /// expr ("=" expr)?
     fn mapItem(parser: *Parser, skip_nl: bool, level: u16) Error!*Node {
         var key: ?*Node = null;
         var value = try parser.expr(true, level);
         var colon: ?TokenIndex = null;
-        if (parser.eatToken(.Colon, true)) |col| {
+        if (parser.eatToken(.Equal, true)) |col| {
             colon = col;
             key = value;
             value = try parser.expr(true, level);
@@ -1045,8 +1059,8 @@ pub const Parser = struct {
     }
 
     /// match_case
-    ///     : decl ":" block_or_expr
-    ///     | expr ("," expr)* ","? ":" block_or_expr
+    ///     : decl "=>" block_or_expr
+    ///     | expr ("," expr)* ","? "=>" block_or_expr
     fn matchCase(parser: *Parser, level: u16) Error!*Node {
         if (parser.eatToken(.Keyword_let, true) orelse
             parser.eatToken(.Keyword_const, true)) |let_const|
@@ -1055,7 +1069,7 @@ pub const Parser = struct {
                 const node = try parser.arena.create(Node.MatchCatchAll);
                 node.* = .{
                     .tok = let_const,
-                    .colon = try parser.expectToken(.Colon, false),
+                    .colon = try parser.expectToken(.EqualArr, false),
                     .expr = try parser.blockOrExpr(false, level),
                 };
                 return &node.base;
@@ -1065,7 +1079,7 @@ pub const Parser = struct {
             node.* = .{
                 .let_const = let_const,
                 .capture = capture,
-                .colon = try parser.expectToken(.Colon, false),
+                .colon = try parser.expectToken(.EqualArr, false),
                 .expr = try parser.blockOrExpr(false, level),
             };
             return &node.base;
@@ -1073,12 +1087,12 @@ pub const Parser = struct {
             const node = try parser.arena.create(Node.MatchCatchAll);
             node.* = .{
                 .tok = u,
-                .colon = try parser.expectToken(.Colon, false),
+                .colon = try parser.expectToken(.EqualArr, false),
                 .expr = try parser.blockOrExpr(false, level),
             };
             return &node.base;
         } else {
-            const items = try parser.listParser(true, level, expr, .Colon);
+            const items = try parser.listParser(true, level, expr, .EqualArr);
             const node = try parser.arena.create(Node.MatchCase);
             node.* = .{
                 .lhs = items.nodes,

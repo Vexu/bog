@@ -1,14 +1,14 @@
 test "types" {
     testCanonical(
-        \\const foo: any = 4
         \\const val = native("my_lib.constant": num)
         \\type id =
         \\    | foo
-        \\    | bar: num
-        \\    | ll: [str]
+        \\    | bar: num|error(any)
+        \\    | ll: [str|int|none]
         \\    | func: fn(num): [str]
         \\
         \\
+        \\const func = fn(arg: num): str "foo bar"
         \\
     );
 }
@@ -18,8 +18,8 @@ test "nested blocks and matches" {
         \\if (false)
         \\    if (true)
         \\        match (2)
-        \\            true: a
-        \\            false: b
+        \\            true => a
+        \\            false => b
         \\
         \\
         \\    else
@@ -132,9 +132,9 @@ test "preserve comments" {
 test "match" {
     testCanonical(
         \\match (2)
-        \\    let (x, 2): x + 4
-        \\    2, 3: 1
-        \\    _: ()
+        \\    let (x, 2) => x + 4
+        \\    2, 3 => 1
+        \\    _ => ()
         \\
         \\
         \\
@@ -161,7 +161,7 @@ test "tuples, lists, maps" {
     testCanonical(
         \\(a, b)
         \\[a, b]
-        \\{a: b, c: d}
+        \\{a = b, c = d}
         \\
     );
     testTransform(

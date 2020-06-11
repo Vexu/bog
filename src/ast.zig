@@ -71,12 +71,7 @@ pub const Node = struct {
                 const param = @fieldParentPtr(Node.Union, "base", node);
                 return param.capture.firstToken();
             },
-            .Case => {
-                const case = @fieldParentPtr(Node.Case, "base", node);
-                if (case.pipe) |some| return some;
-                if (case.name) |some| return some;
-                return case.expr.firstToken();
-            },
+            .Case => @fieldParentPtr(Node.Case, "base", node).pipe,
             .Primitive, .Identifier, .Discard, .This => @fieldParentPtr(Node.SingleToken, "base", node).tok,
             .Prefix => @fieldParentPtr(Node.Prefix, "base", node).tok,
             .Infix => @fieldParentPtr(Node.Infix, "base", node).lhs.firstToken(),
@@ -125,7 +120,11 @@ pub const Node = struct {
                 if (param.param_type) |some| return some.lastToken();
                 return param.capture.lastToken();
             },
-            .Case => return @fieldParentPtr(Node.Case, "base", node).expr.lastToken(),
+            .Case => {
+                const case = @fieldParentPtr(Node.Case, "base", node);
+                if (case.expr) |some| return some.lastToken();
+                return case.name;
+            },
             .Primitive, .Identifier, .Discard, .This => @fieldParentPtr(Node.SingleToken, "base", node).tok,
             .Prefix => @fieldParentPtr(Node.Prefix, "base", node).rhs.lastToken(),
             .Infix => @fieldParentPtr(Node.Infix, "base", node).rhs.lastToken(),
@@ -170,7 +169,6 @@ pub const Node = struct {
         base: Node = Node{ .id = .Decl },
         capture: *Node,
         value: *Node,
-        type_expr: ?*Node,
         let_const: TokenIndex,
         eq_tok: TokenIndex,
     };
@@ -184,9 +182,9 @@ pub const Node = struct {
 
     pub const Case = struct {
         base: Node = Node{ .id = .Case },
-        pipe: ?TokenIndex,
-        name: ?TokenIndex,
-        expr: *Node,
+        pipe: TokenIndex,
+        name: TokenIndex,
+        expr: ?*Node,
     };
 
     pub const Fn = struct {
