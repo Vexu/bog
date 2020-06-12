@@ -1,3 +1,11 @@
+test "invalid error unwrap" {
+    expectError(
+        \\let error = [2]
+    ,
+        \\expected a capture
+    );
+}
+
 test "break outside loop" {
     expectError(
         \\break

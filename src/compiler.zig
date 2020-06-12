@@ -1902,10 +1902,13 @@ pub const Compiler = struct {
                 if (!val.isRt()) {
                     return self.reportErr("expected an error", node.base.firstToken());
                 }
+                if (node.capture == null) {
+                    return self.reportErr("expected a capture", node.base.firstToken());
+                }
                 const unwrap_reg = self.registerAlloc();
                 try self.emitDouble(.unwrap_error_double, unwrap_reg, val.getRt());
                 const r_val = Value{ .rt = unwrap_reg };
-                const l_val = try self.genNode(node.value, switch (res.lval) {
+                const l_val = try self.genNode(node.capture.?, switch (res.lval) {
                     .Const => Result{ .lval = .{ .Const = &r_val } },
                     .let => Result{ .lval = .{ .let = &r_val } },
                     .assign => Result{ .lval = .{ .assign = &r_val } },
@@ -1918,7 +1921,10 @@ pub const Compiler = struct {
                 return self.reportErr("invalid left hand side to augmented assignment", node.tok);
             },
         };
-        const val = try self.genNodeNonEmpty(node.value, .value);
+        const val = if (node.capture) |some|
+            try self.genNodeNonEmpty(some, .value)
+        else
+            Value{ .none = {} };
 
         const sub_res = res.toRt(self);
         const reg = try val.toRt(self);

@@ -61,17 +61,21 @@ primary_expr
     | "true"
     | "false"
     | "this"
-    | "(" block_or_expr ")"
-    | "(" (expr ",")+ expr? ")"
-    | "{" (expr ":" expr ",")* (expr ":" expr)? "}"
-    | "[" (expr ",")* expr? "]"
-    | "error" "(" expr ")"
+    | "(" ")"
+    | initializer
+    | "error" initializer?
     | "import" "(" STRING ")"
     | "native" "(" STRING ")"
     | if
     | while
     | for
     | match
+
+initializer
+    : "(" block_or_expr ")"
+    | "(" (expr ",")+ expr? ")"
+    | "{" (expr ":" expr ",")* (expr ":" expr)? "}"
+    | "[" (expr ",")* expr? "]"
 
 if : "if" "(" (decl "=")? expr ")" block_or_expr ("else" block_or_expr)?
 

@@ -153,10 +153,9 @@ const Renderer = struct {
             .Error => {
                 const err = @fieldParentPtr(Node.Error, "base", node);
 
-                try self.renderToken(err.tok, stream, indent, .none);
-                try self.renderToken(self.nextToken(err.tok), stream, indent, .none);
-                try self.renderNode(err.value, stream, indent, .none);
-                return self.renderToken(err.r_paren, stream, indent, space);
+                const after_tok_space = if (err.capture == null) space else .none;
+                try self.renderToken(err.tok, stream, indent, after_tok_space);
+                if (err.capture) |some| try self.renderNode(some, stream, indent, space);
             },
             .Jump => {
                 const jump = @fieldParentPtr(Node.Jump, "base", node);

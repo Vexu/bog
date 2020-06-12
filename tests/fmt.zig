@@ -1,3 +1,14 @@
+test "different error initializations" {
+    testCanonical(
+        \\error
+        \\error(foo)
+        \\error(2.4, "foo")
+        \\error[1, 2]
+        \\error{foo: bar}
+        \\
+    );
+}
+
 test "nested blocks and matches" {
     testCanonical(
         \\if (false)

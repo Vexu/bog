@@ -106,7 +106,11 @@ pub const Node = struct {
             .Literal => @fieldParentPtr(Node.Literal, "base", node).tok,
             .Import => @fieldParentPtr(Node.Import, "base", node).r_paren,
             .Native => @fieldParentPtr(Node.Native, "base", node).r_paren,
-            .Error => @fieldParentPtr(Node.Error, "base", node).r_paren,
+            .Error => {
+                const err = @fieldParentPtr(Node.Error, "base", node);
+                if (err.capture) |some| return some.lastToken();
+                return err.tok;
+            },
             .List, .Tuple, .Map => @fieldParentPtr(Node.ListTupleMap, "base", node).r_tok,
             .Block => {
                 const block = @fieldParentPtr(Node.Block, "base", node);
@@ -274,8 +278,7 @@ pub const Node = struct {
     pub const Error = struct {
         base: Node = Node{ .id = .Error },
         tok: TokenIndex,
-        value: *Node,
-        r_paren: TokenIndex,
+        capture: ?*Node,
     };
 
     pub const ListTupleMap = struct {

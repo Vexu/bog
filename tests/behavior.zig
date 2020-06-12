@@ -1,3 +1,13 @@
+test "error map" {
+    expectOutput(
+        \\const foo = error{a: 2}
+        \\const error{a: bar} = foo
+        \\return bar * 2
+    ,
+        \\4
+    );
+}
+
 test "call bog function" {
     expectCallOutput(
         \\return {
