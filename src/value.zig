@@ -19,6 +19,7 @@ pub const Type = enum(u8) {
     err,
     range,
     func,
+    tagged,
 
     /// pseudo type user should not have access to via valid bytecode
     iterator,
@@ -55,6 +56,10 @@ pub const Value = union(Type) {
         allocator: *Allocator,
     },
     native: bog.native.Native,
+    tagged: struct {
+        name: []const u8,
+        value: *Value,
+    },
     iterator: struct {
         value: *Value,
         index: usize,
@@ -118,7 +123,7 @@ pub const Value = union(Type) {
     /// Does not free values recursively.
     pub fn deinit(value: *Value) void {
         switch (value.*) {
-            .int, .num, .none, .bool, .native => {},
+            .int, .num, .none, .bool, .native, .tagged => {},
             .tuple => |*t| t.allocator.free(t.values),
             .map => |*m| m.deinit(),
             .list => |*l| l.deinit(),
@@ -176,6 +181,10 @@ pub const Value = union(Type) {
                 autoHash(&hasher, func.arg_count);
                 autoHash(&hasher, func.func);
             },
+            .tagged => |*tagged| {
+                hasher.update(tagged.name);
+                autoHash(&hasher, tagged.value);
+            },
             _ => unreachable,
         }
         return @truncate(u32, hasher.final());
@@ -226,6 +235,10 @@ pub const Value = union(Type) {
                     f.module == b.func.module;
             },
             .native => |n| n.func == b.native.func,
+            .tagged => |t| {
+                if (!mem.eql(u8, t.name, b.tagged.name)) return false;
+                return t.value.eql(b.tagged.value);
+            },
             _ => unreachable,
         };
     }
@@ -318,6 +331,14 @@ pub const Value = union(Type) {
             },
             .native => |n| {
                 try stream.print("native({})@0x{}", .{ n.arg_count, @ptrToInt(n.func) });
+            },
+            .tagged => |t| {
+                try stream.print("@{}", .{t.name});
+                if (level == 0) {
+                    try stream.writeAll("(...)");
+                } else {
+                    try t.value.dump(stream, level - 1);
+                }
             },
             _ => unreachable,
         }
@@ -464,7 +485,7 @@ pub const Value = union(Type) {
 
         const new_val = try vm.gc.alloc();
         new_val.* = switch (type_id) {
-            .bool, .none, .err, .range, .func, .native, .iterator => unreachable,
+            .bool, .none, .err, .range, .func, .native, .iterator, .tagged => unreachable,
             .int => .{
                 .int = switch (val.*) {
                     .int => unreachable,

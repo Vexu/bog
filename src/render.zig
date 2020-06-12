@@ -157,6 +157,14 @@ const Renderer = struct {
                 try self.renderToken(err.tok, stream, indent, after_tok_space);
                 if (err.capture) |some| try self.renderNode(some, stream, indent, space);
             },
+            .Tagged => {
+                const tag = @fieldParentPtr(Node.Tagged, "base", node);
+
+                try self.renderToken(tag.at, stream, indent, .none);
+                const after_tok_space = if (tag.capture == null) space else .none;
+                try self.renderToken(tag.name, stream, indent, after_tok_space);
+                if (tag.capture) |some| try self.renderNode(some, stream, indent, space);
+            },
             .Jump => {
                 const jump = @fieldParentPtr(Node.Jump, "base", node);
 

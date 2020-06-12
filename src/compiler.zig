@@ -557,6 +557,7 @@ pub const Compiler = struct {
             .Map => return self.genMap(@fieldParentPtr(Node.ListTupleMap, "base", node), res),
             .MapItem => unreachable,
             .This => return self.genThis(@fieldParentPtr(Node.SingleToken, "base", node), res),
+            .Tagged => return self.genTagged(@fieldParentPtr(Node.Tagged, "base", node), res),
 
             .Match => return self.reportErr("TODO: Match", node.firstToken()),
             .MatchCatchAll => return self.reportErr("TODO: MatchCatchAll", node.firstToken()),
@@ -1243,7 +1244,9 @@ pub const Compiler = struct {
         else if (mem.eql(u8, type_str, "range"))
             .range
         else if (mem.eql(u8, type_str, "fn"))
-            bog.Type.func
+            .func
+        else if (mem.eql(u8, type_str, "tagged"))
+            bog.Type.tagged
         else
             return self.reportErr("expected a type name", node.type_tok);
 
@@ -1312,7 +1315,7 @@ pub const Compiler = struct {
                 .func => return self.reportErr("cannot cast to function", node.type_tok),
                 .err => return self.reportErr("cannot cast to error", node.type_tok),
                 .range => return self.reportErr("cannot cast to range", node.type_tok),
-                .tuple, .map, .list => return self.reportErr("invalid cast", node.type_tok),
+                .tuple, .map, .list, .tagged => return self.reportErr("invalid cast", node.type_tok),
                 .native, .iterator => unreachable,
                 _ => unreachable,
             },
@@ -1931,6 +1934,57 @@ pub const Compiler = struct {
         defer val.free(self, reg);
 
         try self.emitDouble(.build_error_double, sub_res.rt, reg);
+        return sub_res.toVal();
+    }
+
+    fn genTagged(self: *Compiler, node: *Node.Tagged, res: Result) Error!Value {
+        if (res == .lval) switch (res.lval) {
+            .Const, .let, .assign => |val| {
+                if (!val.isRt()) {
+                    return self.reportErr("expected a tagged value", node.base.firstToken());
+                }
+                if (node.capture == null) {
+                    return self.reportErr("expected a capture", node.base.firstToken());
+                }
+                const str_loc = try self.putString(self.tokenSlice(node.name));
+                const unwrap_reg = self.registerAlloc();
+                try self.emitDouble(.unwrap_tagged, unwrap_reg, val.getRt());
+                try self.code.append(.{
+                    .bare = str_loc,
+                });
+                const r_val = Value{ .rt = unwrap_reg };
+                const l_val = try self.genNode(node.capture.?, switch (res.lval) {
+                    .Const => Result{ .lval = .{ .Const = &r_val } },
+                    .let => Result{ .lval = .{ .let = &r_val } },
+                    .assign => Result{ .lval = .{ .assign = &r_val } },
+                    else => unreachable,
+                });
+                std.debug.assert(l_val == .empty);
+                return Value.empty;
+            },
+            .aug_assign => {
+                return self.reportErr("invalid left hand side to augmented assignment", node.at);
+            },
+        };
+
+        const sub_res = res.toRt(self);
+        const str_loc = try self.putString(self.tokenSlice(node.name));
+
+        try self.code.append(.{
+            .tagged = .{
+                .res = sub_res.rt,
+                .kind = if (node.capture == null) .none else .some,
+                .arg = if (node.capture) |some| blk: {
+                    const val = try self.genNodeNonEmpty(some, .value);
+                    const reg = try val.toRt(self);
+                    defer val.free(self, reg);
+                    break :blk reg;
+                } else 0,
+            },
+        });
+        try self.code.append(.{
+            .bare = str_loc,
+        });
         return sub_res.toVal();
     }
 

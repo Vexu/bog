@@ -622,6 +622,7 @@ pub const Parser = struct {
     ///     | "(" ")"
     ///     | initializer
     ///     | "error" initializer?
+    ///     | "@" IDENTIFIER initializer?
     ///     | "import" "(" STRING ")"
     ///     | "native" "(" (STRING ",")? STRING ")"
     ///     | if
@@ -680,6 +681,16 @@ pub const Parser = struct {
                 const node = try parser.arena.create(Node.Error);
                 node.* = .{
                     .tok = tok,
+                    .capture = try parser.initializer(skip_nl, level),
+                };
+                return &node.base;
+            },
+            .At => {
+                parser.skipNl();
+                const node = try parser.arena.create(Node.Tagged);
+                node.* = .{
+                    .at = tok,
+                    .name = try parser.expectToken(.Identifier, skip_nl),
                     .capture = try parser.initializer(skip_nl, level),
                 };
                 return &node.base;

@@ -1,6 +1,20 @@
-test "invalid error unwrap" {
+test "invalid tag unwrap" {
+    expectError(
+        \\let foo = @bar[2]
+        \\let @foo[baz] = foo
+    ,
+        \\invalid tag
+    );
+}
+
+test "missing capture" {
     expectError(
         \\let error = [2]
+    ,
+        \\expected a capture
+    );
+    expectError(
+        \\let @foo = [2]
     ,
         \\expected a capture
     );

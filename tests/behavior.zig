@@ -1,3 +1,32 @@
+test "tagged values" {
+    expectOutput(
+        \\return @something{foo: 69}
+    ,
+        \\@something{"foo": 69}
+    );
+    expectOutput(
+        \\const foo = @foo
+        \\const bar = @bar
+        \\return foo == bar
+    ,
+        \\false
+    );
+    expectOutput(
+        \\const foo = @foo[1]
+        \\const bar = @foo[1]
+        \\return foo == bar
+    ,
+        \\true
+    );
+    expectOutput(
+        \\const foo = @foo[1,2]
+        \\const @foo[bar, baz] = foo
+        \\return bar + baz
+    ,
+        \\3
+    );
+}
+
 test "error map" {
     expectOutput(
         \\const foo = error{a: 2}

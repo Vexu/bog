@@ -40,6 +40,7 @@ pub const Node = struct {
         Import,
         Native,
         Error,
+        Tagged,
         List,
         Tuple,
         Map,
@@ -73,6 +74,7 @@ pub const Node = struct {
             .Import => @fieldParentPtr(Node.Import, "base", node).tok,
             .Native => @fieldParentPtr(Node.Native, "base", node).tok,
             .Error => @fieldParentPtr(Node.Error, "base", node).tok,
+            .Tagged => @fieldParentPtr(Node.Tagged, "base", node).at,
             .List, .Tuple, .Map => @fieldParentPtr(Node.ListTupleMap, "base", node).l_tok,
             .Block => @fieldParentPtr(Node.Block, "base", node).stmts[0].firstToken(),
             .Grouped => @fieldParentPtr(Node.Grouped, "base", node).l_tok,
@@ -110,6 +112,11 @@ pub const Node = struct {
                 const err = @fieldParentPtr(Node.Error, "base", node);
                 if (err.capture) |some| return some.lastToken();
                 return err.tok;
+            },
+            .Tagged => {
+                const tagged = @fieldParentPtr(Node.Tagged, "base", node);
+                if (tagged.capture) |some| return some.lastToken();
+                return tagged.name;
             },
             .List, .Tuple, .Map => @fieldParentPtr(Node.ListTupleMap, "base", node).r_tok,
             .Block => {
@@ -278,6 +285,13 @@ pub const Node = struct {
     pub const Error = struct {
         base: Node = Node{ .id = .Error },
         tok: TokenIndex,
+        capture: ?*Node,
+    };
+
+    pub const Tagged = struct {
+        base: Node = Node{ .id = .Tagged },
+        at: TokenIndex,
+        name: TokenIndex,
         capture: ?*Node,
     };
 

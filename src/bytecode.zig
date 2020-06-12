@@ -62,6 +62,7 @@ pub const Op = enum(u8) {
     /// This is fused with a jump_none as an optimization
     iter_next_double,
     unwrap_error_double,
+    unwrap_tagged,
     /// IF (B==error) RET B ELSE A = B
     try_double,
 
@@ -76,6 +77,7 @@ pub const Op = enum(u8) {
     build_map_off,
     build_native_off,
     build_func,
+    build_tagged,
 
     /// ip = arg1
     jump,
@@ -151,6 +153,16 @@ pub const Instruction = packed union {
             return self.off == 0xFFFF;
         }
     },
+    tagged: packed struct {
+        op: Op = .build_tagged,
+        res: RegRef,
+        arg: RegRef,
+        kind: packed enum(u8) {
+            none = 0,
+            some = 1,
+            _,
+        },
+    },
     primitive: packed struct {
         op: Op = .const_primitive,
         res: u8,
@@ -221,7 +233,8 @@ pub const Module = struct {
     pub const magic = "\x7fbog";
 
     /// Current bytecode version.
-    pub const bytecode_version = 2;
+    pub const bytecode_version = 3;
+    pub const last_compatible = 3;
 
     /// The header of a Bog bytecode file.
     /// All integer values are little-endian.
@@ -274,7 +287,7 @@ pub const Module = struct {
                 .entry = mem.readIntLittle(u32, src[16..20]),
             };
 
-        if (header.version != bytecode_version)
+        if (header.version < last_compatible)
             return error.UnsupportedVersion;
 
         // strings must come before code
@@ -367,6 +380,18 @@ pub const Module = struct {
                     try stream.print("{} <- \"{}\"\n", .{ inst.off.res, slice });
                 },
 
+                .build_tagged => {
+                    const offset = module.code[ip].bare;
+                    ip += 1;
+
+                    const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
+                    const slice = module.strings[offset + @sizeOf(u32) ..][0..len];
+                    if (inst.tagged.kind == .none)
+                        try stream.print("{} <- @{}\n", .{ inst.off.res, slice })
+                    else
+                        try stream.print("{} <- @{}({})\n", .{ inst.off.res, slice, inst.tagged.arg });
+                },
+
                 .jump, .jump_false, .jump_true, .jump_none, .jump_not_error => {
                     const jump_target = if (inst.jump.op == .jump)
                         @intCast(usize, @intCast(isize, ip) + module.code[ip].bare_signed)
@@ -427,6 +452,14 @@ pub const Module = struct {
                 },
                 .build_error_double, .unwrap_error_double, .iter_init_double, .move_double, .copy_double => {
                     try stream.print("{} <- {}\n", .{ inst.double.res, inst.double.arg });
+                },
+                .unwrap_tagged => {
+                    const offset = module.code[ip].bare;
+                    ip += 1;
+
+                    const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
+                    const slice = module.strings[offset + @sizeOf(u32) ..][0..len];
+                    try stream.print("{} <- @{}({})\n", .{ inst.double.res, slice, inst.double.arg });
                 },
                 .bool_not_double, .bit_not_double, .negate_double, .try_double => {
                     try stream.print("{} <- {} {}\n", .{ inst.double.res, opToStr(inst.double.op), inst.double.arg });
@@ -516,7 +549,7 @@ pub const Module = struct {
                     ip += 1;
                 },
 
-                .line_info, .call => ip += 1,
+                .build_tagged, .line_info, .call => ip += 1,
                 else => {},
             }
         }

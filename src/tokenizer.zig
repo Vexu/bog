@@ -167,6 +167,7 @@ pub const Token = struct {
         Tilde,
         Colon,
         Underscore,
+        At,
 
         /// keywords
         Keyword_not,
@@ -580,6 +581,10 @@ pub const Tokenizer = struct {
                     },
                     ',' => {
                         res = .Comma;
+                        break;
+                    },
+                    '@' => {
+                        res = .At;
                         break;
                     },
                     '%' => {
@@ -1146,7 +1151,7 @@ fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
 test "operators" {
     expectTokens(
         \\!= | |= = ==
-        \\( ) { } [ ] . ...
+        \\( ) { } [ ] . ... @
         \\^ ^= + += - -=
         \\* *= ** **= % %= / /= // //=
         \\, & &= < <= <<
@@ -1167,6 +1172,7 @@ test "operators" {
         .RBracket,
         .Period,
         .Ellipsis,
+        .At,
         .Nl,
         .Caret,
         .CaretEqual,

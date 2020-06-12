@@ -492,6 +492,19 @@ pub const Vm = struct {
                         return vm.reportErr("expected an error");
                     res.* = arg.err;
                 },
+                .unwrap_tagged => {
+                    const res = try vm.getRef(module, inst.double.res);
+                    const arg = try vm.getVal(module, inst.double.arg);
+                    const offset = try vm.getSingle(module);
+                    const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
+                    const name = module.strings[offset + @sizeOf(u32) ..][0..len];
+
+                    if (arg.* != .tagged)
+                        return vm.reportErr("expected a tagged value");
+                    if (!mem.eql(u8, arg.tagged.name, name))
+                        return vm.reportErr("invalid tag");
+                    res.* = arg.tagged.value;
+                },
                 .import_off => {
                     const res = try vm.getRef(module, inst.off.res);
                     const str = try vm.getString(module, inst);
@@ -572,7 +585,7 @@ pub const Vm = struct {
                     const arg = try vm.getVal(module, inst.double.arg);
 
                     res.* = .{
-                        .err = arg,
+                        .err = try vm.gc.dupe(arg),
                     };
                 },
                 .build_func => {
@@ -587,6 +600,24 @@ pub const Vm = struct {
                             .module = module,
                             .allocator = vm.gc.gpa,
                             .captures = try vm.gc.gpa.alloc(*Value, inst.func.capture_count),
+                        },
+                    };
+                },
+                .build_tagged => {
+                    const res = try vm.getNewVal(module, inst.tagged.res);
+                    const arg = switch (inst.tagged.kind) {
+                        .none => &Value.None,
+                        .some => try vm.gc.dupe(try vm.getVal(module, inst.tagged.arg)),
+                        _ => return error.MalformedByteCode,
+                    };
+                    const offset = try vm.getSingle(module);
+                    const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
+                    const name = module.strings[offset + @sizeOf(u32) ..][0..len];
+
+                    res.* = .{
+                        .tagged = .{
+                            .name = name,
+                            .value = arg,
                         },
                     };
                 },
@@ -614,7 +645,7 @@ pub const Vm = struct {
                     // Value.as will hit unreachable on invalid type_id
                     switch (inst.type_id.type_id) {
                         .none, .int, .num, .bool, .str, .tuple, .map, .list => {},
-                        .err, .range, .func, .native, .iterator => return error.MalformedByteCode,
+                        .err, .range, .func, .native, .iterator, .tagged => return error.MalformedByteCode,
                         _ => return error.MalformedByteCode,
                     }
 
@@ -625,7 +656,7 @@ pub const Vm = struct {
                     const arg = try vm.getVal(module, inst.type_id.arg);
 
                     switch (inst.type_id.type_id) {
-                        .none, .int, .num, .bool, .str, .tuple, .map, .list, .err, .range, .func => {},
+                        .none, .int, .num, .bool, .str, .tuple, .map, .list, .err, .range, .func, .tagged => {},
                         .iterator, .native => return error.MalformedByteCode,
                         _ => return error.MalformedByteCode,
                     }

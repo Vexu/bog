@@ -1,3 +1,14 @@
+test "tag" {
+    testCanonical(
+        \\@foo
+        \\@bar(foo)
+        \\@baz(2.4, "foo")
+        \\@qux[1, 2]
+        \\@quux{foo: bar}
+        \\
+    );
+}
+
 test "different error initializations" {
     testCanonical(
         \\error

@@ -64,6 +64,7 @@ primary_expr
     | "(" ")"
     | initializer
     | "error" initializer?
+    | "@" IDENTIFIER initializer?
     | "import" "(" STRING ")"
     | "native" "(" STRING ")"
     | if
