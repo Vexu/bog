@@ -142,14 +142,6 @@ const Renderer = struct {
                 try self.renderToken(import.str_tok, stream, indent, .none);
                 return self.renderToken(import.r_paren, stream, indent, space);
             },
-            .Native => {
-                const native = @fieldParentPtr(Node.Native, "base", node);
-
-                try self.renderToken(native.tok, stream, indent, .none);
-                try self.renderToken(self.nextToken(native.tok), stream, indent, .none);
-                try self.renderToken(native.str_tok, stream, indent, .none);
-                return self.renderToken(native.r_paren, stream, indent, space);
-            },
             .Error => {
                 const err = @fieldParentPtr(Node.Error, "base", node);
 

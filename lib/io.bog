@@ -1,3 +1,0 @@
-{
-    print: native("io.print"),
-}

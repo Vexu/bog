@@ -75,7 +75,6 @@ pub const Op = enum(u8) {
     build_tuple_off,
     build_list_off,
     build_map_off,
-    build_native_off,
     build_func,
     build_tagged,
 
@@ -233,8 +232,8 @@ pub const Module = struct {
     pub const magic = "\x7fbog";
 
     /// Current bytecode version.
-    pub const bytecode_version = 3;
-    pub const last_compatible = 3;
+    pub const bytecode_version = 4;
+    pub const last_compatible = 4;
 
     /// The header of a Bog bytecode file.
     /// All integer values are little-endian.
@@ -369,7 +368,7 @@ pub const Module = struct {
                     try stream.print("{} <- ({d})\n", .{ inst.single.arg, @ptrCast(*align(@alignOf(Instruction)) const f64, &module.code[ip]).* });
                     ip += 2;
                 },
-                .const_string_off, .build_native_off, .import_off => {
+                .const_string_off, .import_off => {
                     const offset = if (inst.off.isArg()) blk: {
                         ip += 1;
                         break :blk module.code[ip - 1].bare;
@@ -540,7 +539,6 @@ pub const Module = struct {
                 .const_num => ip += 2,
 
                 .import_off,
-                .build_native_off,
                 .const_string_off,
                 .build_tuple_off,
                 .build_list_off,

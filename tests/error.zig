@@ -53,14 +53,6 @@ test "index out of bounds" {
     );
 }
 
-test "invalid namespace for native" {
-    expectError(
-        \\native("foo")
-    ,
-        \\invalid namespace
-    );
-}
-
 test "invalid type" {
     expectError(
         \\1 + true

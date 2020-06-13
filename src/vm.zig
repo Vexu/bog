@@ -529,15 +529,6 @@ pub const Vm = struct {
                         return arg;
                     }
                 },
-                .build_native_off => {
-                    const res = try vm.getNewVal(module, inst.off.res);
-                    const str = try vm.getString(module, inst);
-
-                    res.* = .{
-                        .native = vm.native_registry.map.getValue(str) orelse
-                            return vm.reportErr("native function not registered"),
-                    };
-                },
                 .build_tuple_off => {
                     const res = try vm.getNewVal(module, inst.off.res);
                     const size = if (inst.off.isArg())

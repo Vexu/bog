@@ -38,7 +38,6 @@ pub const Node = struct {
         Suffix,
         Literal,
         Import,
-        Native,
         Error,
         Tagged,
         List,
@@ -72,7 +71,6 @@ pub const Node = struct {
                 return if (lit.kind != .none) lit.tok else lit.tok - 1;
             },
             .Import => @fieldParentPtr(Node.Import, "base", node).tok,
-            .Native => @fieldParentPtr(Node.Native, "base", node).tok,
             .Error => @fieldParentPtr(Node.Error, "base", node).tok,
             .Tagged => @fieldParentPtr(Node.Tagged, "base", node).at,
             .List, .Tuple, .Map => @fieldParentPtr(Node.ListTupleMap, "base", node).l_tok,
@@ -107,7 +105,6 @@ pub const Node = struct {
             .Suffix => @fieldParentPtr(Node.Suffix, "base", node).r_tok,
             .Literal => @fieldParentPtr(Node.Literal, "base", node).tok,
             .Import => @fieldParentPtr(Node.Import, "base", node).r_paren,
-            .Native => @fieldParentPtr(Node.Native, "base", node).r_paren,
             .Error => {
                 const err = @fieldParentPtr(Node.Error, "base", node);
                 if (err.capture) |some| return some.lastToken();
@@ -270,13 +267,6 @@ pub const Node = struct {
 
     pub const Import = struct {
         base: Node = Node{ .id = .Import },
-        tok: TokenIndex,
-        str_tok: TokenIndex,
-        r_paren: TokenIndex,
-    };
-
-    pub const Native = struct {
-        base: Node = Node{ .id = .Native },
         tok: TokenIndex,
         str_tok: TokenIndex,
         r_paren: TokenIndex,

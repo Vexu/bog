@@ -33,8 +33,6 @@ pub const Module = bytecode.Module;
 pub const RegRef = bytecode.RegRef;
 pub const Instruction = bytecode.Instruction;
 
-pub const native = @import("native.zig");
-
 pub const repl = @import("repl.zig");
 
 pub const std = @import("std.zig");

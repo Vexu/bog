@@ -552,7 +552,6 @@ pub const Compiler = struct {
             .List => return self.genTupleList(@fieldParentPtr(Node.ListTupleMap, "base", node), res),
             .Catch => return self.genCatch(@fieldParentPtr(Node.Catch, "base", node), res),
             .Import => return self.genImport(@fieldParentPtr(Node.Import, "base", node), res),
-            .Native => return self.genNative(@fieldParentPtr(Node.Native, "base", node), res),
             .For => return self.genFor(@fieldParentPtr(Node.For, "base", node), res),
             .Map => return self.genMap(@fieldParentPtr(Node.ListTupleMap, "base", node), res),
             .MapItem => unreachable,
@@ -1883,19 +1882,6 @@ pub const Compiler = struct {
         const str_loc = try self.putString(str);
 
         try self.emitOff(.import_off, sub_res.rt, str_loc);
-        return sub_res.toVal();
-    }
-
-    fn genNative(self: *Compiler, node: *Node.Native, res: Result) Error!Value {
-        try res.notLval(self, node.tok);
-
-        const sub_res = res.toRt(self);
-        const str = try self.parseStr(node.str_tok);
-        if (mem.indexOfScalar(u8, str, '.') == null) {
-            return self.reportErr("invalid namespace", node.str_tok);
-        }
-        const str_loc = try self.putString(str);
-        try self.emitOff(.build_native_off, sub_res.rt, str_loc);
         return sub_res.toVal();
     }
 

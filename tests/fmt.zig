@@ -81,13 +81,6 @@ test "respect new lines" {
     );
 }
 
-test "native function" {
-    testCanonical(
-        \\const foo = native("bar.foo")
-        \\
-    );
-}
-
 test "nested blocks" {
     testCanonical(
         \\if (false)

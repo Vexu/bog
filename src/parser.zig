@@ -624,7 +624,6 @@ pub const Parser = struct {
     ///     | "error" initializer?
     ///     | "@" IDENTIFIER initializer?
     ///     | "import" "(" STRING ")"
-    ///     | "native" "(" (STRING ",")? STRING ")"
     ///     | if
     ///     | while
     ///     | for
@@ -698,16 +697,6 @@ pub const Parser = struct {
             .Keyword_import => {
                 _ = try parser.expectToken(.LParen, true);
                 const node = try parser.arena.create(Node.Import);
-                node.* = .{
-                    .tok = tok,
-                    .str_tok = try parser.expectToken(.String, true),
-                    .r_paren = try parser.expectToken(.RParen, skip_nl),
-                };
-                return &node.base;
-            },
-            .Keyword_native => {
-                _ = try parser.expectToken(.LParen, true);
-                const node = try parser.arena.create(Node.Native);
                 node.* = .{
                     .tok = tok,
                     .str_tok = try parser.expectToken(.String, true),
