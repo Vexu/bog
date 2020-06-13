@@ -588,6 +588,13 @@ pub const Value = union(Type) {
                 };
                 return str;
             },
+            []const u8 => {
+                const str = try vm.gc.alloc();
+                str.* = .{
+                    .str = val,
+                };
+                return str;
+            },
             type => switch (@typeInfo(val)) {
                 .Struct => |info| {
                     var map = Value.Map.init(vm.gc.gpa);
@@ -616,7 +623,6 @@ pub const Value = union(Type) {
                     };
                     return ret;
                 },
-                .Union, .Enum => @compileError("TODO implement zigToBog for type " ++ @typeName(val)),
                 else => @compileError("unsupported type: " ++ @typeName(val)),
             },
             else => switch (@typeInfo(@TypeOf(val))) {
@@ -656,6 +662,16 @@ pub const Value = union(Type) {
                         .err = str,
                     };
                     return err;
+                },
+                .Enum => {
+                    const tag = try vm.gc.alloc();
+                    tag.* = .{
+                        .tagged = .{
+                            .name = @tagName(val),
+                            .value = &None,
+                        },
+                    };
+                    return tag;
                 },
                 else => @compileError("TODO unsupported type " ++ @typeName(@TypeOf(val))),
             },
@@ -706,6 +722,15 @@ pub const Value = union(Type) {
                     else
                         return vm.reportErr("expected num"),
                     else => @compileError("unsupported float"),
+                },
+                .Enum => {
+                    if (val.* != .tagged)
+                        return vm.reportErr("expected tag");
+                    const e = std.meta.stringToEnum(T, val.tagged.name) orelse
+                        return vm.reportErr("no value by such name");
+                    if (val.tagged.value.* != .none)
+                        return vm.reportErr("expected no value");
+                    return e;
                 },
                 else => @compileError("TODO unsupported type"),
             },
