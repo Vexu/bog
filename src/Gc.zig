@@ -64,8 +64,10 @@ const Page = struct {
         while (page.free < page.values.len) {
             defer page.free += 1;
 
-            if (page.meta[page.free] == .empty)
+            if (page.meta[page.free] == .empty) {
+                page.meta[page.free] = .white;
                 return &page.values[page.free];
+            }
         }
         return null;
     }
@@ -162,10 +164,10 @@ pub fn stackRef(gc: *Gc, index: usize) !*?*Value {
 /// Allocates new value on stack, invalidates all references to stack values.
 pub fn stackAlloc(gc: *Gc, index: usize) !*Value {
     const val = try gc.stackRef(index);
-    if (val.* == null or
-        val.*.?.* == .none or
-        val.*.?.* == .bool)
-    {
+    if (val.*) |some| switch (some.*) {
+        .int, .num, .native, .tagged => {},
+        else => val.* = try gc.alloc(),
+    } else {
         val.* = try gc.alloc();
     }
     return val.*.?;
@@ -174,5 +176,5 @@ pub fn stackAlloc(gc: *Gc, index: usize) !*Value {
 /// Shrinks stack to `size`, doesn't free any memory.
 pub fn stackShrink(gc: *Gc, size: usize) void {
     if (size > gc.stack.items.len) return;
-    gc.stack.items = gc.stack.items[0..size];
+    gc.stack.items.len = size;
 }

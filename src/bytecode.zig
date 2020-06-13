@@ -465,7 +465,7 @@ pub const Module = struct {
                 },
 
                 .store_capture_triple => {
-                    try stream.print("{}[{}] <- {}\n", .{ inst.triple.res, inst.triple.lhs, inst.triple.rhs });
+                    try stream.print("{}[{}] <- {}\n", .{ inst.triple.res, inst.triple.rhs, inst.triple.lhs });
                 },
                 .load_capture_double => {
                     try stream.print("{} <- [{}]\n", .{ inst.double.res, inst.double.arg });

@@ -86,6 +86,7 @@ test "closures" {
         \\7
     );
     // TODO multilevel captures
+    // https://github.com/Vexu/bog/issues/4
     // expectOutput(
     //     \\let x = 2
     //     \\const foo = fn()
