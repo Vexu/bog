@@ -2,13 +2,13 @@ Small, strongly typed, embeddable language.
 ## [Examples](examples)
 
 ### Hello world
-```rust
+```julia
 const {print} = import("std.io")
 print("hello world")
 ```
 
 ### Calculator
-```rust
+```julia
 const {input, print} = import("std.io")
 
 const val1 = input("first argument: ") as num
@@ -30,14 +30,14 @@ else
 ```
 
 ### Use command line arguments
-```rust
+```julia
 # run with `path/to/bog path/here.bog arg1 arg2 "foo"`
 const {print} = import("io")
 print(import("args"))
 ```
 
 ### Loops
-```rust
+```julia
 let sum = 0
 for (let c in "hellö wörld")
     if (c == "h") sum += 1
@@ -49,7 +49,7 @@ for (let c in "hellö wörld")
 
 return sum # 31
 ```
-```rust
+```julia
 const getSome = fn(val)  if (val != 0) val - 1
 
 let val = 10
@@ -59,7 +59,7 @@ return val # 0
 ```
 
 ### Destructuring assignment
-```rust
+```julia
 const add = fn ((a,b)) a + b
 const tuplify = fn (a,b) (a,b)
 return add(tuplify(1,2)) # 3
@@ -112,13 +112,15 @@ const bog_integer = try call_res.bogToZig(i64, &vm);
 ### Calling Zig functions from Bog
 
 ```zig
-fn pow(val: i64) i64 {
-    return val * val;
-}
+const my_lib = struct {
+    pub fn pow(val: i64) i64 {
+        return val * val;
+    }
+};
 
 var vm = Vm.init(allocator, .{});
 defer vm.deinit();
-try vm.addPackage("pow", pow)
+try vm.addPackage("my_lib", my_lib);
 
 const res = vm.run(source) catch |e| switch (e) {
     else => |err| return err,
@@ -132,8 +134,8 @@ const bog_integer = try res.bogToZig(i64, &vm);
 std.debug.assert(bog_integer == 8);
 ```
 
-```rust
-const pow = import("pow")
+```julia
+const {pow} = import("my_lib")
 
 return 2 * pow(2)
 ```
