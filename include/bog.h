@@ -30,7 +30,10 @@ bog_Error bog_Vm_init(bog_Vm **vm, bool import_files);
 void bog_Vm_deinit(bog_Vm *vm);
 
 // possible errors: BOG_ERROR_OUT_OF_MEMORY
+// build with NO_ADD_STD to exclude this and reduce binary size
 bog_Error bog_Vm_addStd(bog_Vm *vm);
+// build with NO_ADD_STD_NO_IO to exclude this and reduce binary size
+bog_Error bog_Vm_addStdNoIo(bog_Vm *vm);
 
 // possible errors: BOG_ERROR_OUT_OF_MEMORY, BOG_ERROR_TOKENIZE, BOG_ERROR_PARSE, BOG_ERROR_COMPILE,
 //      BOG_ERROR_RUNTIME, BOG_ERROR_MALFORMED_BYTE_CODE

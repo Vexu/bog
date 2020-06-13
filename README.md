@@ -71,7 +71,7 @@ const bog = @import("bog");
 
 var vm = bog.Vm.init(allocator, .{ .import_files = true });
 defer vm.deinit();
-try vm.addPackage("std.io", bog.std.io);
+try vm.addStd();
 
 const res = vm.run(source) catch |e| switch (e) {
     else => |err| return err,

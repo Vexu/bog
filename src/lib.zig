@@ -35,11 +35,26 @@ export fn bog_Vm_deinit(vm: *bog.Vm) void {
     vm.deinit();
 }
 
-export fn bog_Vm_addStd(vm: *bog.Vm) Error {
-    vm.addPackage("std.io", bog.std.io) catch |e| switch (e) {
+fn bog_Vm_addStd(vm: *bog.Vm) callconv(.C) Error {
+    vm.addStd() catch |e| switch (e) {
         error.OutOfMemory => return .OutOfMemory,
     };
     return .None;
+}
+
+fn bog_Vm_addStdNoIo(vm: *bog.Vm) callconv(.C) Error {
+    vm.addStdNoIo() catch |e| switch (e) {
+        error.OutOfMemory => return .OutOfMemory,
+    };
+    return .None;
+}
+
+comptime {
+    const build_options = @import("build_options");
+    if (!build_options.no_std)
+        @export(bog_Vm_addStd, .{ .name = "bog_Vm_addStd", .linkage = .Strong });
+    if (!build_options.no_std_no_io)
+        @export(bog_Vm_addStdNoIo, .{ .name = "bog_Vm_addStdNoIo", .linkage = .Strong });
 }
 
 export fn bog_Vm_run(vm: *bog.Vm, res: **bog.Value, source: [*:0]const u8) Error {

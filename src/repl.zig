@@ -46,7 +46,7 @@ pub const Repl = struct {
         errdefer buffer.deinit();
         var vm = Vm.init(gpa, .{ .repl = true, .import_files = true });
         errdefer vm.deinit();
-        try vm.addPackage("std.io", bog.std.io);
+        try vm.addStd();
         var syms = bog.Compiler.Symbol.List.init(gpa);
         errdefer syms.deinit();
 

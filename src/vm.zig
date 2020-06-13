@@ -102,6 +102,14 @@ pub const Vm = struct {
         }.func);
     }
 
+    pub fn addStd(vm: *Vm) Allocator.Error!void {
+        try vm.addPackage("std.io", bog.std.io);
+    }
+
+    pub fn addStdNoIo(vm: *Vm) Allocator.Error!void {
+        // try vm.addPackage("std.math", bog.std.math);
+    }
+
     /// Compiles and executes `source`.
     pub fn run(vm: *Vm, source: []const u8) !*bog.Value {
         var module = try bog.compile(vm.gc.gpa, source, &vm.errors);

@@ -67,7 +67,7 @@ fn run(gpa: *std.mem.Allocator, args: [][]const u8) !void {
 
     var vm = bog.Vm.init(gpa, .{ .import_files = true });
     defer vm.deinit();
-    try vm.addPackage("std.io", bog.std.io);
+    try vm.addStd();
     const S = struct {
         var _args: [][]const u8 = undefined;
 
