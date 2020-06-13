@@ -9,8 +9,6 @@ pub fn run(gpa: *Allocator, in_stream: var, out_stream: var) !void {
     var repl = try Repl.init(gpa);
     defer repl.deinit();
 
-    try bog.std.registerAll(&repl.vm.native_registry);
-
     while (true) {
         repl.handleLine(in_stream, out_stream) catch |err| switch (err) {
             error.EndOfStream => return,
@@ -48,6 +46,7 @@ pub const Repl = struct {
         errdefer buffer.deinit();
         var vm = Vm.init(gpa, .{ .repl = true, .import_files = true });
         errdefer vm.deinit();
+        try vm.addImportable("std.io", bog.std.io);
         var syms = bog.Compiler.Symbol.List.init(gpa);
         errdefer syms.deinit();
 

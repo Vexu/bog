@@ -4,7 +4,6 @@ const Allocator = mem.Allocator;
 const bog = @import("bog.zig");
 const Vm = bog.Vm;
 const Module = bog.Module;
-const NativeFn = bog.NativeFn;
 const util = @import("util.zig");
 
 pub const Type = enum(u8) {
@@ -55,7 +54,7 @@ pub const Value = union(Type) {
         captures: []*Value,
         allocator: *Allocator,
     },
-    native: bog.native.Native,
+    native: Native,
     tagged: struct {
         name: []const u8,
         value: *Value,
@@ -114,6 +113,10 @@ pub const Value = union(Type) {
 
     pub const Map = std.HashMap(*const Value, *Value, hash, eql);
     pub const List = std.ArrayList(*Value);
+    pub const Native = struct {
+        arg_count: u8,
+        func: fn (*Vm, []*Value) Vm.Error!*Value,
+    };
 
     pub var None = Value{ .none = {} };
     pub var True = Value{ .bool = true };
@@ -580,7 +583,45 @@ pub const Value = union(Type) {
                 };
                 return str;
             },
+            type => switch (@typeInfo(val)) {
+                .Struct => |info| {
+                    var map = Value.Map.init(vm.gc.gpa);
+                    errdefer map.deinit();
+
+                    comptime var pub_decls = 0;
+                    inline for (info.decls) |decl| {
+                        if (decl.is_pub) pub_decls += 1;
+                    }
+
+                    try map.ensureCapacity(pub_decls);
+
+                    inline for (info.decls) |decl| {
+                        if (!decl.is_pub) continue;
+                        const key = try vm.gc.alloc();
+                        key.* = .{
+                            .str = decl.name,
+                        };
+                        const value = try zigToBog(vm, @field(val, decl.name));
+                        try map.putNoClobber(key, value);
+                    }
+
+                    const ret = try vm.gc.alloc();
+                    ret.* = .{
+                        .map = map,
+                    };
+                    return ret;
+                },
+                .Union, .Enum => @compileError("TODO implement zigToBog for type " ++ @typeName(val)),
+                else => @compileError("unsupported type: " ++ @typeName(val)),
+            },
             else => switch (@typeInfo(@TypeOf(val))) {
+                .Fn => {
+                    const native = try vm.gc.alloc();
+                    native.* = .{
+                        .native = wrapZigFunc(val),
+                    };
+                    return native;
+                },
                 .ComptimeInt, .Int => {
                     const int = try vm.gc.alloc();
                     int.* = .{
@@ -611,7 +652,7 @@ pub const Value = union(Type) {
                     };
                     return err;
                 },
-                else => @compileError("TODO unsupported type"),
+                else => @compileError("TODO unsupported type " ++ @typeName(@TypeOf(val))),
             },
         }
     }
@@ -665,6 +706,49 @@ pub const Value = union(Type) {
         };
     }
 };
+
+fn wrapZigFunc(func: var) Value.Native {
+    const Fn = @typeInfo(@TypeOf(func)).Fn;
+    if (Fn.is_generic or Fn.is_var_args or Fn.return_type == null)
+        @compileError("unsupported function");
+
+    comptime var bog_arg_i: u8 = 0;
+    const S = struct {
+        // cannot directly use `func` so declare a pointer to it
+        var _func: @TypeOf(func) = undefined;
+
+        fn native(vm: *Vm, bog_args: []*Value) Vm.Error!*Value {
+            if (Fn.args.len == 0)
+                return Value.zigToBog(vm, _func());
+
+            const arg_1 = try bog_args[bog_arg_i].bogToZig(Fn.args[0].arg_type.?, vm);
+            if (@TypeOf(arg_1) != *Vm) bog_arg_i += 1;
+            if (Fn.args.len == 1)
+                return Value.zigToBog(vm, _func(arg_1));
+
+            const arg_2 = try bog_args[bog_arg_i].bogToZig(Fn.args[1].arg_type.?, vm);
+            if (@TypeOf(arg_2) != *Vm) bog_arg_i += 1;
+            if (Fn.args.len == 2)
+                return Value.zigToBog(vm, _func(arg_1, arg_2));
+
+            // @compileError("TODO too many args");
+            // var args = .{};
+            // inline for (Fn.args) |arg, i| {
+            //     const val = bog_args[i];
+            //     const T = arg.arg_type.?;
+            //     // args = args ++
+            // }
+            // return Value.zigToBog(vm, @call(.{}, func, args));
+        }
+    };
+    S._func = func;
+
+    return .{
+        // TODO this is reset to 0 for some reason
+        .arg_count = bog_arg_i,
+        .func = S.native,
+    };
+}
 
 var buffer: [1024]u8 = undefined;
 

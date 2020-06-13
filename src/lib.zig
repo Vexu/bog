@@ -36,7 +36,7 @@ export fn bog_Vm_deinit(vm: *bog.Vm) void {
 }
 
 export fn bog_Vm_addStd(vm: *bog.Vm) Error {
-    bog.std.registerAll(&vm.native_registry) catch |e| switch (e) {
+    vm.addImportable("std.io", bog.std.io) catch |e| switch (e) {
         error.OutOfMemory => return .OutOfMemory,
     };
     return .None;

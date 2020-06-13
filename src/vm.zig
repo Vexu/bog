@@ -26,8 +26,7 @@ pub const Vm = struct {
     // TODO come up with better debug info
     line_loc: u32 = 0,
 
-    /// all currently registered native functions
-    native_registry: bog.native.Registry,
+    imports: Imports,
 
     /// all currently loaded packages and files
     imported_modules: std.StringHashMap(*Module),
@@ -37,6 +36,7 @@ pub const Vm = struct {
     // TODO gc can't see this and it will be invalidated on collect
     last_get: ?*Value = null,
 
+    const Imports = std.StringHashMap(fn(*Vm) Vm.Error!*bog.Value);
     const CallStack = std.SegmentedList(FunctionFrame, 16);
     const max_depth = 512;
 
@@ -77,7 +77,7 @@ pub const Vm = struct {
             .call_stack = CallStack.init(allocator),
             .errors = Errors.init(allocator),
             .options = options,
-            .native_registry = bog.native.Registry.init(allocator),
+            .imports = Imports.init(allocator),
             .imported_modules = std.StringHashMap(*Module).init(allocator),
         };
     }
@@ -86,12 +86,20 @@ pub const Vm = struct {
         vm.call_stack.deinit();
         vm.errors.deinit();
         vm.gc.deinit();
-        vm.native_registry.deinit();
+        vm.imports.deinit();
         var it = vm.imported_modules.iterator();
         while (it.next()) |mod| {
             mod.value.deinit(vm.gc.gpa);
         }
         vm.imported_modules.deinit();
+    }
+
+    pub fn addImportable(vm: *Vm, name: []const u8, importable: var) Allocator.Error!void {
+        try vm.imports.putNoClobber(name, struct {
+            fn func(_vm: *Vm) Vm.Error!*bog.Value {
+                return bog.Value.zigToBog(_vm, importable);
+            }
+        }.func);
     }
 
     /// Compiles and executes `source`.
@@ -829,6 +837,9 @@ pub const Vm = struct {
             _ = try vm.imported_modules.put(id, mod);
             break :blk mod;
         } else {
+            if (vm.imports.getValue(id)) |some| {
+                return some(vm);
+            }
             return vm.reportErr("no such package");
         };
 

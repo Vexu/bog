@@ -67,7 +67,7 @@ fn run(gpa: *std.mem.Allocator, args: [][]const u8) !void {
 
     var vm = bog.Vm.init(gpa, .{ .import_files = true });
     defer vm.deinit();
-    try bog.std.registerAll(&vm.native_registry);
+    try vm.addImportable("std.io", bog.std.io);
 
     const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,

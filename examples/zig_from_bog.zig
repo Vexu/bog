@@ -1,9 +1,11 @@
 const std = @import("std");
 const bog = @import("bog");
 
-fn pow(val: i64) i64 {
-    return val * val;
-}
+const my_lib = struct {
+    pub fn pow(val: i64) i64 {
+        return val * val;
+    }
+};
 
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
@@ -13,7 +15,7 @@ pub fn main() !void {
 
     var vm = bog.Vm.init(allocator, .{});
     defer vm.deinit();
-    try vm.native_registry.register("my_lib.pow", pow);
+    try vm.addImportable("my_lib", my_lib);
 
     const res = vm.run(source) catch |e| switch (e) {
         else => |err| return err,

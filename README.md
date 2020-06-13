@@ -1,18 +1,15 @@
 Small, strongly typed, embeddable language. 
 ## [Examples](examples)
 
-### Hello world (only the latter works currently)
+### Hello world
 ```rust
 const {print} = import("io")
 print("hello world")
-# or native("std.print")("hello world\n")
 ```
 
 ### Calculator
 ```rust
-# TODO these should be hidden behind an import
-const input = native("std.input")
-const print = native ("std.print")
+const {input, print} = import("std.io")
 
 const val1 = input("first argument: ") as num
 const op = input("operation: ")
@@ -114,7 +111,7 @@ fn pow(val: i64) i64 {
 
 var vm = Vm.init(allocator, .{});
 defer vm.deinit();
-try vm.native_registry.register("my_lib.pow", pow);
+try vm.addImportable("pow", pow)
 
 const res = vm.run(source) catch |e| switch (e) {
     else => |err| return err,
@@ -129,7 +126,7 @@ std.debug.assert(bog_integer == 8);
 ```
 
 ```rust
-const pow = native("my_lib.pow")
+const pow = import("pow")
 
 return 2 * pow(2)
 ```
