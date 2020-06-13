@@ -15,7 +15,7 @@ pub fn main() !void {
 
     var vm = bog.Vm.init(allocator, .{});
     defer vm.deinit();
-    try vm.addImportable("my_lib", my_lib);
+    try vm.addPackage("my_lib", my_lib);
 
     const res = vm.run(source) catch |e| switch (e) {
         else => |err| return err,

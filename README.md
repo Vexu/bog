@@ -3,7 +3,7 @@ Small, strongly typed, embeddable language.
 
 ### Hello world
 ```rust
-const {print} = import("io")
+const {print} = import("std.io")
 print("hello world")
 ```
 
@@ -71,7 +71,7 @@ const bog = @import("bog");
 
 var vm = bog.Vm.init(allocator, .{ .import_files = true });
 defer vm.deinit();
-try bog.std.registerAll(&vm.native_registry);
+try vm.addPackage("std.io", bog.std.io);
 
 const res = vm.run(source) catch |e| switch (e) {
     else => |err| return err,
@@ -118,7 +118,7 @@ fn pow(val: i64) i64 {
 
 var vm = Vm.init(allocator, .{});
 defer vm.deinit();
-try vm.addImportable("pow", pow)
+try vm.addPackage("pow", pow)
 
 const res = vm.run(source) catch |e| switch (e) {
     else => |err| return err,
