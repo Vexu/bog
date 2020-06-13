@@ -1,3 +1,22 @@
+test "collections copy hold values" {
+    expectOutput(
+        \\let x = [0]
+        \\let y = [x]
+        \\x[0] = 1
+        \\return y
+    ,
+        \\[[0]]
+    );
+    expectOutput(
+        \\const foo = [1]
+        \\const bar = fn(list) list[0] = 2
+        \\bar(foo)
+        \\return foo
+    ,
+        \\[1]
+    );
+}
+
 test "tagged values" {
     expectOutput(
         \\return @something{foo: 69}

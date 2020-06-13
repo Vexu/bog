@@ -126,20 +126,14 @@ pub const Value = union(Type) {
     /// Does not free values recursively.
     pub fn deinit(value: *Value) void {
         switch (value.*) {
-            .int, .num, .none, .bool, .native, .tagged => {},
+            .int, .num, .none, .bool, .native, .tagged, .err, .range, .iterator => {},
             .tuple => |*t| t.allocator.free(t.values),
             .map => |*m| m.deinit(),
             .list => |*l| l.deinit(),
-            .err => |e| e.deinit(),
-            .range => |*r| {
-                r.begin.deinit();
-                r.end.deinit();
-            },
             .str => {
                 // TODO string memory management
             },
             .func => |*f| f.allocator.free(f.captures),
-            .iterator => |*i| i.value.deinit(),
             _ => unreachable,
         }
     }
@@ -433,12 +427,11 @@ pub const Value = union(Type) {
                 if (i < 0 or i >= tuple.values.len)
                     return vm.reportErr("index out of bounds");
 
-                tuple.values[@intCast(u32, i)].* = new_val.*;
+                tuple.values[@intCast(u32, i)] = try vm.gc.dupe(new_val);
             } else {
                 return vm.reportErr("TODO set with ranges");
             },
             .map => |*map| {
-                // hashmaps store the key and the value so both have to be duped.
                 _ = try map.put(try vm.gc.dupe(index), try vm.gc.dupe(new_val));
             },
             .list => |list| if (index.* == .int) {
@@ -448,7 +441,7 @@ pub const Value = union(Type) {
                 if (i < 0 or i >= list.items.len)
                     return vm.reportErr("index out of bounds");
 
-                list.items[@intCast(u32, i)].* = new_val.*;
+                list.items[@intCast(u32, i)] = try vm.gc.dupe(new_val);
             } else {
                 return vm.reportErr("TODO set with ranges");
             },

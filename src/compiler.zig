@@ -19,7 +19,11 @@ pub fn compile(gpa: *Allocator, source: []const u8, errors: *Errors) (Compiler.E
     var tree = try bog.parse(gpa, source, errors);
     defer tree.deinit();
 
-    const arena = &tree.arena.promote(gpa).allocator;
+    // TODO reduce usage of arenas
+    var arena_state = std.heap.ArenaAllocator.init(gpa);
+    defer arena_state.deinit();
+    const arena = &arena_state.allocator;
+
     var root_scope: ModuleScope = .{
         .base = .{
             .syms = Compiler.Symbol.List.init(arena),

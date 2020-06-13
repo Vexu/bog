@@ -258,10 +258,10 @@ pub const Vm = struct {
                     res.* = arg;
                 },
                 .copy_double => {
-                    const res = try vm.getNewVal(module, inst.double.res);
+                    const res = try vm.getRef(module, inst.double.res);
                     const arg = try vm.getVal(module, inst.double.arg);
 
-                    res.* = arg.*;
+                    res.* = try vm.gc.dupe(arg);
                 },
                 .bool_not_double => {
                     const res = try vm.getRef(module, inst.double.res);
@@ -552,12 +552,6 @@ pub const Vm = struct {
                             .allocator = vm.gc.gpa,
                         },
                     };
-
-                    // initialize to nones
-                    for (res.tuple.values) |*item| {
-                        item.* = try vm.gc.alloc();
-                        item.*.* = .{ .none = {} };
-                    }
                 },
                 .build_list_off => {
                     const res = try vm.getNewVal(module, inst.off.res);
@@ -570,12 +564,6 @@ pub const Vm = struct {
                         .list = Value.List.init(vm.gc.gpa),
                     };
                     try res.list.resize(size);
-
-                    // initialize to nones
-                    for (res.list.items) |*item| {
-                        item.* = try vm.gc.alloc();
-                        item.*.* = .{ .none = {} };
-                    }
                 },
                 .build_map_off => {
                     const res = try vm.getNewVal(module, inst.off.res);

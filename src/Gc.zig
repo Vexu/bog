@@ -138,8 +138,37 @@ pub fn alloc(gc: *Gc) !*Value {
 
 /// Allocates a shallow copy of `val`.
 pub fn dupe(gc: *Gc, val: *Value) !*Value {
+    // no need to copy always memoized values
+    if (val.* == .bool or val.* == .none)
+        return val;
+
     const new = try gc.alloc();
-    new.* = val.*;
+    switch (val.*) {
+        .list => |l| {
+            new.* = .{
+                .list = Value.List.init(gc.gpa),
+            };
+            try new.list.appendSlice(l.items);
+        },
+        .tuple => {
+            new.* = .{
+                .tuple = .{
+                    .values = try gc.gpa.dupe(*Value, val.tuple.values),
+                    .allocator = gc.gpa,
+                },
+            };
+        },
+        .map => {
+            new.* = .{
+                .map = try val.map.clone(),
+            };
+        },
+        .func => {
+            new.* = val.*;
+            new.func.captures = try gc.gpa.dupe(*Value, val.func.captures);
+        },
+        else => new.* = val.*,
+    }
     return new;
 }
 
