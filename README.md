@@ -29,6 +29,13 @@ else
     print("unknown op")
 ```
 
+### Use command line arguments
+```rust
+# run with `path/to/bog path/here.bog arg1 arg2 "foo"`
+const {print} = import("io")
+print(import("args"))
+```
+
 ### Loops
 ```rust
 let sum = 0

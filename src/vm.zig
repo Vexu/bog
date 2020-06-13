@@ -36,7 +36,7 @@ pub const Vm = struct {
     // TODO gc can't see this and it will be invalidated on collect
     last_get: ?*Value = null,
 
-    const Imports = std.StringHashMap(fn(*Vm) Vm.Error!*bog.Value);
+    const Imports = std.StringHashMap(fn (*Vm) Vm.Error!*bog.Value);
     const CallStack = std.SegmentedList(FunctionFrame, 16);
     const max_depth = 512;
 

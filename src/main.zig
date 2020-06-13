@@ -68,6 +68,30 @@ fn run(gpa: *std.mem.Allocator, args: [][]const u8) !void {
     var vm = bog.Vm.init(gpa, .{ .import_files = true });
     defer vm.deinit();
     try vm.addImportable("std.io", bog.std.io);
+    const S = struct {
+        var _args: [][]const u8 = undefined;
+
+        fn argsToBog(_vm: *bog.Vm) bog.Vm.Error!*bog.Value {
+            var list = bog.Value.List.init(_vm.gc.gpa);
+            errdefer list.deinit();
+            try list.ensureCapacity(_args.len);
+
+            for (_args) |arg| {
+                const str = try _vm.gc.alloc();
+                str.* = .{
+                    .str = arg,
+                };
+                list.appendAssumeCapacity(str);
+            }
+            const ret = try _vm.gc.alloc();
+            ret.* = .{
+                .list = list,
+            };
+            return ret;
+        }
+    };
+    S._args = args[0..];
+    try vm.imports.putNoClobber("args", S.argsToBog);
 
     const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
