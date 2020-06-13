@@ -104,10 +104,11 @@ pub const Vm = struct {
 
     pub fn addStd(vm: *Vm) Allocator.Error!void {
         try vm.addPackage("std.io", bog.std.io);
+        try vm.addPackage("std.math", bog.std.math);
     }
 
     pub fn addStdNoIo(vm: *Vm) Allocator.Error!void {
-        // try vm.addPackage("std.math", bog.std.math);
+        try vm.addPackage("std.math", bog.std.math);
     }
 
     /// Compiles and executes `source`.

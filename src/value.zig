@@ -575,6 +575,11 @@ pub const Value = union(Type) {
             void => return &Value.None,
             bool => return if (val) &Value.True else &Value.False,
             *Value => return val,
+            Value => {
+                const ret = try vm.gc.alloc();
+                ret.* = val;
+                return ret;
+            },
             []u8 => {
                 // assume val was allocated with vm.gc
                 const str = try vm.gc.alloc();
@@ -677,6 +682,7 @@ pub const Value = union(Type) {
             },
             *Vm => vm,
             *Value, *const Value => val,
+            Value => return val.*,
             else => switch (@typeInfo(T)) {
                 .Int => if (val.* == .int) blk: {
                     if (val.int < std.math.minInt(T) or val.int > std.math.maxInt(T))
