@@ -5,104 +5,98 @@ const bog = @import("bog.zig");
 const Node = bog.Node;
 const Type = bog.Type;
 
-// TODO give these numbers once they are more stable
+/// Id's of all the bytecode instructions
 pub const Op = enum(u8) {
-    move_double,
-    copy_double,
+    move_double = 0x10,
+    copy_double = 0x11,
 
-    discard_single,
+    discard_single = 0x12,
 
     /// res = CAPTURE(arg)
-    load_capture_double,
+    load_capture_double = 0x13,
 
     /// CAPTURE(res, lhs) = rhs
-    store_capture_triple,
+    store_capture_triple = 0x14,
 
-    load_this_single,
+    load_this_single = 0x15,
 
-    const_primitive,
+    const_primitive = 0x20,
 
     /// A = INT(arg1)
-    const_int,
+    const_int = 0x21,
 
     /// A = NUM(arg1, arg2)
-    const_num,
-    const_string_off,
-    import_off,
+    const_num = 0x22,
+    const_string_off = 0x23,
+    import_off = 0x24,
 
-    div_floor_triple,
-    div_triple,
-    mul_triple,
-    pow_triple,
-    mod_triple,
-    add_triple,
-    sub_triple,
+    div_floor_triple = 0x30,
+    div_triple = 0x31,
+    mul_triple = 0x32,
+    pow_triple = 0x33,
+    mod_triple = 0x34,
+    add_triple = 0x35,
+    sub_triple = 0x36,
 
-    l_shift_triple,
-    r_shift_triple,
-    bit_and_triple,
-    bit_or_triple,
-    bit_xor_triple,
-    bit_not_double,
+    l_shift_triple = 0x37,
+    r_shift_triple = 0x38,
+    bit_and_triple = 0x39,
+    bit_or_triple = 0x3A,
+    bit_xor_triple = 0x3B,
+    bit_not_double = 0x3C,
 
-    equal_triple,
-    not_equal_triple,
-    less_than_triple,
-    less_than_equal_triple,
-    greater_than_triple,
-    greater_than_equal_triple,
-    in_triple,
+    equal_triple = 0x40,
+    not_equal_triple = 0x41,
+    less_than_triple = 0x42,
+    less_than_equal_triple = 0x43,
+    greater_than_triple = 0x44,
+    greater_than_equal_triple = 0x45,
+    in_triple = 0x46,
 
-    bool_and_triple,
-    bool_or_triple,
-    bool_not_double,
+    is_type_id = 0x47,
+    as_type_id = 0x48,
 
-    negate_double,
-    iter_init_double,
-    /// This is fused with a jump_none as an optimization
-    iter_next_double,
-    unwrap_error_double,
-    unwrap_tagged,
+    bool_and_triple = 0x4A,
+    bool_or_triple = 0x4B,
+    bool_not_double = 0x4C,
+
+    negate_double = 0x4D,
     /// IF (B==error) RET B ELSE A = B
-    try_double,
+    try_double = 0x4E,
 
+    unwrap_error_double = 0x50,
+    unwrap_tagged = 0x51,
     /// res = lhs[rhs]
-    get_triple,
-
+    get_triple = 0x52,
     /// res[lhs] = rhs
-    set_triple,
-    build_error_double,
-    build_tuple_off,
-    build_list_off,
-    build_map_off,
-    build_func,
-    build_tagged,
+    set_triple = 0x53,
+
+    build_error_double = 0xB0,
+    build_tuple_off = 0xB1,
+    build_list_off = 0xB2,
+    build_map_off = 0xB3,
+    build_func = 0xB4,
+    build_tagged = 0xB5,
 
     /// ip = arg1
-    jump,
-
+    jump = 0xA0,
     /// if (A) ip = arg1
-    jump_true,
-
+    jump_true = 0xA1,
     /// if (not A) ip = arg1
-    jump_false,
-
+    jump_false = 0xA2,
     /// if (not A is error) ip = arg1
-    jump_not_error,
-
+    jump_not_error = 0xA3,
     /// if (A is none) ip = arg1
-    jump_none,
+    jump_none = 0xA4,
+    iter_init_double = 0xA5,
+    /// This is fused with a jump_none as an optimization
+    iter_next_double = 0xA6,
 
-    is_type_id,
-    as_type_id,
-
-    call,
-
+    call = 0x90,
     /// RETURN(arg)
-    return_single,
-
+    return_single = 0x91,
     /// RETURN(())
-    return_none,
+    return_none = 0x92,
 
     /// TODO better debug info
     line_info,
@@ -232,8 +226,8 @@ pub const Module = struct {
     pub const magic = "\x7fbog";
 
     /// Current bytecode version.
-    pub const bytecode_version = 4;
-    pub const last_compatible = 4;
+    pub const bytecode_version = 5;
+    pub const last_compatible = 5;
 
     /// The header of a Bog bytecode file.
     /// All integer values are little-endian.
