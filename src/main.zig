@@ -192,9 +192,7 @@ fn getFileName(usage_arg: []const u8, args: [][]const u8) []const u8 {
 }
 
 const usage_debug =
-    \\usage: bog fmt [file]...
-    \\
-    \\   Formats the input files.
+    \\usage: bog debug:[command] [file]
     \\
 ;
 
@@ -257,8 +255,16 @@ fn debugTokens(gpa: *std.mem.Allocator, args: [][]const u8) !void {
     }
 }
 
+const usage_debug_write =
+    \\usage: bog debug:write [file] [out]
+    \\
+;
+
 fn debugWrite(gpa: *std.mem.Allocator, args: [][]const u8) !void {
-    const file_name = getFileName(usage_debug, args);
+    if (args.len != 2) {
+        printAndExit("{}", .{usage_debug_write});
+    }
+    const file_name = args[0];
 
     const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,

@@ -1319,8 +1319,7 @@ pub const Compiler = struct {
                 .err => return self.reportErr("cannot cast to error", node.type_tok),
                 .range => return self.reportErr("cannot cast to range", node.type_tok),
                 .tuple, .map, .list, .tagged => return self.reportErr("invalid cast", node.type_tok),
-                .native, .iterator => unreachable,
-                _ => unreachable,
+                else => unreachable,
             },
             .is => Value{
                 .Bool = switch (type_id) {

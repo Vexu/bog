@@ -342,7 +342,7 @@ pub const Value = union(Type) {
     }
 
     /// Returns value in `container` at `index`.
-    pub fn get(container: *Value, vm: *Vm, index: *const Value, res: *?*Value) !void {
+    pub fn get(container: *const Value, vm: *Vm, index: *const Value, res: *?*Value) Vm.Error!void {
         switch (container.*) {
             .tuple => |tuple| switch (index.*) {
                 .int => {
@@ -418,7 +418,7 @@ pub const Value = union(Type) {
     }
 
     /// Sets index of container to value. Does a shallow copy if value stored.
-    pub fn set(container: *Value, vm: *Vm, index: *Value, new_val: *Value) !void {
+    pub fn set(container: *Value, vm: *Vm, index: *Value, new_val: *Value) Vm.Error!void {
         switch (container.*) {
             .tuple => |tuple| if (index.* == .int) {
                 var i = index.int;
@@ -454,7 +454,7 @@ pub const Value = union(Type) {
     }
 
     /// `type_id` must be valid and cannot be .err, .range, .func or .native
-    pub fn as(val: *Value, vm: *Vm, type_id: Type) !*Value {
+    pub fn as(val: *Value, vm: *Vm, type_id: Type) Vm.Error!*Value {
         if (type_id == .none) {
             return &Value.None;
         }
@@ -481,7 +481,6 @@ pub const Value = union(Type) {
 
         const new_val = try vm.gc.alloc();
         new_val.* = switch (type_id) {
-            .bool, .none, .err, .range, .func, .native, .iterator, .tagged => unreachable,
             .int => .{
                 .int = switch (val.*) {
                     .int => unreachable,
@@ -507,19 +506,19 @@ pub const Value = union(Type) {
             .map,
             .list,
             => return vm.reportErr("TODO more casts"),
-            _ => unreachable,
+            else => unreachable,
         };
         return new_val;
     }
 
-    pub fn is(val: *Value, type_id: Type) bool {
+    pub fn is(val: *const Value, type_id: Type) bool {
         if (val.* == type_id) return true;
         if (type_id == .func and val.* == .native) return true;
         return false;
     }
 
     /// Returns whether `container` has `val` in it.
-    pub fn in(val: *Value, container: *Value) bool {
+    pub fn in(val: *const Value, container: *const Value) bool {
         switch (container.*) {
             .str => |str| {
                 if (val.* != .str) return false;
@@ -544,7 +543,7 @@ pub const Value = union(Type) {
         }
     }
 
-    pub fn iterator(val: *Value, vm: *Vm) !*Value {
+    pub fn iterator(val: *Value, vm: *Vm) Vm.Error!*Value {
         switch (val.*) {
             .map => return vm.reportErr("TODO: map iterator"),
             .range => return vm.reportErr("TODO: range iterator"),
@@ -555,7 +554,7 @@ pub const Value = union(Type) {
         const iter = try vm.gc.alloc();
         iter.* = .{
             .iterator = .{
-                .value = val,
+                .value = try vm.gc.dupe(val),
                 .index = 0,
             },
         };

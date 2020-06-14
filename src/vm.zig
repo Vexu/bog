@@ -642,8 +642,7 @@ pub const Vm = struct {
                     // Value.as will hit unreachable on invalid type_id
                     switch (inst.type_id.type_id) {
                         .none, .int, .num, .bool, .str, .tuple, .map, .list => {},
-                        .err, .range, .func, .native, .iterator, .tagged => return error.MalformedByteCode,
-                        _ => return error.MalformedByteCode,
+                        else => return error.MalformedByteCode,
                     }
 
                     res.* = try arg.as(vm, inst.type_id.type_id);
@@ -654,8 +653,7 @@ pub const Vm = struct {
 
                     switch (inst.type_id.type_id) {
                         .none, .int, .num, .bool, .str, .tuple, .map, .list, .err, .range, .func, .tagged => {},
-                        .iterator, .native => return error.MalformedByteCode,
-                        _ => return error.MalformedByteCode,
+                        else => return error.MalformedByteCode,
                     }
 
                     res.* = if (arg.is(inst.type_id.type_id)) &Value.True else &Value.False;
