@@ -126,7 +126,7 @@ pub const Parser = struct {
         const tok = parser.eatToken(.Keyword_fn, true) orelse return null;
 
         _ = try parser.expectToken(.LParen, true);
-        const params = try parser.listParser(skip_nl, level, primaryExpr, .RParen);
+        const params = try parser.listParser(skip_nl, level, primaryExpr, .RParen, null);
         const node = try parser.arena.create(Node.Fn);
         node.* = .{
             .fn_tok = tok,
@@ -182,7 +182,6 @@ pub const Parser = struct {
         }
         var lhs = try parser.comparisonExpr(skip_nl, level);
 
-        // TODO improve
         if (parser.eatTokenNoNl(.Keyword_or)) |t| {
             var tok = t;
             while (true) {
@@ -292,7 +291,6 @@ pub const Parser = struct {
     fn bitExpr(parser: *Parser, skip_nl: bool, level: u16) Error!*Node {
         var lhs = try parser.shiftExpr(skip_nl, level);
 
-        // TODO improve
         if (parser.eatTokenNoNl(.Ampersand)) |t| {
             // &
             var tok = t;
@@ -537,7 +535,7 @@ pub const Parser = struct {
                 };
                 lhs = &node.base;
             } else if (parser.eatToken(.LParen, true)) |tok| {
-                const args = try parser.listParser(skip_nl, level, expr, .RParen);
+                const args = try parser.listParser(skip_nl, level, expr, .RParen, null);
                 const node = try parser.arena.create(Node.Suffix);
                 node.* = .{
                     .lhs = lhs,
@@ -736,7 +734,7 @@ pub const Parser = struct {
     ///     | "[" (expr ",")* expr? "]"
     fn initializer(parser: *Parser, skip_nl: bool, level: u16) Error!?*Node {
         if (parser.eatToken(.LBrace, true)) |tok| {
-            const elems = try parser.listParser(skip_nl, level, mapItem, .RBrace);
+            const elems = try parser.listParser(skip_nl, level, mapItem, .RBrace, null);
             const node = try parser.arena.create(Node.ListTupleMap);
             node.* = .{
                 .base = .{ .id = .Map },
@@ -746,7 +744,7 @@ pub const Parser = struct {
             };
             return &node.base;
         } else if (parser.eatToken(.LBracket, true)) |tok| {
-            const elems = try parser.listParser(skip_nl, level, expr, .RBracket);
+            const elems = try parser.listParser(skip_nl, level, expr, .RBracket, null);
             const node = try parser.arena.create(Node.ListTupleMap);
             node.* = .{
                 .base = .{ .id = .List },
@@ -777,30 +775,14 @@ pub const Parser = struct {
                 };
                 return &node.base;
             }
-            var elems = NodeList.init(parser.gpa);
-            defer elems.deinit();
-            try elems.append(first);
-            var r_paren: TokenIndex = undefined;
-
             _ = try parser.expectToken(.Comma, true);
-            var end = false; // TODO try to use listParser here
-            while (true) {
-                if (parser.eatToken(.RParen, skip_nl)) |r_tok| {
-                    r_paren = r_tok;
-                    break;
-                } else if (end) {
-                    r_paren = try parser.expectToken(.RParen, skip_nl);
-                    break;
-                }
-                try elems.append(try parser.expr(true, level));
-                if (parser.eatToken(.Comma, true) == null) end = true;
-            }
+            var elems = try parser.listParser(skip_nl, level, expr, .RParen, first);
             const node = try parser.arena.create(Node.ListTupleMap);
             node.* = .{
                 .base = .{ .id = .Tuple },
                 .l_tok = tok,
-                .values = try parser.arena.dupe(*Node, elems.items),
-                .r_tok = r_paren,
+                .values = elems.nodes,
+                .r_tok = elems.term,
             };
             return &node.base;
         } else return null;
@@ -831,9 +813,10 @@ pub const Parser = struct {
     };
 
     /// (PARSE_FN ",")* PARSE_FN? TERM
-    fn listParser(parser: *Parser, skip_nl: bool, level: u16, parseFn: fn (*Parser, bool, u16) Error!*Node, term_id: TokenId) Error!ListParserRes {
+    fn listParser(parser: *Parser, skip_nl: bool, level: u16, parseFn: fn (*Parser, bool, u16) Error!*Node, term_id: TokenId, first: ?*Node) Error!ListParserRes {
         var nodes = NodeList.init(parser.gpa);
         defer nodes.deinit();
+        if (first) |some| try nodes.append(some);
 
         var term: TokenIndex = parser.tok_index;
         var end = false;
@@ -1021,7 +1004,7 @@ pub const Parser = struct {
             };
             return &node.base;
         } else {
-            const items = try parser.listParser(true, level, expr, .Colon);
+            const items = try parser.listParser(true, level, expr, .Colon, null);
             const node = try parser.arena.create(Node.MatchCase);
             node.* = .{
                 .lhs = items.nodes,
