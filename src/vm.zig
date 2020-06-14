@@ -550,12 +550,7 @@ pub const Vm = struct {
                     else
                         inst.off.off;
 
-                    res.* = .{
-                        .tuple = .{
-                            .values = try vm.gc.gpa.alloc(*Value, size),
-                            .allocator = vm.gc.gpa,
-                        },
-                    };
+                    res.* = .{ .tuple = try vm.gc.gpa.alloc(*Value, size) };
                 },
                 .build_list_off => {
                     const res = try vm.getNewVal(module, inst.off.res);
@@ -564,10 +559,8 @@ pub const Vm = struct {
                     else
                         inst.off.off;
 
-                    res.* = .{
-                        .list = Value.List.init(vm.gc.gpa),
-                    };
-                    try res.list.resize(size);
+                    res.* = .{ .list = .{} };
+                    try res.list.resize(vm.gc.gpa, size);
                 },
                 .build_map_off => {
                     const res = try vm.getNewVal(module, inst.off.res);
@@ -576,10 +569,8 @@ pub const Vm = struct {
                     else
                         inst.off.off;
 
-                    res.* = .{
-                        .map = Value.Map.init(vm.gc.gpa),
-                    };
-                    try res.map.ensureCapacity(size);
+                    res.* = .{ .map = .{} };
+                    try res.map.ensureCapacity(vm.gc.gpa, size);
                 },
                 .build_error_double => {
                     const res = try vm.getNewVal(module, inst.double.res);
@@ -599,7 +590,6 @@ pub const Vm = struct {
                             .arg_count = inst.func.arg_count,
                             .offset = try vm.getSingle(module),
                             .module = module,
-                            .allocator = vm.gc.gpa,
                             .captures = try vm.gc.gpa.alloc(*Value, inst.func.capture_count),
                         },
                     };

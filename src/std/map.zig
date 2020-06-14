@@ -8,8 +8,8 @@ pub fn keys(vm: *Vm, val: *const Value) !*Value {
     if (val.* != .map) return error.ExpectedMap;
 
     var ret = try vm.gc.alloc();
-    ret.* = .{ .list = Value.List.init(vm.gc.gpa) };
-    try ret.list.resize(val.map.size);
+    ret.* = .{ .list = .{} };
+    try ret.list.resize(vm.gc.gpa, val.map.size);
     const items = ret.list.items;
     var i: usize = 0;
     for (val.map.entries) |*e| {
@@ -27,8 +27,8 @@ pub fn values(vm: *Vm, val: *const Value) !*Value {
     if (val.* != .map) return error.ExpectedMap;
 
     var ret = try vm.gc.alloc();
-    ret.* = .{ .list = Value.List.init(vm.gc.gpa) };
-    try ret.list.resize(val.map.size);
+    ret.* = .{ .list = .{} };
+    try ret.list.resize(vm.gc.gpa, val.map.size);
     const items = ret.list.items;
     var i: usize = 0;
     for (val.map.entries) |*e| {
@@ -46,8 +46,8 @@ pub fn entries(vm: *Vm, val: *const Value) !*Value {
     if (val.* != .map) return error.ExpectedMap;
 
     var ret = try vm.gc.alloc();
-    ret.* = .{ .list = Value.List.init(vm.gc.gpa) };
-    try ret.list.resize(val.map.size);
+    ret.* = .{ .list = .{} };
+    try ret.list.resize(vm.gc.gpa, val.map.size);
     const items = ret.list.items;
     var i: usize = 0;
     for (val.map.entries) |*e| {
@@ -55,9 +55,10 @@ pub fn entries(vm: *Vm, val: *const Value) !*Value {
             var entry = try vm.gc.alloc();
             const val_str = Value{ .str = "value" };
             const key_str = Value{ .str = "key" };
-            entry.* = .{ .map = Value.Map.init(vm.gc.gpa) };
-            try entry.map.putNoClobber(try vm.gc.dupe(&key_str), try vm.gc.dupe(e.kv.key));
-            try entry.map.putNoClobber(try vm.gc.dupe(&val_str), try vm.gc.dupe(e.kv.value));
+            entry.* = .{ .map = .{} };
+            try entry.map.ensureCapacity(vm.gc.gpa, 2);
+            entry.map.putAssumeCapacityNoClobber(try vm.gc.dupe(&key_str), try vm.gc.dupe(e.kv.key));
+            entry.map.putAssumeCapacityNoClobber(try vm.gc.dupe(&val_str), try vm.gc.dupe(e.kv.value));
 
             items[i] = entry;
             i += 1;

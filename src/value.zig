@@ -29,10 +29,7 @@ pub const Type = enum(u8) {
 };
 
 pub const Value = union(Type) {
-    tuple: struct {
-        values: []*Value,
-        allocator: *Allocator,
-    },
+    tuple: []*Value,
     map: Map,
     list: List,
     err: *Value,
@@ -52,7 +49,6 @@ pub const Value = union(Type) {
         module: *Module,
 
         captures: []*Value,
-        allocator: *Allocator,
     },
     native: Native,
     tagged: struct {
@@ -63,19 +59,18 @@ pub const Value = union(Type) {
         value: *Value,
         index: usize,
 
-        // TODO protect against concurrent modification
         pub fn next(iter: *@This(), vm: *Vm, res: *?*Value) !void {
             switch (iter.value.*) {
                 .tuple => |tuple| {
-                    if (iter.index == tuple.values.len) {
+                    if (iter.index == tuple.len) {
                         res.* = &Value.None;
                         return;
                     }
 
-                    res.* = tuple.values[iter.index];
+                    res.* = tuple[iter.index];
                     iter.index += 1;
                 },
-                .list => |list| {
+                .list => |*list| {
                     if (iter.index == list.items.len) {
                         res.* = &Value.None;
                         return;
@@ -100,7 +95,7 @@ pub const Value = union(Type) {
                         .str = str[iter.index - cp_len .. iter.index],
                     };
                 },
-                .map => @panic("TODO: map iterator"),
+                .map => {},
                 .range => @panic("TODO: range iterator"),
                 else => unreachable,
             }
@@ -111,8 +106,8 @@ pub const Value = union(Type) {
     bool: bool,
     none,
 
-    pub const Map = std.HashMap(*const Value, *Value, hash, eql);
-    pub const List = std.ArrayList(*Value);
+    pub const Map = @import("value/Map.zig");
+    pub const List = std.ArrayListUnmanaged(*Value);
     pub const Native = struct {
         arg_count: u8,
         func: fn (*Vm, []*Value) Vm.Error!*Value,
@@ -124,16 +119,17 @@ pub const Value = union(Type) {
 
     /// Frees any extra memory allocated by value.
     /// Does not free values recursively.
-    pub fn deinit(value: *Value) void {
+    pub fn deinit(value: *const Value, allocator: *Allocator) void {
         switch (value.*) {
             .int, .num, .none, .bool, .native, .tagged, .err, .range, .iterator => {},
-            .tuple => |*t| t.allocator.free(t.values),
-            .map => |*m| m.deinit(),
-            .list => |*l| l.deinit(),
+            .tuple => |t| allocator.free(t),
+            .map => |*m| m.deinit(allocator),
+            // `deinit` takes a mutable pointer for some reason
+            .list => |*l| allocator.free(l.items.ptr[0..l.capacity]),
             .str => {
                 // TODO string memory management
             },
-            .func => |*f| f.allocator.free(f.captures),
+            .func => |*f| allocator.free(f.captures),
             _ => unreachable,
         }
     }
@@ -150,9 +146,9 @@ pub const Value = union(Type) {
             .num => |num| autoHash(&hasher, num),
             .bool => |b| autoHash(&hasher, b),
             .str => |str| hasher.update(str),
-            .tuple => |*tuple| {
-                autoHash(&hasher, tuple.values.len);
-                autoHash(&hasher, tuple.values.ptr);
+            .tuple => |tuple| {
+                autoHash(&hasher, tuple.len);
+                autoHash(&hasher, tuple.ptr);
             },
             .map => |*map| {
                 autoHash(&hasher, map.size);
@@ -209,15 +205,15 @@ pub const Value = union(Type) {
                 return std.mem.eql(u8, s, b.str);
             },
             .tuple => |t| {
-                const b_val = b.tuple.values;
-                if (t.values.len != b_val.len) return false;
-                for (t.values) |v, i| {
+                const b_val = b.tuple;
+                if (t.len != b_val.len) return false;
+                for (t) |v, i| {
                     if (!v.eql(b_val[i])) return false;
                 }
                 return true;
             },
-            .map => |m| @panic("TODO eql for maps"),
-            .list => |l| {
+            .map => |*m| @panic("TODO eql for maps"),
+            .list => |*l| {
                 if (l.items.len != b.list.items.len) return false;
                 for (l.items) |v, i| {
                     if (!v.eql(b.list.items[i])) return false;
@@ -225,14 +221,14 @@ pub const Value = union(Type) {
                 return true;
             },
             .err => |e| e.eql(b.err),
-            .range => |r| @panic("TODO eql for ranges"),
-            .func => |f| {
+            .range => |*r| @panic("TODO eql for ranges"),
+            .func => |*f| {
                 return f.offset == b.func.offset and
                     f.arg_count == b.func.arg_count and
                     f.module == b.func.module;
             },
-            .native => |n| n.func == b.native.func,
-            .tagged => |t| {
+            .native => |*n| n.func == b.native.func,
+            .tagged => |*t| {
                 if (!mem.eql(u8, t.name, b.tagged.name)) return false;
                 return t.value.eql(b.tagged.value);
             },
@@ -241,14 +237,14 @@ pub const Value = union(Type) {
     }
 
     /// Prints string representation of value to stream
-    pub fn dump(value: Value, stream: var, level: u32) @TypeOf(stream).Error!void {
-        switch (value) {
+    pub fn dump(value: *const Value, stream: var, level: u32) @TypeOf(stream).Error!void {
+        switch (value.*) {
             .iterator => unreachable,
             .int => |i| try stream.print("{}", .{i}),
             .num => |n| try stream.print("{d}", .{n}),
             .bool => |b| try stream.writeAll(if (b) "true" else "false"),
             .none => try stream.writeAll("()"),
-            .range => |r| {
+            .range => |*r| {
                 if (level == 0) {
                     try stream.writeAll("(range)");
                 } else {
@@ -262,14 +258,14 @@ pub const Value = union(Type) {
                     try stream.writeAll("(...)");
                 } else {
                     try stream.writeByte('(');
-                    for (t.values) |v, i| {
+                    for (t) |v, i| {
                         if (i != 0) try stream.writeAll(", ");
                         try v.dump(stream, level - 1);
                     }
                     try stream.writeByte(')');
                 }
             },
-            .map => |m| {
+            .map => |*m| {
                 if (level == 0) {
                     try stream.writeAll("{...}");
                 } else {
@@ -285,7 +281,7 @@ pub const Value = union(Type) {
                     try stream.writeByte('}');
                 }
             },
-            .list => |l| {
+            .list => |*l| {
                 if (level == 0) {
                     try stream.writeAll("[...]");
                 } else {
@@ -323,13 +319,13 @@ pub const Value = union(Type) {
                 }
                 try stream.writeByte('"');
             },
-            .func => |f| {
+            .func => |*f| {
                 try stream.print("fn({})@0x{X}[{}]", .{ f.arg_count, f.offset, f.captures.len });
             },
-            .native => |n| {
+            .native => |*n| {
                 try stream.print("native({})@0x{}", .{ n.arg_count, @ptrToInt(n.func) });
             },
-            .tagged => |t| {
+            .tagged => |*t| {
                 try stream.print("@{}", .{t.name});
                 if (level == 0) {
                     try stream.writeAll("(...)");
@@ -348,11 +344,11 @@ pub const Value = union(Type) {
                 .int => {
                     var i = index.int;
                     if (i < 0)
-                        i += @intCast(i64, tuple.values.len);
-                    if (i < 0 or i >= tuple.values.len)
+                        i += @intCast(i64, tuple.len);
+                    if (i < 0 or i >= tuple.len)
                         return vm.reportErr("index out of bounds");
 
-                    res.* = tuple.values[@intCast(u32, i)];
+                    res.* = tuple[@intCast(u32, i)];
                 },
                 .range => return vm.reportErr("TODO get with ranges"),
                 .str => |s| {
@@ -361,14 +357,14 @@ pub const Value = union(Type) {
                     }
 
                     if (mem.eql(u8, s, "len")) {
-                        res.*.?.* = .{ .int = @intCast(i64, tuple.values.len) };
+                        res.*.?.* = .{ .int = @intCast(i64, tuple.len) };
                     } else {
                         return vm.reportErr("no such property");
                     }
                 },
                 else => return vm.reportErr("invalid index type"),
             },
-            .list => |list| switch (index.*) {
+            .list => |*list| switch (index.*) {
                 .int => {
                     var i = index.int;
                     if (i < 0)
@@ -392,7 +388,7 @@ pub const Value = union(Type) {
                 },
                 else => return vm.reportErr("invalid index type"),
             },
-            .map => |map| {
+            .map => |*map| {
                 res.* = map.getValue(index) orelse
                     return vm.reportErr("TODO better handling undefined key");
             },
@@ -423,18 +419,18 @@ pub const Value = union(Type) {
             .tuple => |tuple| if (index.* == .int) {
                 var i = index.int;
                 if (i < 0)
-                    i += @intCast(i64, tuple.values.len);
-                if (i < 0 or i >= tuple.values.len)
+                    i += @intCast(i64, tuple.len);
+                if (i < 0 or i >= tuple.len)
                     return vm.reportErr("index out of bounds");
 
-                tuple.values[@intCast(u32, i)] = try vm.gc.dupe(new_val);
+                tuple[@intCast(u32, i)] = try vm.gc.dupe(new_val);
             } else {
                 return vm.reportErr("TODO set with ranges");
             },
             .map => |*map| {
-                _ = try map.put(try vm.gc.dupe(index), try vm.gc.dupe(new_val));
+                _ = try map.put(vm.gc.gpa, try vm.gc.dupe(index), try vm.gc.dupe(new_val));
             },
-            .list => |list| if (index.* == .int) {
+            .list => |*list| if (index.* == .int) {
                 var i = index.int;
                 if (i < 0)
                     i += @intCast(i64, list.items.len);
@@ -524,8 +520,8 @@ pub const Value = union(Type) {
                 if (val.* != .str) return false;
                 return mem.indexOf(u8, str, val.str) != null;
             },
-            .tuple => |*tuple| {
-                for (tuple.values) |v| {
+            .tuple => |tuple| {
+                for (tuple) |v| {
                     if (v.eql(val)) return true;
                 }
                 return false;
@@ -536,7 +532,7 @@ pub const Value = union(Type) {
                 }
                 return false;
             },
-            .map => @panic("TODO in map"),
+            .map => |*map| return map.contains(val),
             .range => @panic("TODO in range"),
             .iterator => unreachable,
             else => unreachable,
@@ -545,9 +541,8 @@ pub const Value = union(Type) {
 
     pub fn iterator(val: *const Value, vm: *Vm) Vm.Error!*Value {
         switch (val.*) {
-            .map => return vm.reportErr("TODO: map iterator"),
             .range => return vm.reportErr("TODO: range iterator"),
-            .str, .tuple, .list => {},
+            .str, .tuple, .list, .map => {},
             .iterator => unreachable,
             else => return vm.reportErr("invalid type for iteration"),
         }
@@ -589,15 +584,15 @@ pub const Value = union(Type) {
             },
             type => switch (@typeInfo(val)) {
                 .Struct => |info| {
-                    var map = Value.Map.init(vm.gc.gpa);
-                    errdefer map.deinit();
+                    var map = Value.Map{};
+                    errdefer map.deinit(vm.gc.gpa);
 
                     comptime var pub_decls = 0;
                     inline for (info.decls) |decl| {
                         if (decl.is_pub) pub_decls += 1;
                     }
 
-                    try map.ensureCapacity(pub_decls);
+                    try map.ensureCapacity(vm.gc.gpa, pub_decls);
 
                     inline for (info.decls) |decl| {
                         if (!decl.is_pub) continue;
@@ -606,7 +601,7 @@ pub const Value = union(Type) {
                             .str = decl.name,
                         };
                         const value = try zigToBog(vm, @field(val, decl.name));
-                        try map.putNoClobber(key, value);
+                        map.putAssumeCapacityNoClobber(key, value);
                     }
 
                     const ret = try vm.gc.alloc();

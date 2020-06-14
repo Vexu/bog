@@ -16,16 +16,8 @@ const Page = struct {
         // 2^20, 1 MiB
         assert(@sizeOf(Page) == max_size);
     }
-    const val_count = blk: {
-        const v = @sizeOf(Value);
-
-        var n = 18300;
-        @setEvalBranchQuota(4000);
-        while (n + n * v < max_size) : (n += 1) {}
-
-        break :blk n - 1;
-    };
-    const pad_size = std.math.clamp(max_size - (@sizeOf(Value) + 1) * val_count - @sizeOf(u32) * 2, 0, max_size);
+    const val_count = 25_574;
+    const pad_size = max_size - @sizeOf(u32) - (@sizeOf(Value) + @sizeOf(State)) * val_count;
 
     const State = enum(u8) {
         empty,
@@ -36,11 +28,11 @@ const Page = struct {
 
     /// States of all values.
     meta: [val_count]State,
-    /// Index to the first free slot.
-    free: u32,
-
     /// Padding to ensure size is 1 MiB.
     __padding: [pad_size]u8 = @compileError("do not initiate directly"),
+
+    /// Index to the first free slot.
+    free: u32,
 
     /// Actual values, all pointers will stay valid as long as they are
     /// referenced from a root.
@@ -55,7 +47,7 @@ const Page = struct {
     fn deinit(page: *Page, gc: *Gc) void {
         for (page.meta) |s, i| {
             if (s == .empty) continue;
-            page.values[i].deinit();
+            page.values[i].deinit(gc.gpa);
         }
         std.heap.page_allocator.destroy(page);
     }
@@ -147,28 +139,15 @@ pub fn dupe(gc: *Gc, val: *const Value) !*Value {
 
     const new = try gc.alloc();
     switch (val.*) {
-        .list => |l| {
-            new.* = .{
-                .list = Value.List.init(gc.gpa),
-            };
-            try new.list.appendSlice(l.items);
+        .list => |*l| {
+            new.* = .{ .list = .{} };
+            try new.list.appendSlice(gc.gpa, l.items);
         },
-        .tuple => {
-            new.* = .{
-                .tuple = .{
-                    .values = try gc.gpa.dupe(*Value, val.tuple.values),
-                    .allocator = gc.gpa,
-                },
-            };
+        .tuple => |t| {
+            new.* = .{ .tuple = try gc.gpa.dupe(*Value, t) };
         },
-        .map => {
-            new.* = .{
-                .map = try val.map.clone(),
-            };
-        },
-        .func => {
-            new.* = val.*;
-            new.func.captures = try gc.gpa.dupe(*Value, val.func.captures);
+        .map => |*m| {
+            new.* = .{ .map = try m.clone(gc.gpa) };
         },
         else => new.* = val.*,
     }

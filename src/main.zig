@@ -72,9 +72,11 @@ fn run(gpa: *std.mem.Allocator, args: [][]const u8) !void {
         var _args: [][]const u8 = undefined;
 
         fn argsToBog(_vm: *bog.Vm) bog.Vm.Error!*bog.Value {
-            var list = bog.Value.List.init(_vm.gc.gpa);
-            errdefer list.deinit();
-            try list.ensureCapacity(_args.len);
+            const ret = try _vm.gc.alloc();
+            ret.* = .{ .list = .{} };
+            var list = &ret.list;
+            errdefer list.deinit(_vm.gc.gpa);
+            try list.ensureCapacity(_vm.gc.gpa, _args.len);
 
             for (_args) |arg| {
                 const str = try _vm.gc.alloc();
@@ -83,10 +85,6 @@ fn run(gpa: *std.mem.Allocator, args: [][]const u8) !void {
                 };
                 list.appendAssumeCapacity(str);
             }
-            const ret = try _vm.gc.alloc();
-            ret.* = .{
-                .list = list,
-            };
             return ret;
         }
     };
