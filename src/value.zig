@@ -418,7 +418,7 @@ pub const Value = union(Type) {
     }
 
     /// Sets index of container to value. Does a shallow copy if value stored.
-    pub fn set(container: *Value, vm: *Vm, index: *Value, new_val: *Value) Vm.Error!void {
+    pub fn set(container: *Value, vm: *Vm, index: *const Value, new_val: *const Value) Vm.Error!void {
         switch (container.*) {
             .tuple => |tuple| if (index.* == .int) {
                 var i = index.int;
@@ -543,7 +543,7 @@ pub const Value = union(Type) {
         }
     }
 
-    pub fn iterator(val: *Value, vm: *Vm) Vm.Error!*Value {
+    pub fn iterator(val: *const Value, vm: *Vm) Vm.Error!*Value {
         switch (val.*) {
             .map => return vm.reportErr("TODO: map iterator"),
             .range => return vm.reportErr("TODO: range iterator"),

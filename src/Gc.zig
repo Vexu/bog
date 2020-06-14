@@ -137,10 +137,13 @@ pub fn alloc(gc: *Gc) !*Value {
 }
 
 /// Allocates a shallow copy of `val`.
-pub fn dupe(gc: *Gc, val: *Value) !*Value {
+pub fn dupe(gc: *Gc, val: *const Value) !*Value {
     // no need to copy always memoized values
-    if (val.* == .bool or val.* == .none)
-        return val;
+    switch (val.*) {
+        .none => return &Value.None,
+        .bool => |b| return if (b) &Value.True else &Value.False,
+        else => {},
+    }
 
     const new = try gc.alloc();
     switch (val.*) {

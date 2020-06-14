@@ -1,3 +1,21 @@
+test "std.map" {
+    expectOutput(
+        \\let val = {foo: 2, bar: 3, 0: 515, [1]: [2]}
+        \\const map = import("std.map")
+        \\const {assert} = import("std.debug")
+        \\const keys = map.keys(val)
+        \\assert(keys is list and keys.len == 4)
+        \\const values = map.values(val)
+        \\assert(values is list and values.len == 4)
+        \\const entries = map.entries(val)
+        \\assert(entries is list and entries.len == 4)
+        \\const entry = entries[0]
+        \\assert(entry is map and map.size(entry) == 2)
+    ,
+        \\()
+    );
+}
+
 test "collections copy hold values" {
     expectOutput(
         \\let x = [0]
@@ -553,13 +571,14 @@ const testing = std.testing;
 const bog = @import("bog");
 const Vm = bog.Vm;
 
-var buffer: [16 * 1024]u8 = undefined;
+var buffer: [20 * 1024]u8 = undefined;
 
 fn expectCallOutput(source: []const u8, args: var, expected: []const u8) void {
     var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const alloc = &buf_alloc.allocator;
 
     var vm = Vm.init(alloc, .{});
+    defer vm.deinit();
     const res = run(alloc, source, &vm) catch |e| switch (e) {
         else => @panic("test failure"),
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
@@ -585,6 +604,8 @@ fn expectOutput(source: []const u8, expected: []const u8) void {
     const alloc = &buf_alloc.allocator;
 
     var vm = Vm.init(alloc, .{});
+    defer vm.deinit();
+    vm.addStd() catch unreachable;
     const res = run(alloc, source, &vm) catch |e| switch (e) {
         else => @panic("test failure"),
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {

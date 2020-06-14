@@ -34,7 +34,7 @@ pub const Vm = struct {
     options: Options,
 
     // TODO gc can't see this and it will be invalidated on collect
-    last_get: ?*Value = null,
+    last_get: *Value = &Value.None,
 
     const Imports = std.StringHashMap(fn (*Vm) Vm.Error!*bog.Value);
     const CallStack = std.SegmentedList(FunctionFrame, 16);
@@ -106,10 +106,14 @@ pub const Vm = struct {
         try vm.addPackage("std.io", bog.std.io);
         try vm.addPackage("std.math", bog.std.math);
         try vm.addPackage("std.os", bog.std.os);
+        try vm.addPackage("std.map", bog.std.map);
+        try vm.addPackage("std.debug", bog.std.debug);
     }
 
     pub fn addStdNoIo(vm: *Vm) Allocator.Error!void {
         try vm.addPackage("std.math", bog.std.math);
+        try vm.addPackage("std.map", bog.std.map);
+        try vm.addPackage("std.debug", bog.std.debug);
     }
 
     /// Compiles and executes `source`.
