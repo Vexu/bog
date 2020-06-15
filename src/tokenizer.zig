@@ -394,16 +394,18 @@ pub const Tokenizer = struct {
         var start_index = self.it.i;
         var count: u8 = 0;
         // get all indentation characters
-        while (self.it.nextCodepoint()) |c| {
-            if (c == '\r')
-                continue;
-            if (c == '\n' or c == ';') {
+        while (self.it.nextCodepoint()) |c| switch (c) {
+            '\r' => continue,
+            '\n', ';' => {
                 // empty line; rest count
                 count = 0;
-                if (self.repl) {
-                    break;
-                }
-            } else if (self.indent_char != null and c == self.indent_char.?) {
+                if (self.repl) break;
+            },
+            '#' => {
+                self.it.i -= 1;
+                return null;
+            },
+            else => if (self.indent_char != null and c == self.indent_char.?) {
                 count += 1;
             } else if (isWhiteSpace(c)) {
                 self.indent_char = c;
@@ -411,7 +413,7 @@ pub const Tokenizer = struct {
             } else {
                 self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                 break;
-            }
+            },
         } else {
             if (self.repl) {
                 if (self.indent_level == 0 and self.tokens.items.len > 2) {
