@@ -94,7 +94,8 @@ pub const Vm = struct {
         vm.imported_modules.deinit();
     }
 
-    pub fn addPackage(vm: *Vm, name: []const u8, importable: var) Allocator.Error!void {
+    // TODO we might not want to require `importable` to be comptime
+    pub fn addPackage(vm: *Vm, name: []const u8, comptime importable: var) Allocator.Error!void {
         try vm.imports.putNoClobber(name, struct {
             fn func(_vm: *Vm) Vm.Error!*bog.Value {
                 return bog.Value.zigToBog(_vm, importable);

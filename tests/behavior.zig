@@ -1,3 +1,13 @@
+test "list.append" {
+    expectOutput(
+        \\let list = [1,2]
+        \\list.append(3)
+        \\return list
+    ,
+        \\[1, 2, 3]
+    );
+}
+
 test "std.map" {
     expectOutput(
         \\let val = {foo: 2, bar: 3, 0: 515, [1]: [2]}
@@ -103,7 +113,7 @@ test "this" {
         \\    y: 420,
         \\    foo: fn() (
         \\        [0][0] # last_get is now referencing this list
-        \\        return this.a * this.y # TODO this return should not be needed
+        \\        return this.a * this.y
         \\    ),
         \\
         \\}

@@ -4,15 +4,13 @@ const Value = bog.Value;
 const Vm = bog.Vm;
 
 /// Creates a list of the maps keys
-pub fn keys(vm: *Vm, val: *const Value) !*Value {
-    if (val.* != .map) return error.ExpectedMap;
-
+pub fn keys(vm: *Vm, map: *const Value.Map) !*Value {
     var ret = try vm.gc.alloc();
     ret.* = .{ .list = .{} };
-    try ret.list.resize(vm.gc.gpa, val.map.size);
+    try ret.list.resize(vm.gc.gpa, map.size);
     const items = ret.list.items;
     var i: usize = 0;
-    for (val.map.entries) |*e| {
+    for (map.entries) |*e| {
         if (e.used) {
             items[i] = try vm.gc.dupe(e.kv.key);
             i += 1;
@@ -23,15 +21,13 @@ pub fn keys(vm: *Vm, val: *const Value) !*Value {
 }
 
 /// Creates a list of the maps values
-pub fn values(vm: *Vm, val: *const Value) !*Value {
-    if (val.* != .map) return error.ExpectedMap;
-
+pub fn values(vm: *Vm, map: *const Value.Map) !*Value {
     var ret = try vm.gc.alloc();
     ret.* = .{ .list = .{} };
-    try ret.list.resize(vm.gc.gpa, val.map.size);
+    try ret.list.resize(vm.gc.gpa, map.size);
     const items = ret.list.items;
     var i: usize = 0;
-    for (val.map.entries) |*e| {
+    for (map.entries) |*e| {
         if (e.used) {
             items[i] = try vm.gc.dupe(e.kv.value);
             i += 1;
@@ -42,15 +38,13 @@ pub fn values(vm: *Vm, val: *const Value) !*Value {
 }
 
 /// Creates a list of kv pairs
-pub fn entries(vm: *Vm, val: *const Value) !*Value {
-    if (val.* != .map) return error.ExpectedMap;
-
+pub fn entries(vm: *Vm, map: *const Value.Map) !*Value {
     var ret = try vm.gc.alloc();
     ret.* = .{ .list = .{} };
-    try ret.list.resize(vm.gc.gpa, val.map.size);
+    try ret.list.resize(vm.gc.gpa, map.size);
     const items = ret.list.items;
     var i: usize = 0;
-    for (val.map.entries) |*e| {
+    for (map.entries) |*e| {
         if (e.used) {
             var entry = try vm.gc.alloc();
             const val_str = Value{ .str = "value" };
@@ -68,7 +62,7 @@ pub fn entries(vm: *Vm, val: *const Value) !*Value {
     return ret;
 }
 
-pub fn size(val: *const Value) !i64 {
-    if (val.* != .map) return error.ExpectedMap;
-    return @intCast(i64, val.map.size);
+/// Returns the amount of key value pairs in the map.
+pub fn size(map: *const Value.Map) !i64 {
+    return @intCast(i64, map.size);
 }

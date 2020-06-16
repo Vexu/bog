@@ -106,6 +106,13 @@ pub const Value = union(Type) {
     bool: bool,
     none,
 
+    // comptime {
+    //     @compileLog("Value", @sizeOf(Value));
+    //     for (std.meta.fields(Value)) |f| {
+    //         @compileLog(f.name, @sizeOf(f.field_type));
+    //     }
+    // }
+
     pub const Map = @import("value/Map.zig");
     pub const List = std.ArrayListUnmanaged(*Value);
     pub const Native = struct {
@@ -382,6 +389,14 @@ pub const Value = union(Type) {
 
                     if (mem.eql(u8, s, "len")) {
                         res.*.?.* = .{ .int = @intCast(i64, list.items.len) };
+                    } else if (mem.eql(u8, s, "append")) {
+                        res.* = try zigToBog(vm, struct {
+                            fn append(_vm: *Vm, val: *Value) !void {
+                                if (_vm.last_get.* != .list)
+                                    return _vm.reportErr("expected list");
+                                try _vm.last_get.list.append(_vm.gc.gpa, try _vm.gc.dupe(val));
+                            }
+                        }.append);
                     } else {
                         return vm.reportErr("no such property");
                     }
@@ -639,6 +654,10 @@ pub const Value = union(Type) {
                 .ErrorUnion => if (val) |some| {
                     return zigToBog(vm, some);
                 } else |e| {
+                    // capture runtime errors
+                    if (@as(anyerror, e) == error.RuntimeError)
+                        return error.RuntimeError;
+
                     // wrap error string
                     const str = try vm.gc.alloc();
                     str.* = .{
@@ -673,15 +692,20 @@ pub const Value = union(Type) {
                 if (val.* != .none)
                     return vm.reportErr("expected none");
             },
-            bool => blk: {
+            bool => {
                 if (val.* != .bool)
                     return vm.reportErr("expected bool");
-                break :blk val.bool;
+                return val.bool;
             },
-            []const u8 => blk: {
+            []const u8 => {
                 if (val.* != .str)
                     return vm.reportErr("expected num");
-                break :blk val.str;
+                return val.str;
+            },
+            *Map, *const Map => {
+                if (val.* != .map)
+                    return vm.reportErr("expected map");
+                return &val.map;
             },
             *Vm => vm,
             *Value, *const Value => val,
