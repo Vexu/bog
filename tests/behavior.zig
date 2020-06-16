@@ -1,3 +1,19 @@
+test "list comprehension" {
+    expectOutput(
+        \\return for (const c in "hello") c
+    ,
+        \\["h", "e", "l", "l", "o"]
+    );
+    expectOutput(
+        \\let i = 0
+        \\return while (i < 10)
+        \\    i += 1
+        \\    i
+    ,
+        \\[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    );
+}
+
 test "list.append" {
     expectOutput(
         \\let list = [1,2]

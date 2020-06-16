@@ -771,6 +771,14 @@ pub const Vm = struct {
                     res.* = frame.this orelse
                         return vm.reportErr("this has not been set");
                 },
+                .append_double => {
+                    const list = try vm.getVal(module, inst.double.res);
+                    const val = try vm.getVal(module, inst.double.arg);
+
+                    if (list.* != .list)
+                        return vm.reportErr("expected list");
+                    try list.list.append(vm.gc.gpa, try vm.gc.dupe(val));
+                },
                 .line_info => {
                     vm.line_loc = try vm.getSingle(module);
                 },

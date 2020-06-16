@@ -98,8 +98,12 @@ pub const Op = enum(u8) {
     /// RETURN(())
     return_none = 0x92,
 
+    // unstable instructions
+
     /// TODO better debug info
     line_info,
+
+    append_double,
 
     _,
 };
@@ -443,7 +447,7 @@ pub const Module = struct {
                     const label = jumps.getValue(jump_target) orelse unreachable;
                     try stream.print("{} <- {}, jump_none to {}\n", .{ inst.double.res, inst.double.arg, label });
                 },
-                .build_error_double, .unwrap_error_double, .iter_init_double, .move_double, .copy_double => {
+                .build_error_double, .unwrap_error_double, .iter_init_double, .move_double, .copy_double, .append_double => {
                     try stream.print("{} <- {}\n", .{ inst.double.res, inst.double.arg });
                 },
                 .unwrap_tagged => {

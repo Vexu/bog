@@ -987,8 +987,20 @@ pub const Compiler = struct {
         return Value{ .empty = {} };
     }
 
+    fn createListComprehension(self: *Compiler) !Result {
+        const list = self.registerAlloc();
+        try self.emitOff(.build_list_off, list, 0);
+        return Result{ .rt = list };
+    }
+
     fn genWhile(self: *Compiler, node: *Node.While, res: Result) Error!Value {
         try res.notLval(self, node.while_tok);
+
+        const sub_res = switch (res) {
+            .discard => res,
+            .lval => unreachable,
+            .value, .rt => try self.createListComprehension(),
+        };
 
         var loop_scope = Scope.Loop{
             .base = .{
@@ -1029,15 +1041,20 @@ pub const Compiler = struct {
             }
         }
 
-        const sub_res = switch (res) {
-            .discard => res,
-            .lval => unreachable,
-            .value, .rt => return self.reportErr("TODO while expr", node.while_tok),
-        };
-
-        const body_val = try self.genNode(node.body, sub_res);
-        if (sub_res != .rt and body_val.isRt()) {
-            try self.emitSingle(.discard_single, body_val.getRt());
+        switch (sub_res) {
+            .discard => {
+                const body_val = try self.genNode(node.body, res);
+                if (body_val.isRt()) {
+                    try self.emitSingle(.discard_single, body_val.getRt());
+                }
+            },
+            .rt => |list| {
+                const body_val = try self.genNodeNonEmpty(node.body, .value);
+                const reg = try body_val.toRt(self);
+                defer self.registerFree(reg);
+                try self.emitDouble(.append_double, list, reg);
+            },
+            else => unreachable,
         }
 
         // jump back to condition
@@ -1072,6 +1089,12 @@ pub const Compiler = struct {
         self.cur_scope = &loop_scope.base;
         defer self.cur_scope = loop_scope.base.parent.?;
 
+        const sub_res = switch (res) {
+            .discard => res,
+            .lval => unreachable,
+            .value, .rt => try self.createListComprehension(),
+        };
+
         const cond_val = try self.genNode(node.cond, .value);
         if (!cond_val.isRt() and cond_val != .str)
             return self.reportErr("expected iterable value", node.cond.firstToken());
@@ -1105,15 +1128,20 @@ pub const Compiler = struct {
             assert((try self.genNode(node.capture.?, lval_res)) == .empty);
         }
 
-        const sub_res = switch (res) {
-            .discard => res,
-            .lval => unreachable,
-            .value, .rt => return self.reportErr("TODO for expr", node.for_tok),
-        };
-
-        const body_val = try self.genNode(node.body, sub_res);
-        if (sub_res != .rt and body_val.isRt()) {
-            try self.emitSingle(.discard_single, body_val.getRt());
+        switch (sub_res) {
+            .discard => {
+                const body_val = try self.genNode(node.body, res);
+                if (body_val.isRt()) {
+                    try self.emitSingle(.discard_single, body_val.getRt());
+                }
+            },
+            .rt => |list| {
+                const body_val = try self.genNodeNonEmpty(node.body, .value);
+                const reg = try body_val.toRt(self);
+                defer self.registerFree(reg);
+                try self.emitDouble(.append_double, list, reg);
+            },
+            else => unreachable,
         }
 
         // jump to the start of the loop
