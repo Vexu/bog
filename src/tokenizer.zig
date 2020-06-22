@@ -138,7 +138,7 @@ pub const Token = struct {
         LBracket,
         RBracket,
         Period,
-        Ellipsis,
+        EqualRarr,
         Caret,
         CaretEqual,
         Plus,
@@ -249,7 +249,6 @@ pub const Token = struct {
             .LBracket => "[",
             .RBracket => "]",
             .Period => ".",
-            .Ellipsis => "...",
             .Caret => "^",
             .CaretEqual => "^=",
             .Plus => "+",
@@ -507,8 +506,6 @@ pub const Tokenizer = struct {
             RArr,
             RArrArr,
             Caret,
-            Period,
-            Period2,
             Minus,
             Slash,
             SlashSlash,
@@ -627,7 +624,8 @@ pub const Tokenizer = struct {
                         break;
                     },
                     '.' => {
-                        state = .Period;
+                        res = .Period;
+                        break;
                     },
                     '-' => {
                         state = .Minus;
@@ -737,6 +735,10 @@ pub const Tokenizer = struct {
                 .Equal => switch (c) {
                     '=' => {
                         res = .EqualEqual;
+                        break;
+                    },
+                    '>' => {
+                        res = .EqualRarr;
                         break;
                     },
                     else => {
@@ -871,25 +873,6 @@ pub const Tokenizer = struct {
                         self.it.i = start_index + 1;
                         res = .Caret;
                         break;
-                    },
-                },
-                .Period => switch (c) {
-                    '.' => {
-                        state = .Period2;
-                    },
-                    else => {
-                        self.it.i = start_index + 1;
-                        res = .Period;
-                        break;
-                    },
-                },
-                .Period2 => switch (c) {
-                    '.' => {
-                        res = .Ellipsis;
-                        break;
-                    },
-                    else => {
-                        return self.reportErr("invalid character", c);
                     },
                 },
                 .Minus => switch (c) {
@@ -1106,7 +1089,6 @@ pub const Tokenizer = struct {
                 .Slash => res = .Slash,
                 .SlashSlash => res = .SlashSlash,
                 .Ampersand => res = .Ampersand,
-                .Period => res = .Period,
                 .Pipe => res = .Pipe,
                 .RArr => res = .RArr,
                 .RArrArr => res = .RArrArr,
@@ -1151,7 +1133,7 @@ fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
 test "operators" {
     expectTokens(
         \\!= | |= = ==
-        \\( ) { } [ ] . ... @
+        \\( ) { } [ ] . @ =>
         \\^ ^= + += - -=
         \\* *= ** **= % %= / /= // //=
         \\, & &= < <= <<
@@ -1171,8 +1153,8 @@ test "operators" {
         .LBracket,
         .RBracket,
         .Period,
-        .Ellipsis,
         .At,
+        .EqualRarr,
         .Nl,
         .Caret,
         .CaretEqual,

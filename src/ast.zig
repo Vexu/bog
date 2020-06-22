@@ -206,7 +206,6 @@ pub const Node = struct {
             Equal,
             NotEqual,
             In,
-            Range,
             BitAnd,
             BitOr,
             BitXor,
@@ -238,6 +237,15 @@ pub const Node = struct {
         tok: TokenIndex,
         lhs: *Node,
         rhs: *Node,
+    };
+
+    pub const Range = struct {
+        base: Node = .{ .id = .Range },
+        start: ?*Node,
+        end: ?*Node,
+        step: ?*Node,
+        colon_1: TokenIndex,
+        colon_2: ?TokenIndex,
     };
 
     pub const Suffix = struct {
@@ -307,7 +315,7 @@ pub const Node = struct {
     pub const MapItem = struct {
         base: Node = Node{ .id = .MapItem },
         key: ?*Node,
-        colon: ?TokenIndex,
+        eq: ?TokenIndex,
         value: *Node,
     };
 
@@ -367,7 +375,7 @@ pub const Node = struct {
         base: Node = Node{ .id = .MatchCatchAll },
         expr: *Node,
         tok: TokenIndex,
-        colon: TokenIndex,
+        eq_arr: TokenIndex,
     };
 
     pub const MatchLet = struct {
@@ -375,14 +383,14 @@ pub const Node = struct {
         capture: *Node,
         expr: *Node,
         let_const: TokenIndex,
-        colon: TokenIndex,
+        eq_arr: TokenIndex,
     };
 
     pub const MatchCase = struct {
         base: Node = Node{ .id = .MatchCase },
         lhs: []*Node,
         expr: *Node,
-        colon: TokenIndex,
+        eq_arr: TokenIndex,
     };
 
     pub const Jump = struct {
