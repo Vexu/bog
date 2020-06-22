@@ -1,3 +1,15 @@
+test "ranges" {
+    testCanonical(
+        \\1:2:3
+        \\:2:3
+        \\::3
+        \\1:2:
+        \\1::
+        \\1::3
+        \\
+    );
+}
+
 test "ignore comments in indent blocks" {
     testTransform(
         \\const foo = fn()
@@ -27,7 +39,7 @@ test "tag" {
         \\@bar(foo)
         \\@baz(2.4, "foo")
         \\@qux[1, 2]
-        \\@quux{foo: bar}
+        \\@quux{foo = bar}
         \\
     );
 }
@@ -38,7 +50,7 @@ test "different error initializations" {
         \\error(foo)
         \\error(2.4, "foo")
         \\error[1, 2]
-        \\error{foo: bar}
+        \\error{foo = bar}
         \\
     );
 }
@@ -48,8 +60,8 @@ test "nested blocks and matches" {
         \\if (false)
         \\    if (true)
         \\        match (2)
-        \\            true: a
-        \\            false: b
+        \\            true => a
+        \\            false => b
         \\
         \\
         \\    else
@@ -133,13 +145,6 @@ test "preserve comment after comma" {
     );
 }
 
-test "range operator" {
-    testCanonical(
-        \\1...2
-        \\
-    );
-}
-
 test "preserve comments" {
     testCanonical(
         \\#some comment
@@ -155,9 +160,9 @@ test "preserve comments" {
 test "match" {
     testCanonical(
         \\match (2)
-        \\    let (x, 2): x + 4
-        \\    2, 3: 1
-        \\    _: ()
+        \\    let (x, 2) => x + 4
+        \\    2, 3 => 1
+        \\    _ => ()
         \\
         \\
         \\
@@ -184,7 +189,7 @@ test "tuples, lists, maps" {
     testCanonical(
         \\(a, b)
         \\[a, b]
-        \\{a: b, c: d}
+        \\{a = b, c = d}
         \\
     );
     testTransform(
@@ -254,7 +259,7 @@ test "loops" {
         \\while (true) break
         \\return 123 // 4
         \\for (let foo in arr) foo + 2
-        \\for (1...3) continue
+        \\for (1:3) continue
         \\
     );
 }
