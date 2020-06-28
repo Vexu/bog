@@ -36,8 +36,9 @@ pub const Value = union(Type) {
     int: i64,
     num: f64,
     range: struct {
-        begin: *Value,
-        end: *Value,
+        start: i64 = 0,
+        end: i64 = std.math.maxInt(i64),
+        step: i64 = 1,
     },
     str: []const u8,
     func: struct {
@@ -138,7 +139,8 @@ pub const Value = union(Type) {
     /// Does not free values recursively.
     pub fn deinit(value: *Value, allocator: *Allocator) void {
         switch (value.*) {
-            .int, .num, .none, .bool, .native, .tagged, .err, .range, .iterator => {},
+            .int, .num, .none, .bool, .native, .tagged, .range, .iterator => {},
+            .err => |e| e.deinit(allocator),
             .tuple => |t| allocator.free(t),
             // I really, really hate `deinit` taking a mutable pointer.
             .map => |*m| m.deinit(allocator),
@@ -178,8 +180,9 @@ pub const Value = union(Type) {
             },
             .err => |err| autoHash(&hasher, @as(Type, err.*)),
             .range => |*range| {
-                autoHash(&hasher, @as(Type, range.begin.*));
-                autoHash(&hasher, @as(Type, range.end.*));
+                autoHash(&hasher, range.start);
+                autoHash(&hasher, range.end);
+                autoHash(&hasher, range.step);
             },
             .func => |*func| {
                 autoHash(&hasher, func.offset);
@@ -261,13 +264,7 @@ pub const Value = union(Type) {
             .bool => |b| try writer.writeAll(if (b) "true" else "false"),
             .none => try writer.writeAll("()"),
             .range => |*r| {
-                if (level == 0) {
-                    try writer.writeAll("(range)");
-                } else {
-                    try r.begin.dump(writer, level - 1);
-                    try writer.writeAll("...");
-                    try r.end.dump(writer, level - 1);
-                }
+                try writer.print("{}:{}:{}", .{ r.start, r.end, r.step });
             },
             .tuple => |t| {
                 if (level == 0) {

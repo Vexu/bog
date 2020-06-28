@@ -77,6 +77,7 @@ pub const Op = enum(u8) {
     build_map_off = 0xB3,
     build_func = 0xB4,
     build_tagged = 0xB5,
+    build_range = 0xB6,
 
     /// ip = arg1
     jump = 0xA0,
@@ -203,6 +204,25 @@ pub const Instruction = packed union {
         // followed by a bare instruction with arg count
         // TODO max 32 args, reduce waste of space
     },
+    range: packed struct {
+        op: Op = .build_range,
+        res: RegRef,
+        start: RegRef,
+        end: RegRef,
+    },
+    range_cont: packed struct {
+        step: RegRef,
+        start_kind: RangeKind,
+        end_kind: RangeKind,
+        step_kind: RangeKind,
+    },
+
+    pub const RangeKind = packed enum(u8) {
+        reg,
+        value,
+        default,
+        _,
+    };
 
     comptime {
         std.debug.assert(@sizeOf(Instruction) == @sizeOf(u32));
@@ -476,6 +496,12 @@ pub const Module = struct {
                     try writer.print("{} <- size:{}\n", .{ inst.off.res, size });
                 },
 
+                .build_range => {
+                    const cont = module.code[ip].range_cont;
+                    ip += 1;
+                    try stream.print("{} <- {}:{}:{}\n", .{ inst.range.res, inst.range.start, inst.range.end, cont.step });
+                },
+
                 .call => {
                     var first = inst.call.first;
                     const last = module.code[ip].bare + first;
@@ -545,7 +571,7 @@ pub const Module = struct {
                     ip += 1;
                 },
 
-                .build_tagged, .line_info, .call => ip += 1,
+                .build_range, .build_tagged, .line_info, .call => ip += 1,
                 else => {},
             }
         }

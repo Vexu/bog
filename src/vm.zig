@@ -513,7 +513,7 @@ pub const Vm = struct {
 
                     if (arg.* != .err)
                         return vm.reportErr("expected an error");
-                    res.* = arg.err;
+                    res.* = try vm.gc.dupe(arg.err);
                 },
                 .unwrap_tagged => {
                     const res = try vm.getRef(module, inst.double.res);
@@ -612,6 +612,38 @@ pub const Vm = struct {
                             .value = arg,
                         },
                     };
+                },
+                .build_range => {
+                    const res = try vm.getNewVal(module, inst.range.res);
+                    {
+                        if (vm.ip + 1 > module.code.len)
+                            return error.MalformedByteCode;
+                        vm.ip += 1;
+                    }
+                    const cont = module.code[vm.ip - 1].range_cont;
+
+                    res.* = .{
+                        .range = .{},
+                    };
+                    const range = &res.range;
+                    switch (cont.start_kind) {
+                        .reg => range.start = try vm.getInt(module, inst.range.start),
+                        .value => range.start = inst.range.start,
+                        .default => {},
+                        _ => return error.MalformedByteCode,
+                    }
+                    switch (cont.end_kind) {
+                        .reg => range.end = try vm.getInt(module, inst.range.end),
+                        .value => range.end = inst.range.end,
+                        .default => {},
+                        _ => return error.MalformedByteCode,
+                    }
+                    switch (cont.step_kind) {
+                        .reg => range.step = try vm.getInt(module, inst.range_cont.step),
+                        .value => range.step = inst.range_cont.step,
+                        .default => {},
+                        _ => return error.MalformedByteCode,
+                    }
                 },
                 .get_triple => {
                     const res = try vm.getRef(module, inst.triple.res);

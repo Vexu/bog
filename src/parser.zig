@@ -149,7 +149,7 @@ pub const Parser = struct {
             },
         }
         const res = if (id == .Keyword_return and switch (parser.tokens[parser.tok_index].id) {
-            .Nl, .RParen, .RBrace, .RBracket, .Keyword_else, .Comma, .Colon => false,
+            .Eof, .Nl, .RParen, .RBrace, .RBracket, .Keyword_else, .Comma, .Colon => false,
             else => true,
         }) try parser.blockOrExpr(skip_nl, level) else null;
         const node = try parser.arena.create(Node.Jump);
@@ -287,7 +287,7 @@ pub const Parser = struct {
         var colon_2 = parser.eatToken(.Colon, skip_nl);
         if (colon_2 == null) {
             switch (parser.tokens[parser.tok_index].id) {
-                .Nl, .RParen, .RBrace, .RBracket, .Keyword_else, .Comma, .Colon => {},
+                .Eof, .Nl, .RParen, .RBrace, .RBracket, .Keyword_else, .Comma, .Colon => {},
                 else => end = try parser.exprNoRange(skip_nl, level),
             }
             colon_2 = parser.eatToken(.Colon, skip_nl);
@@ -296,7 +296,7 @@ pub const Parser = struct {
         var step: ?*Node = null;
         if (colon_2 != null) {
             switch (parser.tokens[parser.tok_index].id) {
-                .Nl, .RParen, .RBrace, .RBracket, .Keyword_else, .Comma, .Colon => {},
+                .Eof, .Nl, .RParen, .RBrace, .RBracket, .Keyword_else, .Comma, .Colon => {},
                 else => step = try parser.exprNoRange(skip_nl, level),
             }
         }

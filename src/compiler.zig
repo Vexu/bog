@@ -561,6 +561,7 @@ pub const Compiler = struct {
             .MapItem => unreachable,
             .This => return self.genThis(@fieldParentPtr(Node.SingleToken, "base", node), res),
             .Tagged => return self.genTagged(@fieldParentPtr(Node.Tagged, "base", node), res),
+            .Range => return self.genRange(@fieldParentPtr(Node.Range, "base", node), res),
 
             .Match => return self.reportErr("TODO: Match", node.firstToken()),
             .MatchCatchAll => return self.reportErr("TODO: MatchCatchAll", node.firstToken()),
@@ -1444,8 +1445,6 @@ pub const Compiler = struct {
             .In,
             => return self.genComparisonInfix(node, res),
 
-            .Range => return self.reportErr("TODO ranges", node.tok),
-
             .BitAnd,
             .BitOr,
             .BitXor,
@@ -2005,6 +2004,71 @@ pub const Compiler = struct {
             .bare = str_loc,
         });
         return sub_res.toVal();
+    }
+
+    fn genRange(self: *Compiler, node: *Node.Range, res: Result) Error!Value {
+        if (res == .lval) switch (res.lval) {
+            .Const, .let, .assign => |val| {
+                if (!val.isRt()) {
+                    return self.reportErr("expected a range", node.base.firstToken());
+                }
+                return self.reportErr("TODO: range destructure", node.base.firstToken());
+            },
+            .aug_assign => {
+                return self.reportErr("invalid left hand side to augmented assignment", node.base.firstToken());
+            },
+        };
+
+        const sub_res = res.toRt(self);
+        const start = try self.genRangePart(node.start);
+        const end = try self.genRangePart(node.end);
+        const step = try self.genRangePart(node.step);
+        try self.code.append(.{
+            .range = .{
+                .res = sub_res.rt,
+                .start = start.val,
+                .end = end.val,
+            },
+        });
+        try self.code.append(.{
+            .range_cont = .{
+                .step = step.val,
+                .start_kind = start.kind,
+                .end_kind = end.kind,
+                .step_kind = step.kind,
+            },
+        });
+        return sub_res.toVal();
+    }
+
+    const RangePart = struct {
+        kind: bog.Instruction.RangeKind = .default,
+        val: RegRef = 0,
+    };
+
+    fn genRangePart(self: *Compiler, node: ?*Node) !RangePart {
+        var res: RangePart = .{};
+        const some = node orelse return res;
+
+        const value = try self.genNodeNonEmpty(some, .value);
+        if (value.isRt()) {
+            res.kind = .reg;
+            res.val = value.getRt();
+            return res;
+        }
+
+        const int = try value.getInt(self, some.firstToken());
+        switch (int) {
+            0...std.math.maxInt(RegRef) => {
+                res.kind = .value;
+                res.val = @intCast(RegRef, int);
+            },
+            else => {
+                res.kind = .reg;
+                res.val = try value.toRt(self);
+            },
+        }
+        return res;
     }
 
     fn addLineInfo(self: *Compiler, node: *Node) !void {
