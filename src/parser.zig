@@ -104,11 +104,11 @@ pub const Parser = struct {
         return &node.base;
     }
 
-    /// expr
+    /// expr_no_range
     ///     : fn
     ///     | jump_expr
     ///     | bool_expr assign?
-    fn expr(parser: *Parser, skip_nl: bool, level: u16) Error!*Node {
+    fn exprNoRange(parser: *Parser, skip_nl: bool, level: u16) Error!*Node {
         if (try parser.func(skip_nl, level)) |node| return node;
         if (try parser.jumpExpr(skip_nl, level)) |node| return node;
         return parser.assign(try parser.boolExpr(skip_nl, level), skip_nl, level);
@@ -213,10 +213,10 @@ pub const Parser = struct {
     }
 
     /// comparison_expr
-    ///     : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in") range_expr)?
-    ///     | range_expr ("is" type_name)?
+    ///     : bit_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in") bit_expr)?
+    ///     | bit_expr ("is" type_name)?
     fn comparisonExpr(parser: *Parser, skip_nl: bool, level: u16) Error!*Node {
-        const lhs = try parser.rangeExpr(skip_nl, level);
+        const lhs = try parser.bitExpr(skip_nl, level);
 
         // we can safely skip any newlines here
         const start = parser.tok_index;
@@ -240,7 +240,7 @@ pub const Parser = struct {
                         .Keyword_in => .In,
                         else => unreachable,
                     },
-                    .rhs = try parser.rangeExpr(skip_nl, level),
+                    .rhs = try parser.bitExpr(skip_nl, level),
                 };
                 return &node.base;
             },
@@ -269,25 +269,27 @@ pub const Parser = struct {
             parser.reportErr("expected type name", parser.tokens[parser.tok_index]);
     }
 
-    /// range_expr : bit_expr? (":" bit_expr? (":" bit_expr?)?)
-    fn rangeExpr(parser: *Parser, skip_nl: bool, level: u16) Error!*Node {
+    /// expr : expr_no_range? (":" expr_no_range? (":" expr_no_range?)?)?
+    fn expr(parser: *Parser, skip_nl: bool, level: u16) Error!*Node {
         // This grammar would be much easier to implement with infinite lookahead
         // maybe that would be worth doing some time.
         var start: ?*Node = null;
         var colon_1 = parser.eatToken(.Colon, skip_nl);
 
         if (colon_1 == null) {
-            start = try parser.bitExpr(skip_nl, level);
+            start = try parser.exprNoRange(skip_nl, level);
             colon_1 = parser.eatToken(.Colon, skip_nl);
             // not a range
             if (colon_1 == null) return start.?;
-            
         }
 
         var end: ?*Node = null;
         var colon_2 = parser.eatToken(.Colon, skip_nl);
         if (colon_2 == null) {
-            end = try parser.bitExpr(skip_nl, level);
+            switch (parser.tokens[parser.tok_index].id) {
+                .Nl, .RParen, .RBrace, .RBracket, .Keyword_else, .Comma, .Colon => {},
+                else => end = try parser.exprNoRange(skip_nl, level),
+            }
             colon_2 = parser.eatToken(.Colon, skip_nl);
         }
 
@@ -295,7 +297,7 @@ pub const Parser = struct {
         if (colon_2 != null) {
             switch (parser.tokens[parser.tok_index].id) {
                 .Nl, .RParen, .RBrace, .RBracket, .Keyword_else, .Comma, .Colon => {},
-                else => step = try parser.blockOrExpr(skip_nl, level),
+                else => step = try parser.exprNoRange(skip_nl, level),
             }
         }
 
@@ -753,7 +755,7 @@ pub const Parser = struct {
     /// initializer
     ///     : "(" block_or_expr ")"
     ///     | "(" (expr ",")+ expr? ")"
-    ///     | "{" (expr "=" expr ",")* (expr "=" expr)? "}"
+    ///     | "{" (expr_no_range ":" expr_no_range ",")* (expr_no_range ":" expr_no_range)? "}"
     ///     | "[" (expr ",")* expr? "]"
     fn initializer(parser: *Parser, skip_nl: bool, level: u16) Error!?*Node {
         if (parser.eatToken(.LBrace, true)) |tok| {
@@ -811,20 +813,20 @@ pub const Parser = struct {
         } else return null;
     }
 
-    /// expr ("=" expr)?
+    /// expr_no_range (":" expr_no_range)?
     fn mapItem(parser: *Parser, skip_nl: bool, level: u16) Error!*Node {
         var key: ?*Node = null;
-        var value = try parser.expr(true, level);
-        var eq: ?TokenIndex = null;
-        if (parser.eatToken(.Equal, true)) |tok| {
-            eq = tok;
+        var value = try parser.exprNoRange(true, level);
+        var colon: ?TokenIndex = null;
+        if (parser.eatToken(.Colon, true)) |tok| {
+            colon = tok;
             key = value;
-            value = try parser.expr(true, level);
+            value = try parser.exprNoRange(true, level);
         }
         const item = try parser.arena.create(Node.MapItem);
         item.* = .{
             .key = key,
-            .eq = eq,
+            .colon = colon,
             .value = value,
         };
         return &item.base;

@@ -6,6 +6,10 @@ test "ranges" {
         \\1:2:
         \\1::
         \\1::3
+        \\1:2
+        \\1:
+        \\:2
+        \\:
         \\
     );
 }
@@ -39,7 +43,7 @@ test "tag" {
         \\@bar(foo)
         \\@baz(2.4, "foo")
         \\@qux[1, 2]
-        \\@quux{foo = bar}
+        \\@quux{foo: bar}
         \\
     );
 }
@@ -50,7 +54,7 @@ test "different error initializations" {
         \\error(foo)
         \\error(2.4, "foo")
         \\error[1, 2]
-        \\error{foo = bar}
+        \\error{foo: bar}
         \\
     );
 }
@@ -189,7 +193,7 @@ test "tuples, lists, maps" {
     testCanonical(
         \\(a, b)
         \\[a, b]
-        \\{a = b, c = d}
+        \\{a: b, c: d}
         \\
     );
     testTransform(

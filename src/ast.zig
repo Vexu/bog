@@ -328,7 +328,7 @@ pub const Node = struct {
     pub const MapItem = struct {
         base: Node = .{ .id = .MapItem },
         key: ?*Node,
-        eq: ?TokenIndex,
+        colon: ?TokenIndex,
         value: *Node,
     };
 

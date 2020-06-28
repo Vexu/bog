@@ -88,8 +88,12 @@ const Renderer = struct {
                 const range = @fieldParentPtr(Node.Range, "base", node);
 
                 if (range.start) |some| try self.renderNode(some, stream, indent, .none);
-                try self.renderToken(range.colon_1, stream, indent, .none);
-                if (range.end) |some| try self.renderNode(some, stream, indent, if (range.colon_2 == null) space else .none);
+                try self.renderToken(range.colon_1, stream, indent, if (range.end == null and
+                    range.colon_2 == null and
+                    range.step == null) space else .none);
+                if (range.end) |some|
+                    try self.renderNode(some, stream, indent, if (range.colon_2 == null and
+                        range.step == null) space else .none);
                 if (range.colon_2) |some| try self.renderToken(some, stream, indent, if (range.step == null) space else .none);
                 if (range.step) |some| try self.renderNode(some, stream, indent, space);
             },
@@ -252,8 +256,8 @@ const Renderer = struct {
                 const item = @fieldParentPtr(Node.MapItem, "base", node);
 
                 if (item.key) |some| {
-                    try self.renderNode(some, writer, indent, .space);
-                    try self.renderToken(item.eq.?, writer, indent, .space);
+                    try self.renderNode(some, writer, indent, .none);
+                    try self.renderToken(item.colon.?, writer, indent, .space);
                 }
 
                 return self.renderNode(item.value, writer, indent, space);
