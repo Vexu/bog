@@ -1,3 +1,21 @@
+test "range" {
+    expectOutput(
+        \\return for (let i in 0:7:2) i
+    ,
+        \\[0, 2, 4, 6]
+    );
+    expectOutput(
+        \\return 1 in (0:2)
+    ,
+        \\true
+    );
+    expectOutput(
+        \\return 1 in (0:2:2)
+    ,
+        \\false
+    );
+}
+
 test "list comprehension as function argument" {
     expectOutput(
         \\const map = {1: 2, 3: 4, 5: 6}

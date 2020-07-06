@@ -1705,11 +1705,14 @@ pub const Compiler = struct {
                 break :blk Value{ .Bool = copy };
             },
             .In => .{
-                .Bool = mem.indexOf(
-                    u8,
-                    try l_val.getStr(self, node.lhs.firstToken()),
-                    try r_val.getStr(self, node.rhs.firstToken()),
-                ) != null,
+                .Bool = switch (l_val) {
+                    .str => mem.indexOf(
+                        u8,
+                        try l_val.getStr(self, node.lhs.firstToken()),
+                        try r_val.getStr(self, node.rhs.firstToken()),
+                    ) != null,
+                    else => return self.reportErr("TODO: range without strings", node.lhs.firstToken()),
+                },
             },
             else => unreachable,
         };

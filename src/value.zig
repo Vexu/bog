@@ -58,63 +58,78 @@ pub const Value = union(Type) {
     },
     iterator: struct {
         value: *Value,
-        index: usize,
+        i: packed union {
+            u: usize,
+            i: i64,
+        } = .{ .u = 0 },
 
         pub fn next(iter: *@This(), vm: *Vm, res: *?*Value) !void {
             switch (iter.value.*) {
                 .tuple => |tuple| {
-                    if (iter.index == tuple.len) {
+                    if (iter.i.u == tuple.len) {
                         res.* = &Value.None;
                         return;
                     }
 
-                    res.* = tuple[iter.index];
-                    iter.index += 1;
+                    res.* = tuple[iter.i.u];
+                    iter.i.u += 1;
                 },
                 .list => |*list| {
-                    if (iter.index == list.items.len) {
+                    if (iter.i.u == list.items.len) {
                         res.* = &Value.None;
                         return;
                     }
 
-                    res.* = list.items[iter.index];
-                    iter.index += 1;
+                    res.* = list.items[iter.i.u];
+                    iter.i.u += 1;
                 },
                 .str => |str| {
-                    if (iter.index == str.len) {
+                    if (iter.i.u == str.len) {
                         res.* = &Value.None;
                         return;
                     }
                     if (res.* == null)
                         res.* = try vm.gc.alloc();
 
-                    const cp_len = std.unicode.utf8ByteSequenceLength(str[iter.index]) catch
+                    const cp_len = std.unicode.utf8ByteSequenceLength(str[iter.i.u]) catch
                         return vm.reportErr("invalid utf-8 sequence");
-                    iter.index += cp_len;
+                    iter.i.u += cp_len;
 
                     res.*.?.* = .{
-                        .str = str[iter.index - cp_len .. iter.index],
+                        .str = str[iter.i.u - cp_len .. iter.i.u],
                     };
                 },
                 .map => |*map| {
-                    if (iter.index == map.entries.items.len) {
+                    if (iter.i.u == map.entries.items.len) {
                         res.* = &Value.None;
                         return;
                     }
 
                     if (res.* == null)
                         res.* = try vm.gc.alloc();
-                    if (iter.index == 0) {
+                    if (iter.i.u == 0) {
                         res.*.?.* = .{ .tuple = try vm.gc.gpa.alloc(*Value, 2) };
                     }
-                    const e = &map.entries.items[iter.index];
+                    const e = &map.entries.items[iter.i.u];
                     const t = res.*.?.tuple;
                     // removing `const` on `Map` causes dependency loop??
                     t[0] = @intToPtr(*Value, @ptrToInt(e.key));
                     t[1] = e.value;
-                    iter.index += 1;
+                    iter.i.u += 1;
                 },
-                .range => @panic("TODO: range iterator"),
+                .range => {
+                    if (iter.i.i >= iter.value.range.end) {
+                        res.* = &Value.None;
+                        return;
+                    }
+                    if (res.* == null)
+                        res.* = try vm.gc.alloc();
+
+                    res.*.?.* = .{
+                        .int = iter.i.i,
+                    };
+                    iter.i.i += iter.value.range.step;
+                },
                 else => unreachable,
             }
         }
@@ -139,10 +154,9 @@ pub const Value = union(Type) {
     /// Does not free values recursively.
     pub fn deinit(value: *Value, allocator: *Allocator) void {
         switch (value.*) {
-            .int, .num, .none, .bool, .native, .tagged, .range, .iterator => {},
-            .err => |e| e.deinit(allocator),
+            .bool, .none => return,
+            .int, .num, .native, .tagged, .range, .iterator, .err => {},
             .tuple => |t| allocator.free(t),
-            // I really, really hate `deinit` taking a mutable pointer.
             .map => |*m| m.deinit(allocator),
             .list => |*l| l.deinit(allocator),
             .str => {
@@ -151,6 +165,7 @@ pub const Value = union(Type) {
             .func => |*f| allocator.free(f.captures),
             _ => unreachable,
         }
+        value.* = undefined;
     }
 
     pub fn hash(key: *const Value) u32 {
@@ -240,7 +255,11 @@ pub const Value = union(Type) {
                 return true;
             },
             .err => |e| e.eql(b.err),
-            .range => |*r| @panic("TODO eql for ranges"),
+            .range => |*r| {
+                return r.start == b.range.start and
+                    r.end == b.range.end and
+                    r.step == b.range.step;
+            },
             .func => |*f| {
                 return f.offset == b.func.offset and
                     f.arg_count == b.func.arg_count and
@@ -553,15 +572,22 @@ pub const Value = union(Type) {
                 return false;
             },
             .map => |*map| return map.contains(val),
-            .range => @panic("TODO in range"),
+            .range => |*r| {
+                if (val.* != .int) return false;
+                const int = val.int;
+                if (int < r.start or int > r.end) return false;
+                if (@rem(int - r.start, r.step) != 0) return false;
+                return true;
+            },
             .iterator => unreachable,
             else => unreachable,
         }
     }
 
     pub fn iterator(val: *const Value, vm: *Vm) Vm.Error!*Value {
+        var start: ?i64 = null;
         switch (val.*) {
-            .range => return vm.reportErr("TODO: range iterator"),
+            .range => |*r| start = r.start,
             .str, .tuple, .list, .map => {},
             .iterator => unreachable,
             else => return vm.reportErr("invalid type for iteration"),
@@ -570,9 +596,9 @@ pub const Value = union(Type) {
         iter.* = .{
             .iterator = .{
                 .value = try vm.gc.dupe(val),
-                .index = 0,
             },
         };
+        if (start) |some| iter.iterator.i.i = some;
         return iter;
     }
 

@@ -640,7 +640,7 @@ pub const Vm = struct {
                     }
                     switch (cont.step_kind) {
                         .reg => range.step = try vm.getInt(module, inst.range_cont.step),
-                        .value => range.step = inst.range_cont.step,
+                        .value => range.step = cont.step,
                         .default => {},
                         _ => return error.MalformedByteCode,
                     }
