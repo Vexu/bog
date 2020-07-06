@@ -95,7 +95,24 @@ pub const Value = union(Type) {
                         .str = str[iter.index - cp_len .. iter.index],
                     };
                 },
-                .map => {},
+                .map => |*map| {
+                    if (iter.index == map.entries.items.len) {
+                        res.* = &Value.None;
+                        return;
+                    }
+
+                    if (res.* == null)
+                        res.* = try vm.gc.alloc();
+                    if (iter.index == 0) {
+                        res.*.?.* = .{ .tuple = try vm.gc.gpa.alloc(*Value, 2) };
+                    }
+                    const e = &map.entries.items[iter.index];
+                    const t = res.*.?.tuple;
+                    // removing `const` on `Map` causes dependency loop??
+                    t[0] = @intToPtr(*Value, @ptrToInt(e.key));
+                    t[1] = e.value;
+                    iter.index += 1;
+                },
                 .range => @panic("TODO: range iterator"),
                 else => unreachable,
             }
@@ -123,7 +140,7 @@ pub const Value = union(Type) {
         switch (value.*) {
             .int, .num, .none, .bool, .native, .tagged, .err, .range, .iterator => {},
             .tuple => |t| allocator.free(t),
-                // I really, really hate `deinit` taking a mutable pointer.
+            // I really, really hate `deinit` taking a mutable pointer.
             .map => |*m| m.deinit(allocator),
             .list => |*l| l.deinit(allocator),
             .str => {

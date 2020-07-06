@@ -1,3 +1,16 @@
+test "map iterator" {
+    expectOutput(
+        \\const map = {1: 2, 3: 4, 5: 6}
+        \\let sum = 0
+        \\for (let (k, v) in map)
+        \\    sum += k
+        \\    sum *= v
+        \\return sum
+    ,
+        \\150
+    );
+}
+
 test "list comprehension" {
     expectOutput(
         \\return for (const c in "hello") c
