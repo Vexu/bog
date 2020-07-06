@@ -170,7 +170,7 @@ test "map" {
         \\map["foo"] = "bar"
         \\return map
     ,
-        \\{"foo": "bar", "y": 2, 1: 2}
+        \\{1: 2, "y": 2, "foo": "bar"}
     );
     expectOutput(
         \\let y = 2

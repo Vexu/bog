@@ -468,7 +468,7 @@ pub const Compiler = struct {
     }
 
     fn putString(self: *Compiler, str: []const u8) !u32 {
-        if (self.string_interner.getValue(str)) |some| return some;
+        if (self.string_interner.get(str)) |some| return some;
         const offset = @intCast(u32, self.strings.items.len);
         try self.strings.appendSlice(mem.asBytes(&@intCast(u32, str.len)));
         try self.strings.appendSlice(str);

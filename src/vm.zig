@@ -791,7 +791,7 @@ pub const Vm = struct {
     }
 
     fn import(vm: *Vm, id: []const u8) !*Value {
-        var mod = vm.imported_modules.getValue(id) orelse if (mem.endsWith(u8, id, bog.extension)) blk: {
+        var mod = vm.imported_modules.get(id) orelse if (mem.endsWith(u8, id, bog.extension)) blk: {
             if (!vm.options.import_files) {
                 return vm.reportErr("import failed");
             }
@@ -827,7 +827,7 @@ pub const Vm = struct {
             _ = try vm.imported_modules.put(id, mod);
             break :blk mod;
         } else {
-            if (vm.imports.getValue(id)) |some| {
+            if (vm.imports.get(id)) |some| {
                 return some(vm);
             }
             return vm.reportErr("no such package");
@@ -962,7 +962,7 @@ pub const Vm = struct {
         const index: Value = .{
             .str = func_name,
         };
-        const member = val.map.getValue(&index) orelse
+        const member = val.map.get(&index) orelse
             return error.NoSuchMember;
 
         switch (member.*) {

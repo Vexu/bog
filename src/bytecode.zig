@@ -343,7 +343,7 @@ pub const Module = struct {
             if (ip == module.entry) {
                 try stream.writeAll("\nentry:");
             }
-            if (jumps.getValue(ip)) |label| {
+            if (jumps.get(ip)) |label| {
                 try stream.print("\n{}:", .{label});
             }
             const inst = module.code[ip];
@@ -395,7 +395,7 @@ pub const Module = struct {
                     else
                         ip + module.code[ip].bare;
                     ip += 1;
-                    const label = jumps.getValue(jump_target) orelse unreachable;
+                    const label = jumps.get(jump_target) orelse unreachable;
 
                     if (inst.jump.op == .jump)
                         try stream.print("to {}\n", .{label})
@@ -406,7 +406,7 @@ pub const Module = struct {
                 .build_func => {
                     const offset = module.code[ip].bare;
                     ip += 1;
-                    const label = jumps.getValue(offset) orelse unreachable;
+                    const label = jumps.get(offset) orelse unreachable;
                     try stream.print("{} <- {}({})[{}]\n", .{ inst.func.res, label, inst.func.arg_count, inst.func.capture_count });
                 },
 
@@ -444,7 +444,7 @@ pub const Module = struct {
                 .iter_next_double => {
                     const jump_target = ip + module.code[ip].bare;
                     ip += 1;
-                    const label = jumps.getValue(jump_target) orelse unreachable;
+                    const label = jumps.get(jump_target) orelse unreachable;
                     try stream.print("{} <- {}, jump_none to {}\n", .{ inst.double.res, inst.double.arg, label });
                 },
                 .build_error_double, .unwrap_error_double, .iter_init_double, .move_double, .copy_double, .append_double => {
@@ -520,7 +520,7 @@ pub const Module = struct {
                     else
                         ip + module.code[ip].bare;
                     ip += 1;
-                    if (map.getValue(jump_target)) |_| continue;
+                    if (map.get(jump_target)) |_| continue;
 
                     _ = try map.put(jump_target, try std.fmt.allocPrint(arena, "{}_{}", .{ @tagName(inst.op.op), mangle }));
                     mangle += 1;

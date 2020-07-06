@@ -106,14 +106,7 @@ pub const Value = union(Type) {
     bool: bool,
     none,
 
-    // comptime {
-    //     @compileLog("Value", @sizeOf(Value));
-    //     for (std.meta.fields(Value)) |f| {
-    //         @compileLog(f.name, @sizeOf(f.field_type));
-    //     }
-    // }
-
-    pub const Map = @import("value/Map.zig");
+    pub const Map = std.hash_map.HashMapUnmanaged(*const Value, *Value, hash, eql, true);
     pub const List = std.ArrayListUnmanaged(*Value);
     pub const Native = struct {
         arg_count: u8,
@@ -126,13 +119,13 @@ pub const Value = union(Type) {
 
     /// Frees any extra memory allocated by value.
     /// Does not free values recursively.
-    pub fn deinit(value: *const Value, allocator: *Allocator) void {
+    pub fn deinit(value: *Value, allocator: *Allocator) void {
         switch (value.*) {
             .int, .num, .none, .bool, .native, .tagged, .err, .range, .iterator => {},
             .tuple => |t| allocator.free(t),
+                // I really, really hate `deinit` taking a mutable pointer.
             .map => |*m| m.deinit(allocator),
-            // `deinit` takes a mutable pointer for some reason
-            .list => |*l| allocator.free(l.items.ptr[0..l.capacity]),
+            .list => |*l| l.deinit(allocator),
             .str => {
                 // TODO string memory management
             },
@@ -158,10 +151,9 @@ pub const Value = union(Type) {
                 autoHash(&hasher, tuple.ptr);
             },
             .map => |*map| {
-                autoHash(&hasher, map.size);
-                autoHash(&hasher, map.entries.len);
-                autoHash(&hasher, map.entries.ptr);
-                autoHash(&hasher, map.max_distance_from_start_index);
+                autoHash(&hasher, map.items().len);
+                autoHash(&hasher, map.items().ptr);
+                autoHash(&hasher, map.index_header);
             },
             .list => |*list| {
                 autoHash(&hasher, list.items.len);
@@ -277,13 +269,12 @@ pub const Value = union(Type) {
                     try stream.writeAll("{...}");
                 } else {
                     try stream.writeByte('{');
-                    var it = m.iterator();
-                    while (it.next()) |kv| {
-                        if (it.count != 1)
+                    for (m.items()) |*entry, i| {
+                        if (i != 0)
                             try stream.writeAll(", ");
-                        try kv.key.dump(stream, level - 1);
+                        try entry.key.dump(stream, level - 1);
                         try stream.writeAll(": ");
-                        try kv.value.dump(stream, level - 1);
+                        try entry.value.dump(stream, level - 1);
                     }
                     try stream.writeByte('}');
                 }
@@ -404,7 +395,7 @@ pub const Value = union(Type) {
                 else => return vm.reportErr("invalid index type"),
             },
             .map => |*map| {
-                res.* = map.getValue(index) orelse
+                res.* = map.get(index) orelse
                     return vm.reportErr("TODO better handling undefined key");
             },
             .str => |str| switch (index.*) {
