@@ -597,7 +597,7 @@ pub const Compiler = struct {
                         const item = @fieldParentPtr(Node.MapItem, "base", val);
 
                         if (item.key) |some| {
-                            const last_node = self.getLastNode(some, false);
+                            const last_node = self.getLastNode(some);
                             if (last_node.id == .Identifier) {
                                 // `oldname: newname` is equal to `"oldname": newname`
                                 const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
@@ -607,7 +607,7 @@ pub const Compiler = struct {
                                 _ = try self.genNode(some, .{ .rt = index_reg });
                             }
                         } else {
-                            const last_node = self.getLastNode(item.value, false);
+                            const last_node = self.getLastNode(item.value);
                             if (last_node.id != .Identifier) {
                                 return self.reportErr("expected a key", item.value.firstToken());
                             }
@@ -651,7 +651,7 @@ pub const Compiler = struct {
             const item = @fieldParentPtr(Node.MapItem, "base", val);
 
             if (item.key) |some| {
-                const last_node = self.getLastNode(some, false);
+                const last_node = self.getLastNode(some);
                 if (last_node.id == .Identifier) {
                     // `ident: value` is equal to `"ident": value`
                     const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
@@ -661,7 +661,7 @@ pub const Compiler = struct {
                     _ = try self.genNode(some, .{ .rt = index_reg });
                 }
             } else {
-                const last_node = self.getLastNode(item.value, false);
+                const last_node = self.getLastNode(item.value);
                 if (last_node.id != .Identifier) {
                     return self.reportErr("expected a key", item.value.firstToken());
                 }
@@ -794,22 +794,22 @@ pub const Compiler = struct {
         // gen body and return result
         try self.addLineInfo(node.body);
 
-        const last_node = self.getLastNode(node.body, true);
-        const last_is_ret = last_node.id == .Jump and
-            @fieldParentPtr(Node.Jump, "base", last_node).op == .Return;
-
-        const should_discard = switch (last_node.id) {
-            // these will generate different code if value is discarded
-            .If, .While, .For, .Match, .Block => last_is_ret,
-            else => true,
+        // for one liner functions return the value of the expression,
+        // otherwise require an explicit return statement
+        const last = self.getLastNode(node.body);
+        const should_discard = switch (last.id) {
+            .Block => true,
+            .Infix => switch (@fieldParentPtr(Node.Infix, "base", last).op) {
+                .Assign, .AddAssign, .SubAssign, .MulAssign, .PowAssign, // -
+                    .DivAssign, .DivFloorAssign, .ModAssign, .LShiftAssign, // -
+                    .RShiftAssign, .BitAndAssign, .BitOrAssign, .BitXOrAssign => true,
+                else => false,
+            },
+            else => false,
         };
-
-        // if last node is not a return then we expect some value we can return
         const body_val = try self.genNode(node.body, if (should_discard) .discard else .value);
 
-        if (last_is_ret) {
-            std.debug.assert(body_val == .empty);
-        } else if (body_val == .empty or body_val == .none) {
+        if (body_val == .empty or body_val == .none) {
             try self.code.append(.{ .op = .{ .op = .return_none } });
         } else {
             const reg = try body_val.toRt(self);
@@ -2018,19 +2018,12 @@ pub const Compiler = struct {
         };
     }
 
-    fn getLastNode(self: *Compiler, first_node: *Node, allow_block: bool) *Node {
+    fn getLastNode(self: *Compiler, first_node: *Node) *Node {
         var node = first_node;
-        while (true) {
-            switch (node.id) {
-                .Grouped => node = @fieldParentPtr(Node.Grouped, "base", node).expr,
-                .Block => {
-                    if (!allow_block) return node;
-                    const blk = @fieldParentPtr(Node.Block, "base", node);
-                    node = blk.stmts[blk.stmts.len - 1];
-                },
-                else => return node,
-            }
-        }
+        while (true) switch (node.id) {
+            .Grouped => node = @fieldParentPtr(Node.Grouped, "base", node).expr,
+            else => return node,
+        };
     }
 
     fn tokenSlice(self: *Compiler, token: TokenIndex) []const u8 {

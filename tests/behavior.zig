@@ -117,8 +117,7 @@ test "call bog function" {
     expectCallOutput(
         \\return {
         \\    foo: 2,
-        \\    doTheTest: fn(num)
-        \\        return this.foo + num
+        \\    doTheTest: fn(num) this.foo + num
         \\}
     , .{1},
         \\3
@@ -155,8 +154,7 @@ test "this" {
 test "closures" {
     expectOutput(
         \\let x = 2
-        \\const foo = fn()
-        \\    return x + 5
+        \\const foo = fn() x + 5
         \\return foo()
     ,
         \\7
@@ -274,7 +272,7 @@ test "catch capture" {
 
 test "while let" {
     expectOutput(
-        \\const getSome = fn(val)  if (val != 0) val - 1
+        \\const getSome = fn(val) if (val != 0) val - 1
         \\
         \\let val = 10
         \\while (let newVal = getSome(val))
