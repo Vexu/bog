@@ -987,8 +987,8 @@ pub const Compiler = struct {
         return Value{ .empty = {} };
     }
 
-    fn createListComprehension(self: *Compiler) !Result {
-        const list = self.registerAlloc();
+    fn createListComprehension(self: *Compiler, reg: ?RegRef) !Result {
+        const list = reg orelse self.registerAlloc();
         try self.emitOff(.build_list_off, list, 0);
         return Result{ .rt = list };
     }
@@ -999,7 +999,8 @@ pub const Compiler = struct {
         const sub_res = switch (res) {
             .discard => res,
             .lval => unreachable,
-            .value, .rt => try self.createListComprehension(),
+            .value => try self.createListComprehension(null),
+            .rt => |reg| try self.createListComprehension(reg),
         };
 
         var loop_scope = Scope.Loop{
@@ -1092,7 +1093,8 @@ pub const Compiler = struct {
         const sub_res = switch (res) {
             .discard => res,
             .lval => unreachable,
-            .value, .rt => try self.createListComprehension(),
+            .value => try self.createListComprehension(null),
+            .rt => |reg| try self.createListComprehension(reg),
         };
 
         const cond_val = try self.genNode(node.cond, .value);
@@ -1369,7 +1371,7 @@ pub const Compiler = struct {
             try res.notLval(self, node.r_tok);
         }
         const l_val = try self.genNode(node.lhs, .value);
-        if (l_val != .str and !l_val.isRt()) {
+        if (l_val != .str and l_val != .func and !l_val.isRt()) {
             return self.reportErr("invalid left hand side to suffix op", node.lhs.firstToken());
         }
         const l_reg = try l_val.toRt(self);

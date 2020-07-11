@@ -1,3 +1,12 @@
+test "list comprehension as function argument" {
+    expectOutput(
+        \\const map = {1: 2, 3: 4, 5: 6}
+        \\return (fn(l)l)(for (let (k, v) in map) {key: k, val: v})
+    ,
+        \\[{"key": 1, "val": 2}, {"key": 3, "val": 4}, {"key": 5, "val": 6}]
+    );
+}
+
 test "map iterator" {
     expectOutput(
         \\const map = {1: 2, 3: 4, 5: 6}

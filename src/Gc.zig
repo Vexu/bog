@@ -176,7 +176,7 @@ pub fn stackRef(gc: *Gc, index: usize) !*?*Value {
 pub fn stackAlloc(gc: *Gc, index: usize) !*Value {
     const val = try gc.stackRef(index);
     if (val.*) |some| switch (some.*) {
-        .int, .num, .native, .tagged => {},
+        .int, .num, .native, .tagged, .str => {},
         else => val.* = try gc.alloc(),
     } else {
         val.* = try gc.alloc();
