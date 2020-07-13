@@ -95,7 +95,7 @@ pub const Vm = struct {
     }
 
     // TODO we might not want to require `importable` to be comptime
-    pub fn addPackage(vm: *Vm, name: []const u8, comptime importable: var) Allocator.Error!void {
+    pub fn addPackage(vm: *Vm, name: []const u8, comptime importable: anytype) Allocator.Error!void {
         try vm.imports.putNoClobber(name, struct {
             fn func(_vm: *Vm) Vm.Error!*bog.Value {
                 return bog.Value.zigToBog(_vm, importable);
@@ -956,7 +956,7 @@ pub const Vm = struct {
     }
 
     /// Gets function `func_name` from map and calls it with `args`.
-    pub fn call(vm: *Vm, val: *Value, func_name: []const u8, args: var) !*Value {
+    pub fn call(vm: *Vm, val: *Value, func_name: []const u8, args: anytype) !*Value {
         std.debug.assert(vm.call_stack.len == 0); // vm must be in a callable state
         if (val.* != .map) return error.NotAMap;
         const index: Value = .{

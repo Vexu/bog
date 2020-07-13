@@ -252,100 +252,100 @@ pub const Value = union(Type) {
         };
     }
 
-    /// Prints string representation of value to stream
-    pub fn dump(value: *const Value, stream: var, level: u32) @TypeOf(stream).Error!void {
+    /// Prints string representation of value to writer
+    pub fn dump(value: *const Value, writer: anytype, level: u32) @TypeOf(writer).Error!void {
         switch (value.*) {
             .iterator => unreachable,
-            .int => |i| try stream.print("{}", .{i}),
-            .num => |n| try stream.print("{d}", .{n}),
-            .bool => |b| try stream.writeAll(if (b) "true" else "false"),
-            .none => try stream.writeAll("()"),
+            .int => |i| try writer.print("{}", .{i}),
+            .num => |n| try writer.print("{d}", .{n}),
+            .bool => |b| try writer.writeAll(if (b) "true" else "false"),
+            .none => try writer.writeAll("()"),
             .range => |*r| {
                 if (level == 0) {
-                    try stream.writeAll("(range)");
+                    try writer.writeAll("(range)");
                 } else {
-                    try r.begin.dump(stream, level - 1);
-                    try stream.writeAll("...");
-                    try r.end.dump(stream, level - 1);
+                    try r.begin.dump(writer, level - 1);
+                    try writer.writeAll("...");
+                    try r.end.dump(writer, level - 1);
                 }
             },
             .tuple => |t| {
                 if (level == 0) {
-                    try stream.writeAll("(...)");
+                    try writer.writeAll("(...)");
                 } else {
-                    try stream.writeByte('(');
+                    try writer.writeByte('(');
                     for (t) |v, i| {
-                        if (i != 0) try stream.writeAll(", ");
-                        try v.dump(stream, level - 1);
+                        if (i != 0) try writer.writeAll(", ");
+                        try v.dump(writer, level - 1);
                     }
-                    try stream.writeByte(')');
+                    try writer.writeByte(')');
                 }
             },
             .map => |*m| {
                 if (level == 0) {
-                    try stream.writeAll("{...}");
+                    try writer.writeAll("{...}");
                 } else {
-                    try stream.writeByte('{');
+                    try writer.writeByte('{');
                     for (m.items()) |*entry, i| {
                         if (i != 0)
-                            try stream.writeAll(", ");
-                        try entry.key.dump(stream, level - 1);
-                        try stream.writeAll(": ");
-                        try entry.value.dump(stream, level - 1);
+                            try writer.writeAll(", ");
+                        try entry.key.dump(writer, level - 1);
+                        try writer.writeAll(": ");
+                        try entry.value.dump(writer, level - 1);
                     }
-                    try stream.writeByte('}');
+                    try writer.writeByte('}');
                 }
             },
             .list => |*l| {
                 if (level == 0) {
-                    try stream.writeAll("[...]");
+                    try writer.writeAll("[...]");
                 } else {
-                    try stream.writeByte('[');
+                    try writer.writeByte('[');
                     for (l.items) |v, i| {
-                        if (i != 0) try stream.writeAll(", ");
-                        try v.dump(stream, level - 1);
+                        if (i != 0) try writer.writeAll(", ");
+                        try v.dump(writer, level - 1);
                     }
-                    try stream.writeByte(']');
+                    try writer.writeByte(']');
                 }
             },
             .err => |e| {
                 if (level == 0) {
-                    try stream.writeAll("error(...)");
+                    try writer.writeAll("error(...)");
                 } else {
-                    try stream.writeAll("error(");
-                    try e.dump(stream, level - 1);
-                    try stream.writeByte(')');
+                    try writer.writeAll("error(");
+                    try e.dump(writer, level - 1);
+                    try writer.writeByte(')');
                 }
             },
             .str => |s| {
-                try stream.writeByte('"');
+                try writer.writeByte('"');
                 for (s) |c| {
                     switch (c) {
-                        '\n' => try stream.writeAll("\\n"),
-                        '\t' => try stream.writeAll("\\t"),
-                        '\r' => try stream.writeAll("\\r"),
-                        '\'' => try stream.writeAll("\\'"),
-                        '"' => try stream.writeAll("\\\""),
+                        '\n' => try writer.writeAll("\\n"),
+                        '\t' => try writer.writeAll("\\t"),
+                        '\r' => try writer.writeAll("\\r"),
+                        '\'' => try writer.writeAll("\\'"),
+                        '"' => try writer.writeAll("\\\""),
                         else => if (std.ascii.isCntrl(c))
-                            try stream.print("\\x{x:0<2}", .{c})
+                            try writer.print("\\x{x:0<2}", .{c})
                         else
-                            try stream.print("{c}", .{c}),
+                            try writer.print("{c}", .{c}),
                     }
                 }
-                try stream.writeByte('"');
+                try writer.writeByte('"');
             },
             .func => |*f| {
-                try stream.print("fn({})@0x{X}[{}]", .{ f.arg_count, f.offset, f.captures.len });
+                try writer.print("fn({})@0x{X}[{}]", .{ f.arg_count, f.offset, f.captures.len });
             },
             .native => |*n| {
-                try stream.print("native({})@0x{}", .{ n.arg_count, @ptrToInt(n.func) });
+                try writer.print("native({})@0x{}", .{ n.arg_count, @ptrToInt(n.func) });
             },
             .tagged => |*t| {
-                try stream.print("@{}", .{t.name});
+                try writer.print("@{}", .{t.name});
                 if (level == 0) {
-                    try stream.writeAll("(...)");
+                    try writer.writeAll("(...)");
                 } else {
-                    try t.value.dump(stream, level - 1);
+                    try t.value.dump(writer, level - 1);
                 }
             },
             _ => unreachable,
@@ -580,7 +580,7 @@ pub const Value = union(Type) {
     }
 
     /// Converts Zig value to Bog value. Allocates copy in the gc.
-    pub fn zigToBog(vm: *Vm, val: var) Vm.Error!*Value {
+    pub fn zigToBog(vm: *Vm, val: anytype) Vm.Error!*Value {
         switch (@TypeOf(val)) {
             void => return &Value.None,
             bool => return if (val) &Value.True else &Value.False,
@@ -757,7 +757,7 @@ pub const Value = union(Type) {
     }
 };
 
-fn wrapZigFunc(func: var) Value.Native {
+fn wrapZigFunc(func: anytype) Value.Native {
     const Fn = @typeInfo(@TypeOf(func)).Fn;
     if (Fn.is_generic or Fn.is_var_args or Fn.return_type == null)
         @compileError("unsupported function");
@@ -804,12 +804,9 @@ var buffer: [1024]u8 = undefined;
 
 fn testDump(val: Value, expected: []const u8) !void {
     var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
-    const alloc = &buf_alloc.allocator;
 
-    var out_buf = try std.Buffer.initSize(alloc, 0);
-    var out_stream = std.io.BufferOutStream.init(&out_buf);
-
-    try val.dump(&out_stream.stream, 4);
+    var buf = std.ArrayList(u8).init(&buf_alloc.allocator);
+    try val.dump(buf.writer.writer(), 4);
     const result = out_buf.items;
 
     if (!std.mem.eql(u8, result, expected)) {

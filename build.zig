@@ -65,7 +65,7 @@ pub fn build(b: *Builder) void {
     clean_step.dependOn(&rm_examples_bing.step);
 }
 
-fn addTests(b: *Builder, examples_step: *std.build.Step, tests: var) void {
+fn addTests(b: *Builder, examples_step: *std.build.Step, tests: anytype) void {
     const tests_step = b.step("test", "Run all tests");
     tests_step.dependOn(b.getInstallStep());
     tests_step.dependOn(examples_step);

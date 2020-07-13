@@ -5,17 +5,17 @@ const bog = @import("bog.zig");
 const Vm = bog.Vm;
 const Errors = bog.Errors;
 
-pub fn run(gpa: *Allocator, in_stream: var, out_stream: var) !void {
+pub fn run(gpa: *Allocator, reader: anytype, writer: anytype) !void {
     var repl = try Repl.init(gpa);
     defer repl.deinit();
 
     while (true) {
-        repl.handleLine(in_stream, out_stream) catch |err| switch (err) {
+        repl.handleLine(reader, writer) catch |err| switch (err) {
             error.EndOfStream => return,
-            error.TokenizeError, error.ParseError, error.CompileError => try repl.vm.errors.render(repl.buffer.items, out_stream),
+            error.TokenizeError, error.ParseError, error.CompileError => try repl.vm.errors.render(repl.buffer.items, writer),
             error.RuntimeError => {
                 (try repl.vm.gc.stackRef(0)).* = &bog.Value.None;
-                try repl.vm.errors.render(repl.buffer.items, out_stream);
+                try repl.vm.errors.render(repl.buffer.items, writer);
             },
             else => |e| return e,
         };
@@ -100,14 +100,14 @@ pub const Repl = struct {
         repl.root_scope.base.syms.deinit();
     }
 
-    fn handleLine(repl: *Repl, in_stream: var, out_stream: var) !void {
+    fn handleLine(repl: *Repl, reader: anytype, writer: anytype) !void {
         defer {
             repl.arena.deinit();
             repl.arena = std.heap.ArenaAllocator.init(repl.gpa);
         }
-        try repl.readLine(">>> ", in_stream, out_stream);
+        try repl.readLine(">>> ", reader, writer);
         while (!(try repl.tokenize())) {
-            try repl.readLine("... ", in_stream, out_stream);
+            try repl.readLine("... ", reader, writer);
         }
         const node = (try repl.parse()) orelse return;
         var mod = try repl.compile(node);
@@ -116,17 +116,17 @@ pub const Repl = struct {
         const res = try repl.vm.exec(&mod);
         (try repl.vm.gc.stackRef(0)).* = res;
         if (res.* == .none) return;
-        try res.dump(out_stream, 2);
-        try out_stream.writeByte('\n');
+        try res.dump(writer, 2);
+        try writer.writeByte('\n');
     }
 
-    fn readLine(repl: *Repl, prompt: []const u8, in_stream: var, out_stream: var) !void {
-        try out_stream.writeAll(prompt);
+    fn readLine(repl: *Repl, prompt: []const u8, reader: anytype, writer: anytype) !void {
+        try writer.writeAll(prompt);
         const start_len = repl.buffer.items.len;
         while (true) {
-            var byte: u8 = in_stream.readByte() catch |e| switch (e) {
+            var byte: u8 = reader.readByte() catch |e| switch (e) {
                 error.EndOfStream => if (start_len == repl.buffer.items.len) {
-                    try out_stream.writeAll(std.cstr.line_sep);
+                    try writer.writeAll(std.cstr.line_sep);
                     return error.EndOfStream;
                 } else continue,
                 else => |err| return err,

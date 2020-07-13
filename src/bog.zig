@@ -80,7 +80,7 @@ pub const Errors = struct {
         });
     }
 
-    pub fn render(self: *Errors, source: []const u8, out_stream: var) !void {
+    pub fn render(self: *Errors, source: []const u8, writer: anytype) !void {
         const RED = "\x1b[31;1m";
         const GREEN = "\x1b[32;1m";
         const BOLD = "\x1b[0;1m";
@@ -90,18 +90,18 @@ pub const Errors = struct {
         var it = self.list.iterator(0);
         while (it.next()) |e| {
             switch (e.kind) {
-                .err => try out_stream.writeAll(RED ++ "error: " ++ BOLD),
-                .note => try out_stream.writeAll(CYAN ++ "note: " ++ BOLD),
+                .err => try writer.writeAll(RED ++ "error: " ++ BOLD),
+                .note => try writer.writeAll(CYAN ++ "note: " ++ BOLD),
                 .trace => {},
             }
-            try out_stream.print("{}\n" ++ RESET, .{e.msg});
+            try writer.print("{}\n" ++ RESET, .{e.msg});
 
             const start = lineBegin(source, e.index);
             const end = zig_std.mem.indexOfScalarPos(u8, source, e.index, '\n') orelse source.len;
-            try out_stream.writeAll(source[start..end]);
-            try out_stream.writeAll(zig_std.cstr.line_sep);
-            try out_stream.writeByteNTimes(' ', e.index - start);
-            try out_stream.writeAll(GREEN ++ "^\n" ++ RESET);
+            try writer.writeAll(source[start..end]);
+            try writer.writeAll(zig_std.cstr.line_sep);
+            try writer.writeByteNTimes(' ', e.index - start);
+            try writer.writeAll(GREEN ++ "^\n" ++ RESET);
         }
         self.list.shrink(0);
     }

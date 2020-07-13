@@ -610,7 +610,7 @@ const Vm = bog.Vm;
 
 var buffer: [20 * 1024]u8 = undefined;
 
-fn expectCallOutput(source: []const u8, args: var, expected: []const u8) void {
+fn expectCallOutput(source: []const u8, args: anytype, expected: []const u8) void {
     var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
     const alloc = &buf_alloc.allocator;
 

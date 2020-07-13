@@ -205,7 +205,7 @@ fn fmtFile(gpa: *std.mem.Allocator, name: []const u8) FmtError!bool {
     return false;
 }
 
-fn printAndExit(comptime msg: []const u8, args: var) noreturn {
+fn printAndExit(comptime msg: []const u8, args: anytype) noreturn {
     std.io.getStdErr().writer().print(msg ++ "\n", args) catch {};
     process.exit(1);
 }

@@ -307,32 +307,32 @@ pub const Module = struct {
         };
     }
 
-    /// Writes a module to a stream.
-    pub fn write(module: Module, stream: var) @TypeOf(stream).Error!void {
-        try stream.writeAll(magic);
-        try stream.writeIntLittle(u32, bytecode_version);
+    /// Serializes the module to a writer.
+    pub fn write(module: Module, writer: anytype) @TypeOf(writer).Error!void {
+        try writer.writeAll(magic);
+        try writer.writeIntLittle(u32, bytecode_version);
 
         // strings come immediately after header
         const strings_offset = @intCast(u32, @sizeOf(Header));
-        try stream.writeIntLittle(u32, strings_offset);
+        try writer.writeIntLittle(u32, strings_offset);
 
         // code comes immediately after strings
         const code_offset = strings_offset + @intCast(u32, module.strings.len);
-        try stream.writeIntLittle(u32, code_offset);
+        try writer.writeIntLittle(u32, code_offset);
 
         // entry is offset to the beginning of the code
         const entry_offset = code_offset + module.entry;
-        try stream.writeIntLittle(u32, entry_offset);
+        try writer.writeIntLittle(u32, entry_offset);
 
         // write strings
-        try stream.writeAll(module.strings);
+        try writer.writeAll(module.strings);
 
         // write code
-        try stream.writeAll(mem.sliceAsBytes(module.code));
+        try writer.writeAll(mem.sliceAsBytes(module.code));
     }
 
     /// Pretty prints debug info about the module.
-    pub fn dump(module: Module, allocator: *Allocator, stream: var) (@TypeOf(stream).Error || Allocator.Error)!void {
+    pub fn dump(module: Module, allocator: *Allocator, writer: anytype) (@TypeOf(writer).Error || Allocator.Error)!void {
         var arena_allocator = std.heap.ArenaAllocator.init(allocator);
         defer arena_allocator.deinit();
         const arena = &arena_allocator.allocator;
@@ -341,29 +341,29 @@ pub const Module = struct {
         var ip: usize = 0;
         while (ip < module.code.len) {
             if (ip == module.entry) {
-                try stream.writeAll("\nentry:");
+                try writer.writeAll("\nentry:");
             }
             if (jumps.get(ip)) |label| {
-                try stream.print("\n{}:", .{label});
+                try writer.print("\n{}:", .{label});
             }
             const inst = module.code[ip];
             ip += 1;
             if (inst.op.op != .line_info) {
-                try stream.print("\n {: <5} {: <20} ", .{ ip, @tagName(inst.op.op) });
+                try writer.print("\n {: <5} {: <20} ", .{ ip, @tagName(inst.op.op) });
             }
             switch (inst.op.op) {
                 .const_primitive => {
-                    try stream.print("{} <- ({})\n", .{ inst.primitive.res, @tagName(inst.primitive.kind) });
+                    try writer.print("{} <- ({})\n", .{ inst.primitive.res, @tagName(inst.primitive.kind) });
                 },
                 .const_int => {
                     const val = if (inst.int.long) blk: {
                         ip += 2;
                         break :blk module.code[ip - 2].bare_signed;
                     } else inst.int.arg;
-                    try stream.print("{} <- ({})\n", .{ inst.int.res, val });
+                    try writer.print("{} <- ({})\n", .{ inst.int.res, val });
                 },
                 .const_num => {
-                    try stream.print("{} <- ({d})\n", .{ inst.single.arg, @ptrCast(*align(@alignOf(Instruction)) const f64, &module.code[ip]).* });
+                    try writer.print("{} <- ({d})\n", .{ inst.single.arg, @ptrCast(*align(@alignOf(Instruction)) const f64, &module.code[ip]).* });
                     ip += 2;
                 },
                 .const_string_off, .import_off => {
@@ -374,7 +374,7 @@ pub const Module = struct {
 
                     const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
                     const slice = module.strings[offset + @sizeOf(u32) ..][0..len];
-                    try stream.print("{} <- \"{}\"\n", .{ inst.off.res, slice });
+                    try writer.print("{} <- \"{}\"\n", .{ inst.off.res, slice });
                 },
 
                 .build_tagged => {
@@ -384,9 +384,9 @@ pub const Module = struct {
                     const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
                     const slice = module.strings[offset + @sizeOf(u32) ..][0..len];
                     if (inst.tagged.kind == .none)
-                        try stream.print("{} <- @{}\n", .{ inst.off.res, slice })
+                        try writer.print("{} <- @{}\n", .{ inst.off.res, slice })
                     else
-                        try stream.print("{} <- @{}({})\n", .{ inst.off.res, slice, inst.tagged.arg });
+                        try writer.print("{} <- @{}({})\n", .{ inst.off.res, slice, inst.tagged.arg });
                 },
 
                 .jump, .jump_false, .jump_true, .jump_none, .jump_not_error => {
@@ -398,16 +398,16 @@ pub const Module = struct {
                     const label = jumps.get(jump_target) orelse unreachable;
 
                     if (inst.jump.op == .jump)
-                        try stream.print("to {}\n", .{label})
+                        try writer.print("to {}\n", .{label})
                     else
-                        try stream.print("to {}, cond {}\n", .{ label, inst.jump.arg });
+                        try writer.print("to {}, cond {}\n", .{ label, inst.jump.arg });
                 },
 
                 .build_func => {
                     const offset = module.code[ip].bare;
                     ip += 1;
                     const label = jumps.get(offset) orelse unreachable;
-                    try stream.print("{} <- {}({})[{}]\n", .{ inst.func.res, label, inst.func.arg_count, inst.func.capture_count });
+                    try writer.print("{} <- {}({})[{}]\n", .{ inst.func.res, label, inst.func.arg_count, inst.func.capture_count });
                 },
 
                 .div_floor_triple,
@@ -432,23 +432,23 @@ pub const Module = struct {
                 .bool_and_triple,
                 .bool_or_triple,
                 => {
-                    try stream.print("{} <- {} {} {}\n", .{ inst.triple.res, inst.triple.lhs, opToStr(inst.triple.op), inst.triple.rhs });
+                    try writer.print("{} <- {} {} {}\n", .{ inst.triple.res, inst.triple.lhs, opToStr(inst.triple.op), inst.triple.rhs });
                 },
                 .get_triple => {
-                    try stream.print("{} <- {}[{}]\n", .{ inst.triple.res, inst.triple.lhs, inst.triple.rhs });
+                    try writer.print("{} <- {}[{}]\n", .{ inst.triple.res, inst.triple.lhs, inst.triple.rhs });
                 },
                 .set_triple => {
-                    try stream.print("{}[{}] <- {}\n", .{ inst.triple.res, inst.triple.lhs, inst.triple.rhs });
+                    try writer.print("{}[{}] <- {}\n", .{ inst.triple.res, inst.triple.lhs, inst.triple.rhs });
                 },
 
                 .iter_next_double => {
                     const jump_target = ip + module.code[ip].bare;
                     ip += 1;
                     const label = jumps.get(jump_target) orelse unreachable;
-                    try stream.print("{} <- {}, jump_none to {}\n", .{ inst.double.res, inst.double.arg, label });
+                    try writer.print("{} <- {}, jump_none to {}\n", .{ inst.double.res, inst.double.arg, label });
                 },
                 .build_error_double, .unwrap_error_double, .iter_init_double, .move_double, .copy_double, .append_double => {
-                    try stream.print("{} <- {}\n", .{ inst.double.res, inst.double.arg });
+                    try writer.print("{} <- {}\n", .{ inst.double.res, inst.double.arg });
                 },
                 .unwrap_tagged => {
                     const offset = module.code[ip].bare;
@@ -456,49 +456,49 @@ pub const Module = struct {
 
                     const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
                     const slice = module.strings[offset + @sizeOf(u32) ..][0..len];
-                    try stream.print("{} <- @{}({})\n", .{ inst.double.res, slice, inst.double.arg });
+                    try writer.print("{} <- @{}({})\n", .{ inst.double.res, slice, inst.double.arg });
                 },
                 .bool_not_double, .bit_not_double, .negate_double, .try_double => {
-                    try stream.print("{} <- {} {}\n", .{ inst.double.res, opToStr(inst.double.op), inst.double.arg });
+                    try writer.print("{} <- {} {}\n", .{ inst.double.res, opToStr(inst.double.op), inst.double.arg });
                 },
 
                 .store_capture_triple => {
-                    try stream.print("{}[{}] <- {}\n", .{ inst.triple.res, inst.triple.rhs, inst.triple.lhs });
+                    try writer.print("{}[{}] <- {}\n", .{ inst.triple.res, inst.triple.rhs, inst.triple.lhs });
                 },
                 .load_capture_double => {
-                    try stream.print("{} <- [{}]\n", .{ inst.double.res, inst.double.arg });
+                    try writer.print("{} <- [{}]\n", .{ inst.double.res, inst.double.arg });
                 },
                 .build_tuple_off, .build_list_off, .build_map_off => {
                     const size = if (inst.off.isArg()) blk: {
                         ip += 1;
                         break :blk module.code[ip - 1].bare;
                     } else inst.off.off;
-                    try stream.print("{} <- size:{}\n", .{ inst.off.res, size });
+                    try writer.print("{} <- size:{}\n", .{ inst.off.res, size });
                 },
 
                 .call => {
                     var first = inst.call.first;
                     const last = module.code[ip].bare + first;
-                    try stream.print("{} <- {}(", .{ inst.call.res, inst.call.func });
+                    try writer.print("{} <- {}(", .{ inst.call.res, inst.call.func });
                     var comma = false;
                     while (first < last) : (first += 1) {
                         if (comma) {
-                            try stream.writeAll(", ");
+                            try writer.writeAll(", ");
                         } else comma = true;
-                        try stream.print("{}", .{first});
+                        try writer.print("{}", .{first});
                     }
-                    try stream.writeAll(")\n");
+                    try writer.writeAll(")\n");
                     ip += 1;
                 },
 
                 .line_info => ip += 1,
                 .is_type_id, .as_type_id => {
-                    try stream.print("{} <- {} {} {}\n", .{ inst.type_id.res, inst.type_id.arg, opToStr(inst.op.op), @tagName(inst.type_id.type_id) });
+                    try writer.print("{} <- {} {} {}\n", .{ inst.type_id.res, inst.type_id.arg, opToStr(inst.op.op), @tagName(inst.type_id.type_id) });
                 },
                 .discard_single, .return_single, .load_this_single => {
-                    try stream.print("{}\n", .{inst.single.arg});
+                    try writer.print("{}\n", .{inst.single.arg});
                 },
-                .return_none => try stream.writeByte('\n'),
+                .return_none => try writer.writeByte('\n'),
                 _ => unreachable,
             }
         }

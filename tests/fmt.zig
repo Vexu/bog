@@ -7,7 +7,7 @@ test "ignore comments in indent blocks" {
         \\#foo bar
         \\                #quux
         \\    return 2
-    ,// TODO improve comment rendering
+    , // TODO improve comment rendering
         \\const foo = fn()
         \\#quux
         \\#foo bar
