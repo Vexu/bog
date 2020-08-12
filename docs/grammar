@@ -6,9 +6,7 @@ stmt
 
 decl : ("let" | "const") primary_expr
 
-expr : expr_no_range? (":" expr_no_range? (":" expr_no_range?)?)?
-
-expr_no_range
+expr
     : fn
     | jump_expr
     | bool_expr assign?
@@ -29,10 +27,14 @@ bool_expr
     | comparision_expr ("and" comparision_expr)*
 
 comparision_expr
-    : bit_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in") bit_expr)?
-    | bit_expr ("is" type_name)?
+    : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in") range_expr)?
+    | range_expr ("is" type_name)?
 
 type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
+
+range_expr
+    IF(allow_range) bit_expr? (":" bit_expr? (":" bit_expr?)?)?
+    ELSE bit_expr
 
 bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)* | ("catch" ("(" decl ")")? block_or_expr))?
 
@@ -74,7 +76,7 @@ primary_expr
 initializer
     : "(" block_or_expr ")"
     | "(" (expr ",")+ expr? ")"
-    | "{" (expr_no_range ":" expr_no_range ",")* (expr_no_range ":" expr_no_range)? "}"
+    | "{" (expr ":" expr ",")* (expr ":" expr)? "}"
     | "[" (expr ",")* expr? "]"
 
 if : "if" "(" (decl "=")? expr ")" block_or_expr ("else" block_or_expr)?

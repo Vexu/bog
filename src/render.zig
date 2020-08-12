@@ -87,15 +87,15 @@ const Renderer = struct {
             .Range => {
                 const range = @fieldParentPtr(Node.Range, "base", node);
 
-                if (range.start) |some| try self.renderNode(some, stream, indent, .none);
-                try self.renderToken(range.colon_1, stream, indent, if (range.end == null and
+                if (range.start) |some| try self.renderNode(some, writer, indent, .none);
+                try self.renderToken(range.colon_1, writer, indent, if (range.end == null and
                     range.colon_2 == null and
                     range.step == null) space else .none);
                 if (range.end) |some|
-                    try self.renderNode(some, stream, indent, if (range.colon_2 == null and
+                    try self.renderNode(some, writer, indent, if (range.colon_2 == null and
                         range.step == null) space else .none);
-                if (range.colon_2) |some| try self.renderToken(some, stream, indent, if (range.step == null) space else .none);
-                if (range.step) |some| try self.renderNode(some, stream, indent, space);
+                if (range.colon_2) |some| try self.renderToken(some, writer, indent, if (range.step == null) space else .none);
+                if (range.step) |some| try self.renderNode(some, writer, indent, space);
             },
             .Prefix => {
                 const prefix = @fieldParentPtr(Node.Prefix, "base", node);

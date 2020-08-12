@@ -499,7 +499,7 @@ pub const Module = struct {
                 .build_range => {
                     const cont = module.code[ip].range_cont;
                     ip += 1;
-                    try stream.print("{} <- {}:{}:{}\n", .{ inst.range.res, inst.range.start, inst.range.end, cont.step });
+                    try writer.print("{} <- {}:{}:{}\n", .{ inst.range.res, inst.range.start, inst.range.end, cont.step });
                 },
 
                 .call => {

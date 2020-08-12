@@ -5,12 +5,12 @@ test "range" {
         \\[0, 2, 4, 6]
     );
     expectOutput(
-        \\return 1 in (0:2)
+        \\return 1 in 0:2
     ,
         \\true
     );
     expectOutput(
-        \\return 1 in (0:2:2)
+        \\return 1 in 0:2:2
     ,
         \\false
     );
