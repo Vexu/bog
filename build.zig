@@ -56,6 +56,7 @@ pub fn build(b: *Builder) void {
         "build.zig",
         "src",
         "examples",
+        "tests",
     }).step);
 
     const clean_step = b.step("clean", "Delete all artifacts created by zig build");

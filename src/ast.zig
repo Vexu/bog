@@ -35,6 +35,7 @@ pub const Node = struct {
         Prefix,
         Infix,
         TypeInfix,
+        Range,
         Suffix,
         Literal,
         Import,
@@ -64,6 +65,11 @@ pub const Node = struct {
             .Identifier, .Discard, .This => @fieldParentPtr(Node.SingleToken, "base", node).tok,
             .Prefix => @fieldParentPtr(Node.Prefix, "base", node).tok,
             .Infix => @fieldParentPtr(Node.Infix, "base", node).lhs.firstToken(),
+            .Range => {
+                const range = @fieldParentPtr(Node.Range, "base", node);
+                if (range.start) |some| return some.firstToken();
+                return range.colon_1;
+            },
             .TypeInfix => @fieldParentPtr(Node.TypeInfix, "base", node).lhs.firstToken(),
             .Suffix => @fieldParentPtr(Node.Suffix, "base", node).l_tok,
             .Literal => {
@@ -102,6 +108,13 @@ pub const Node = struct {
             .Prefix => @fieldParentPtr(Node.Prefix, "base", node).rhs.lastToken(),
             .Infix => @fieldParentPtr(Node.Infix, "base", node).rhs.lastToken(),
             .TypeInfix => @fieldParentPtr(Node.TypeInfix, "base", node).type_tok,
+            .Range => {
+                const range = @fieldParentPtr(Node.Range, "base", node);
+                if (range.step) |some| return some.firstToken();
+                if (range.colon_2) |some| return some;
+                if (range.end) |some| return some.firstToken();
+                return range.colon_1;
+            },
             .Suffix => @fieldParentPtr(Node.Suffix, "base", node).r_tok,
             .Literal => @fieldParentPtr(Node.Literal, "base", node).tok,
             .Import => @fieldParentPtr(Node.Import, "base", node).r_paren,
@@ -148,7 +161,7 @@ pub const Node = struct {
     }
 
     pub const Decl = struct {
-        base: Node = Node{ .id = .Decl },
+        base: Node = .{ .id = .Decl },
         capture: *Node,
         value: *Node,
         let_const: TokenIndex,
@@ -156,7 +169,7 @@ pub const Node = struct {
     };
 
     pub const Fn = struct {
-        base: Node = Node{ .id = .Fn },
+        base: Node = .{ .id = .Fn },
         params: []*Node,
         body: *Node,
         fn_tok: TokenIndex,
@@ -169,7 +182,7 @@ pub const Node = struct {
     };
 
     pub const Prefix = struct {
-        base: Node = Node{ .id = .Prefix },
+        base: Node = .{ .id = .Prefix },
         op: Op,
         tok: TokenIndex,
         rhs: *Node,
@@ -184,7 +197,7 @@ pub const Node = struct {
     };
 
     pub const TypeInfix = struct {
-        base: Node = Node{ .id = .TypeInfix },
+        base: Node = .{ .id = .TypeInfix },
         op: enum {
             is,
             as,
@@ -195,7 +208,7 @@ pub const Node = struct {
     };
 
     pub const Infix = struct {
-        base: Node = Node{ .id = .Infix },
+        base: Node = .{ .id = .Infix },
         op: enum {
             BoolOr,
             BoolAnd,
@@ -206,7 +219,6 @@ pub const Node = struct {
             Equal,
             NotEqual,
             In,
-            Range,
             BitAnd,
             BitOr,
             BitXor,
@@ -240,8 +252,17 @@ pub const Node = struct {
         rhs: *Node,
     };
 
+    pub const Range = struct {
+        base: Node = .{ .id = .Range },
+        start: ?*Node,
+        end: ?*Node,
+        step: ?*Node,
+        colon_1: TokenIndex,
+        colon_2: ?TokenIndex,
+    };
+
     pub const Suffix = struct {
-        base: Node = Node{ .id = .Suffix },
+        base: Node = .{ .id = .Suffix },
         lhs: *Node,
         op: union(enum) {
             call: []*Node,
@@ -253,7 +274,7 @@ pub const Node = struct {
     };
 
     pub const Literal = struct {
-        base: Node = Node{ .id = .Literal },
+        base: Node = .{ .id = .Literal },
         kind: enum {
             str,
             num,
@@ -266,20 +287,20 @@ pub const Node = struct {
     };
 
     pub const Import = struct {
-        base: Node = Node{ .id = .Import },
+        base: Node = .{ .id = .Import },
         tok: TokenIndex,
         str_tok: TokenIndex,
         r_paren: TokenIndex,
     };
 
     pub const Error = struct {
-        base: Node = Node{ .id = .Error },
+        base: Node = .{ .id = .Error },
         tok: TokenIndex,
         capture: ?*Node,
     };
 
     pub const Tagged = struct {
-        base: Node = Node{ .id = .Tagged },
+        base: Node = .{ .id = .Tagged },
         at: TokenIndex,
         name: TokenIndex,
         capture: ?*Node,
@@ -298,21 +319,21 @@ pub const Node = struct {
     };
 
     pub const Grouped = struct {
-        base: Node = Node{ .id = .Grouped },
+        base: Node = .{ .id = .Grouped },
         expr: *Node,
         l_tok: TokenIndex,
         r_tok: TokenIndex,
     };
 
     pub const MapItem = struct {
-        base: Node = Node{ .id = .MapItem },
+        base: Node = .{ .id = .MapItem },
         key: ?*Node,
         colon: ?TokenIndex,
         value: *Node,
     };
 
     pub const Catch = struct {
-        base: Node = Node{ .id = .Catch },
+        base: Node = .{ .id = .Catch },
         tok: TokenIndex,
         lhs: *Node,
         capture: ?*Node,
@@ -321,7 +342,7 @@ pub const Node = struct {
     };
 
     pub const If = struct {
-        base: Node = Node{ .id = .If },
+        base: Node = .{ .id = .If },
         cond: *Node,
         if_body: *Node,
         else_body: ?*Node,
@@ -334,7 +355,7 @@ pub const Node = struct {
     };
 
     pub const For = struct {
-        base: Node = Node{ .id = .For },
+        base: Node = .{ .id = .For },
         capture: ?*Node,
         cond: *Node,
         body: *Node,
@@ -345,7 +366,7 @@ pub const Node = struct {
     };
 
     pub const While = struct {
-        base: Node = Node{ .id = .While },
+        base: Node = .{ .id = .While },
         cond: *Node,
         body: *Node,
         capture: ?*Node,
@@ -356,7 +377,7 @@ pub const Node = struct {
     };
 
     pub const Match = struct {
-        base: Node = Node{ .id = .Match },
+        base: Node = .{ .id = .Match },
         expr: *Node,
         cases: []*Node,
         match_tok: TokenIndex,
@@ -364,29 +385,29 @@ pub const Node = struct {
     };
 
     pub const MatchCatchAll = struct {
-        base: Node = Node{ .id = .MatchCatchAll },
+        base: Node = .{ .id = .MatchCatchAll },
         expr: *Node,
         tok: TokenIndex,
-        colon: TokenIndex,
+        eq_arr: TokenIndex,
     };
 
     pub const MatchLet = struct {
-        base: Node = Node{ .id = .MatchLet },
+        base: Node = .{ .id = .MatchLet },
         capture: *Node,
         expr: *Node,
         let_const: TokenIndex,
-        colon: TokenIndex,
+        eq_arr: TokenIndex,
     };
 
     pub const MatchCase = struct {
-        base: Node = Node{ .id = .MatchCase },
+        base: Node = .{ .id = .MatchCase },
         lhs: []*Node,
         expr: *Node,
-        colon: TokenIndex,
+        eq_arr: TokenIndex,
     };
 
     pub const Jump = struct {
-        base: Node = Node{ .id = .Jump },
+        base: Node = .{ .id = .Jump },
         tok: TokenIndex,
         op: union(enum) {
             Break,

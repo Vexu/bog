@@ -32,7 +32,9 @@ comparision_expr
 
 type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
 
-range_expr : bit_expr ("..." bit_expr)?
+range_expr
+    IF(allow_range) bit_expr? (":" bit_expr? (":" bit_expr?)?)?
+    ELSE bit_expr
 
 bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)* | ("catch" ("(" decl ")")? block_or_expr))?
 
@@ -86,5 +88,5 @@ for : "for" "(" (decl "in")? expr ")" block_or_expr
 match : "match" "(" expr ")" (NL match_case)+ NL
 
 match_case
-    : decl ":" block_or_expr
-    | expr ("," expr)* ","? ":" block_or_expr
+    : decl "=>" block_or_expr
+    | expr ("," expr)* ","? "=>" block_or_expr
