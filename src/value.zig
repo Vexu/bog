@@ -163,7 +163,6 @@ pub const Value = union(Type) {
                 // TODO string memory management
             },
             .func => |*f| allocator.free(f.captures),
-            _ => unreachable,
         }
         value.* = undefined;
     }
@@ -212,7 +211,6 @@ pub const Value = union(Type) {
                 hasher.update(tagged.name);
                 autoHash(&hasher, tagged.value);
             },
-            _ => unreachable,
         }
         return @truncate(u32, hasher.final());
     }
@@ -270,7 +268,6 @@ pub const Value = union(Type) {
                 if (!mem.eql(u8, t.name, b.tagged.name)) return false;
                 return t.value.eql(b.tagged.value);
             },
-            _ => unreachable,
         };
     }
 
@@ -364,7 +361,6 @@ pub const Value = union(Type) {
                     try t.value.dump(writer, level - 1);
                 }
             },
-            _ => unreachable,
         }
     }
 

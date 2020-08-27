@@ -304,12 +304,10 @@ const mem = std.mem;
 const warn = std.debug.warn;
 const bog = @import("bog");
 
-var buffer: [10 * 1024]u8 = undefined;
+var state = std.heap.GeneralPurposeAllocator(.{}){};
+const alloc = &state.allocator;
 
 fn testTransform(source: []const u8, expected: []const u8) void {
-    var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
-    const alloc = &buf_alloc.allocator;
-
     var errors = bog.Errors.init(alloc);
     var tree = bog.parse(alloc, source, &errors) catch |e| switch (e) {
         else => @panic("test failure"),

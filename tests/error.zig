@@ -69,12 +69,10 @@ const bog = @import("bog");
 const Vm = bog.Vm;
 const Errors = bog.Errors;
 
-var buffer: [10 * 1024]u8 = undefined;
+var state = std.heap.GeneralPurposeAllocator(.{}){};
+const alloc = &state.allocator;
 
 fn expectError(source: []const u8, expected: []const u8) void {
-    var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
-    const alloc = &buf_alloc.allocator;
-
     var vm = Vm.init(alloc, .{});
     defer vm.deinit();
 

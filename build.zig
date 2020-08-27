@@ -32,7 +32,6 @@ pub fn build(b: *Builder) void {
 
     // calling zig from bog example
     const zig_from_bog = b.addExecutable("zig_from_bog", "examples/zig_from_bog.zig");
-    zig_from_bog.linkLibC();
     zig_from_bog.addPackagePath("bog", "src/bog.zig");
     zig_from_bog.setOutputDir("examples/bin");
 
@@ -49,7 +48,6 @@ pub fn build(b: *Builder) void {
 
     var exe = b.addExecutable("bog", "src/main.zig");
     exe.install();
-    exe.linkLibC();
 
     const fmt_step = b.step("fmt", "Format all source files");
     fmt_step.dependOn(&b.addFmt(&[_][]const u8{

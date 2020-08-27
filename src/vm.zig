@@ -755,8 +755,8 @@ pub const Vm = struct {
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
 
-                    const ret_val = try vm.gc.stackAlloc(vm.sp + frame.ret_reg);
-                    ret_val.* = arg.*;
+                    const ret_val = try vm.gc.stackRef(vm.sp + frame.ret_reg);
+                    ret_val.* = arg;
                 },
                 .return_none => {
                     if (vm.call_stack.len == start_len) {

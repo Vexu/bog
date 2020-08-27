@@ -635,15 +635,13 @@ const testing = std.testing;
 const bog = @import("bog");
 const Vm = bog.Vm;
 
-var buffer: [20 * 1024]u8 = undefined;
+var state = std.heap.GeneralPurposeAllocator(.{}){};
+const alloc = &state.allocator;
 
 fn expectCallOutput(source: []const u8, args: anytype, expected: []const u8) void {
-    var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
-    const alloc = &buf_alloc.allocator;
-
     var vm = Vm.init(alloc, .{});
     defer vm.deinit();
-    const res = run(alloc, source, &vm) catch |e| switch (e) {
+    const res = run(source, &vm) catch |e| switch (e) {
         else => @panic("test failure"),
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
             vm.errors.render(source, std.io.getStdErr().outStream()) catch {};
@@ -664,13 +662,10 @@ fn expectCallOutput(source: []const u8, args: anytype, expected: []const u8) voi
 }
 
 fn expectOutput(source: []const u8, expected: []const u8) void {
-    var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
-    const alloc = &buf_alloc.allocator;
-
     var vm = Vm.init(alloc, .{});
     defer vm.deinit();
     vm.addStd() catch unreachable;
-    const res = run(alloc, source, &vm) catch |e| switch (e) {
+    const res = run(source, &vm) catch |e| switch (e) {
         else => @panic("test failure"),
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
             vm.errors.render(source, std.io.getStdErr().outStream()) catch {};
@@ -683,7 +678,7 @@ fn expectOutput(source: []const u8, expected: []const u8) void {
     testing.expectEqualStrings(expected, out_buf.items);
 }
 
-fn run(alloc: *mem.Allocator, source: []const u8, vm: *Vm) !*bog.Value {
+fn run(source: []const u8, vm: *Vm) !*bog.Value {
     var module = try bog.compile(alloc, source, &vm.errors);
 
     // TODO this should happen in vm.exec but currently that would break repl

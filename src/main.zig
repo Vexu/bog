@@ -5,9 +5,10 @@ const bog = @import("bog.zig");
 const repl = bog.repl;
 
 const is_debug = @import("builtin").mode == .Debug;
+var state = std.heap.GeneralPurposeAllocator(.{}){};
 
 pub fn main() !void {
-    const gpa = std.heap.c_allocator;
+    const gpa = &state.allocator;
 
     const args = try process.argsAlloc(gpa);
     defer process.argsFree(gpa, args);
