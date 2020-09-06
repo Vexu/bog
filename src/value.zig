@@ -139,7 +139,7 @@ pub const Value = union(Type) {
     bool: bool,
     none,
 
-    pub const Map = std.hash_map.HashMapUnmanaged(*const Value, *Value, hash, eql, true);
+    pub const Map = std.array_hash_map.ArrayHashMapUnmanaged(*const Value, *Value, hash, eql, true);
     pub const List = std.ArrayListUnmanaged(*Value);
     pub const Native = struct {
         arg_count: u8,

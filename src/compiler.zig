@@ -802,8 +802,8 @@ pub const Compiler = struct {
             .Block => true,
             .Infix => switch (@fieldParentPtr(Node.Infix, "base", last).op) {
                 .Assign, .AddAssign, .SubAssign, .MulAssign, .PowAssign, // -
-                    .DivAssign, .DivFloorAssign, .ModAssign, .LShiftAssign, // -
-                    .RShiftAssign, .BitAndAssign, .BitOrAssign, .BitXOrAssign => true,
+                .DivAssign, .DivFloorAssign, .ModAssign, .LShiftAssign, // -
+                .RShiftAssign, .BitAndAssign, .BitOrAssign, .BitXOrAssign => true,
                 else => false,
             },
             else => false,
