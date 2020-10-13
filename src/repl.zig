@@ -27,7 +27,6 @@ pub const Repl = struct {
     arena: std.heap.ArenaAllocator,
     vm: Vm,
     buffer: ArrayList(u8),
-    root_scope: @import("compiler.zig").ModuleScope,
     strings: std.ArrayList(u8),
     module_code: bog.Compiler.Code,
     string_interner: std.StringHashMap(u32),

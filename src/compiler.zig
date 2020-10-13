@@ -12,9 +12,6 @@ const util = @import("util.zig");
 
 pub const max_params = 32;
 
-// made pub here to not expose it from bog.zig
-pub const ModuleScope = Compiler.Scope.Module;
-
 pub fn compile(gpa: *Allocator, source: []const u8, errors: *Errors) (Compiler.Error || bog.Parser.Error || bog.Tokenizer.Error)!*bog.Module {
     var tree = try bog.parse(gpa, source, errors);
     defer tree.deinit();
@@ -121,242 +118,65 @@ pub const Compiler = struct {
     source: []const u8,
     errors: *Errors,
     arena: *Allocator,
-    cur_scope: *Scope,
-    used_regs: RegRef = 0,
-    code: *Code,
-    module_code: Code,
+    scope: std.ArrayList(Scope),
+    func: *Fn,
     strings: std.ArrayList(u8),
     string_interner: std.StringHashMap(u32),
 
-    pub const Code = std.ArrayList(bog.Instruction);
+    pub const Fn = struct {
+        code: std.ArrayList(bog.Instruction),
+        registers: std.PackedIntArray(u1, 256) = .{
+            .bytes = [0]u8{0} ** 32,
+        },
+        // index of first free register
+        free_index: u8 = 0,
 
-    pub const Error = error{CompileError} || Allocator.Error;
-
-    fn registerAlloc(self: *Compiler) RegRef {
-        defer self.used_regs += 1;
-        if (self.used_regs == 0xff) @panic("TODO: ran out of registers");
-        return self.used_regs;
-    }
-
-    fn registerFree(self: *Compiler, reg: RegRef) void {
-        if (reg == self.used_regs - 1) {
-            self.used_regs -= 1;
-        }
-    }
-
-    fn emitSingle(self: *Compiler, op: bog.Op, arg: RegRef) !void {
-        try self.code.append(.{
-            .single = .{
-                .op = op,
-                .arg = arg,
-            },
-        });
-    }
-
-    fn emitDouble(self: *Compiler, op: bog.Op, res: RegRef, arg: RegRef) !void {
-        try self.code.append(.{
-            .double = .{
-                .op = op,
-                .res = res,
-                .arg = arg,
-            },
-        });
-    }
-
-    fn emitTriple(self: *Compiler, op: bog.Op, res: RegRef, lhs: RegRef, rhs: RegRef) !void {
-        try self.code.append(.{
-            .triple = .{
-                .op = op,
-                .res = res,
-                .lhs = lhs,
-                .rhs = rhs,
-            },
-        });
-    }
-
-    fn emitOff(self: *Compiler, op: bog.Op, res: RegRef, off: u32) !void {
-        const long = off >= 0xFFFF;
-        try self.code.append(.{
-            .off = .{
-                .op = op,
-                .res = res,
-                .off = if (long) 0xFFFF else @truncate(u16, off),
-            },
-        });
-        if (long) try self.code.append(.{ .bare = off });
-    }
-
-    fn emitJump(self: *Compiler, op: bog.Op, arg: ?RegRef) !u32 {
-        try self.code.append(.{ .jump = .{ .op = op, .arg = arg orelse 0 } });
-        try self.code.append(undefined);
-        return @intCast(u32, self.code.items.len - 1);
-    }
-
-    const Scope = struct {
-        id: Id,
-        parent: ?*Scope,
-        syms: Symbol.List,
-
-        const Id = enum {
-            module,
-            func,
-            loop,
-            block,
-            capture,
-            try_catch,
-        };
-
-        const Fn = struct {
-            base: Scope,
-            code: Code,
-            captures: *Symbol.List,
-        };
-
-        const Module = struct {
-            base: Scope,
-            code: Code,
-        };
-
-        const Loop = struct {
-            base: Scope,
-            breaks: BreakList,
-            cond_begin: u32,
-
-            const BreakList = std.ArrayList(u32);
-        };
-
-        const Try = struct {
-            base: Scope,
-            jumps: JumpList,
-            err_reg: RegRef,
-
-            const JumpList = std.ArrayList(u32);
-        };
-
-        fn declSymbol(self: *Scope, sym: Symbol) !void {
-            try self.syms.append(sym);
-        }
-
-        fn isDeclared(scope: *Scope, name: []const u8) ?*Symbol {
-            var cur: ?*Scope = scope;
-            while (cur) |some| {
-                var i = some.syms.items.len;
-                while (i > 0) {
-                    i -= 1;
-                    const sym = &some.syms.items[i];
-                    if (mem.eql(u8, sym.name, name)) {
-                        return sym;
-                    }
+        fn regAlloc(self: *Fn) !RegRef {
+            var i: u32 = self.free_index;
+            while (i < 256) : (i += 1) {
+                if (self.regs.get(i) == 0) {
+                    self.regs.set(i, 1);
+                    self.free_index = i;
+                    return i;
                 }
-                cur = some.parent;
             }
-            return null;
+            return error.RanOutOfRegisters;
         }
 
-        fn getSymbol(scope: *Scope, self: *Compiler, name: []const u8, tok: TokenIndex) !RegAndMut {
-            return try scope.getSymbolTail(self, name, null, tok);
+        fn regFree(self: *Fn, reg: RegRef) void {
+            self.regs.set(reg, 0);
+            self.free_index = std.math.min(self.free_index, reg);
         }
-
-        fn getSymbolTail(scope: *Scope, self: *Compiler, name: []const u8, func: ?*Fn, tok: TokenIndex) Error!RegAndMut {
-            var cur: ?*Scope = scope;
-            blk: while (cur) |some| {
-                var i = some.syms.items.len;
-                while (i > 0) {
-                    i -= 1;
-                    const sym = some.syms.items[i];
-                    if (mem.eql(u8, sym.name, name)) {
-                        if (func) |parent| {
-                            try parent.captures.append(sym);
-                            return RegAndMut{
-                                .reg = @intCast(RegRef, parent.captures.items.len - 1),
-                                .mutable = sym.mutable,
-                            };
-                        }
-                        return RegAndMut{
-                            .reg = sym.reg,
-                            .mutable = sym.mutable,
-                        };
-                    }
-                }
-                if (some.id == .func) {
-                    const new_func = @fieldParentPtr(Fn, "base", some);
-                    const res = self.registerAlloc();
-
-                    // check if we have already captured this variable
-                    i = new_func.captures.items.len;
-                    while (i > 0) {
-                        i -= 1;
-                        const sym = new_func.captures.items[i];
-                        if (!mem.eql(u8, sym.name, name)) continue;
-
-                        try new_func.code.append(.{
-                            .double = .{
-                                .op = .load_capture_double,
-                                .res = res,
-                                .arg = @intCast(u8, sym.reg),
-                            },
-                        });
-                        return RegAndMut{
-                            .reg = res,
-                            .mutable = sym.mutable,
-                        };
-                    }
-                    const parent = some.parent orelse break :blk;
-                    const sub = try parent.getSymbolTail(self, name, new_func, tok);
-                    try new_func.code.append(.{
-                        .double = .{
-                            .op = .load_capture_double,
-                            .res = res,
-                            .arg = @intCast(u8, sub.reg),
-                        },
-                    });
-
-                    // forward captured symbol
-                    if (func) |parent_fn| {
-                        try parent_fn.captures.append(.{
-                            .name = name,
-                            .reg = res,
-                            .mutable = sub.mutable,
-                        });
-                    }
-                    return RegAndMut{
-                        .reg = res,
-                        .mutable = sub.mutable,
-                    };
-                }
-                cur = some.parent;
-            }
-            return self.reportErr("use of undeclared identifier", tok);
-        }
-
-        fn getTry(scope: *Scope) ?*Scope.Try {
-            var cur: ?*Scope = scope;
-            while (cur) |some| {
-                switch (some.id) {
-                    .try_catch => return @fieldParentPtr(Try, "base", some),
-                    .func, .module => return null,
-                    else => {},
-                }
-                cur = some.parent;
-            }
-            unreachable;
-        }
-
-        const RegAndMut = struct {
-            reg: RegRef,
-            mutable: bool,
-        };
     };
 
     pub const Symbol = struct {
         name: []const u8,
-        reg: RegRef,
-        mutable: bool,
-
-        forward_decl: bool = false,
-
-        pub const List = std.ArrayList(Symbol);
+        // val: Value,
+        reg: u8,
     };
+
+    const Scope = union(enum) {
+        module: *Fn,
+        func: *Fn,
+        loop: struct {
+            breaks: BreakList,
+            cond_begin: u32,
+
+            const BreakList = std.ArrayList(u32);
+        },
+        constant: Symbol,
+        mut: Symbol,
+        forward_decl: Symbol,
+        try_catch: Try,
+    };
+
+    const Try = struct {
+        base: Scope,
+        jumps: JumpList,
+        err_reg: RegRef,
+    };
+
+    const JumpList = std.ArrayList(u32);
 
     const Value = union(enum) {
         /// result of continue, break, return and assignment; cannot exist at runtime
@@ -374,7 +194,6 @@ pub const Compiler = struct {
         func: struct {
             params: u8,
             offset: u32,
-            captures: *Symbol.List,
         },
 
         fn isRt(val: Value) bool {
@@ -394,7 +213,7 @@ pub const Compiler = struct {
 
         fn free(val: Value, self: *Compiler, reg: RegRef) void {
             if (val != .ref) {
-                self.registerFree(reg);
+                self.func.regFree(reg);
             }
         }
 
@@ -403,7 +222,7 @@ pub const Compiler = struct {
                 .rt, .ref => |r| return r,
                 .empty => unreachable,
                 else => {
-                    const reg = self.registerAlloc();
+                    const reg = try self.func.regAlloc();
                     try self.makeRuntime(reg, val);
                     return reg;
                 },
@@ -453,38 +272,101 @@ pub const Compiler = struct {
         }
     };
 
+    pub const Error = error{CompileError} || Allocator.Error;
+
+    fn getTry(self: *Compiler) ?*Try {
+        var i = self.scopes.items.len;
+        while (true) {
+            i -= 1;
+            const scope = &self.scopes.items[i];
+            switch (scope.*) {
+                .try_catch => |*t| return t,
+                .func, .module => return null,
+                else => {},
+            }
+        }
+    }
+
+    fn emitSingle(self: *Compiler, op: bog.Op, arg: RegRef) !void {
+        try self.func.code.append(.{
+            .single = .{
+                .op = op,
+                .arg = arg,
+            },
+        });
+    }
+
+    fn emitDouble(self: *Compiler, op: bog.Op, res: RegRef, arg: RegRef) !void {
+        try self.func.code.append(.{
+            .double = .{
+                .op = op,
+                .res = res,
+                .arg = arg,
+            },
+        });
+    }
+
+    fn emitTriple(self: *Compiler, op: bog.Op, res: RegRef, lhs: RegRef, rhs: RegRef) !void {
+        try self.func.code.append(.{
+            .triple = .{
+                .op = op,
+                .res = res,
+                .lhs = lhs,
+                .rhs = rhs,
+            },
+        });
+    }
+
+    fn emitOff(self: *Compiler, op: bog.Op, res: RegRef, off: u32) !void {
+        const long = off >= 0xFFFF;
+        try self.func.code.append(.{
+            .off = .{
+                .op = op,
+                .res = res,
+                .off = if (long) 0xFFFF else @truncate(u16, off),
+            },
+        });
+        if (long) try self.func.code.append(.{ .bare = off });
+    }
+
+    fn emitJump(self: *Compiler, op: bog.Op, arg: ?RegRef) !u32 {
+        try self.func.code.append(.{ .jump = .{ .op = op, .arg = arg orelse 0 } });
+        try self.func.code.append(undefined);
+        return @intCast(u32, self.func.code.items.len - 1);
+    }
+
     fn makeRuntime(self: *Compiler, res: RegRef, val: Value) Error!void {
         return switch (val) {
             .empty => unreachable,
             .ref, .rt => |v| assert(v == res),
-            .none => try self.code.append(.{
+            .none => try self.func.code.append(.{
                 .primitive = .{ .res = res, .kind = .none },
             }),
             .int => |v| if (v >= std.math.minInt(i15) and v <= std.math.maxInt(i15)) {
-                try self.code.append(.{ .int = .{ .res = res, .long = false, .arg = @truncate(i15, v) } });
+                try self.func.code.append(.{ .int = .{ .res = res, .long = false, .arg = @truncate(i15, v) } });
             } else {
-                try self.code.append(.{ .int = .{ .res = res, .long = true, .arg = 0 } });
+                try self.func.code.append(.{ .int = .{ .res = res, .long = true, .arg = 0 } });
                 const arr = @bitCast([2]u32, v);
-                try self.code.append(.{ .bare = arr[0] });
-                try self.code.append(.{ .bare = arr[1] });
+                try self.func.code.append(.{ .bare = arr[0] });
+                try self.func.code.append(.{ .bare = arr[1] });
             },
             .num => |v| {
-                try self.code.append(.{ .single = .{ .op = .const_num, .arg = res } });
+                try self.func.code.append(.{ .single = .{ .op = .const_num, .arg = res } });
                 const arr = @bitCast([2]u32, v);
-                try self.code.append(.{ .bare = arr[0] });
-                try self.code.append(.{ .bare = arr[1] });
+                try self.func.code.append(.{ .bare = arr[0] });
+                try self.func.code.append(.{ .bare = arr[1] });
             },
-            .Bool => |v| try self.code.append(.{ .primitive = .{ .res = res, .kind = if (v) .True else .False } }),
+            .Bool => |v| try self.func.code.append(.{ .primitive = .{ .res = res, .kind = if (v) .True else .False } }),
             .str => |v| try self.emitOff(.const_string_off, res, try self.putString(v)),
             .func => |v| {
-                try self.code.append(.{
+                try self.func.code.append(.{
                     .func = .{
                         .res = res,
                         .arg_count = v.params,
                         .capture_count = @intCast(u8, v.captures.items.len),
                     },
                 });
-                try self.code.append(.{ .bare = v.offset });
+                try self.func.code.append(.{ .bare = v.offset });
 
                 for (v.captures.items) |capture, i| {
                     try self.emitTriple(
@@ -508,17 +390,83 @@ pub const Compiler = struct {
         return offset;
     }
 
+    fn autoForwardDecl(self: *Compiler, node: *Node) !void {
+        if (node.id != .Decl) return;
+        const decl = @fieldParentPtr(Node.Decl, "base", node);
+
+        // only forward declarations like
+        // `const IDENTIFIER = fn ...`
+        if (self.tokens[decl.let_const].id == .Keyword_const and
+            decl.capture.id != .Identifier or decl.value.id != .Fn)
+            return;
+
+        const ident = @fieldParentPtr(Node.SingleToken, "base", decl.capture);
+        const reg = try self.func.regAlloc();
+        try self.scope.append(.{
+            .forward_decl = .{
+                .val = undefined,
+                .name = self.tokenSlice(ident.tok),
+                .reg = reg,
+            },
+        });
+    }
+
+    const RegAndMut = struct {
+        reg: RegRef,
+        mut: bool,
+    };
+
+    fn findSymbol(self: *Compiler, tok: TokenIndex) !RegAndMut {
+        const name = self.tokenSlice(tok);
+        var i = self.scope.items.len;
+
+        while (true) {
+            i -= 1;
+            const item = self.scope.items[i];
+            switch (item) {
+                .module => break,
+                .func => {
+                    @panic("TODO captures");
+                },
+                .loop => {},
+                .constant, .mut, .forward_decl => |sym| if (mem.eql(u8, sym.name, name)) {
+                    return RegAndMut{
+                        .reg = sym.reg,
+                        .mut = item == .mut,
+                    };
+                },
+            }
+        }
+        return self.reportErr("use of undeclared identifier", tok);
+    }
+
+    fn isForwardDecl(self: *Compiler, tok: TokenIndex) bool {
+        const name = self.tokenSlice(tok);
+        var i = self.scope.items.len;
+        var in_fn_scope = false;
+
+        while (true) {
+            i -= 1;
+            const item = self.scope.items[i];
+            switch (item) {
+                .module => break,
+                .func => in_fn_scope = true,
+                .loop => {},
+                .constant, .mut => |sym| if (mem.eql(u8, sym.name, name)) {
+                    return self.reportErr("redeclaration of identifier", node.tok);
+                },
+                .forward_decl => |sym| if (mem.eql(u8, sym.name, name)) {
+                    assert(!in_fn_scope);
+                    return sym.reg;
+                },
+            }
+        }
+        return null;
+    }
+
     const Result = union(enum) {
         /// A runtime value is expected
         rt: RegRef,
-
-        /// Something assignable is expected
-        lval: union(enum) {
-            Const: *const Value,
-            let: *const Value,
-            assign: *const Value,
-            aug_assign,
-        },
 
         /// A value, runtime or constant, is expected
         value,
@@ -537,34 +485,7 @@ pub const Compiler = struct {
             else
                 .{ .rt = res.rt };
         }
-
-        fn notLval(res: Result, self: *Compiler, tok: TokenIndex) !void {
-            if (res == .lval) {
-                return self.reportErr("invalid left hand side to assignment", tok);
-            }
-        }
     };
-
-    fn autoForwardDecl(self: *Compiler, node: *Node) error{OutOfMemory}!void {
-        if (node.id != .Decl) return;
-        const decl = @fieldParentPtr(Node.Decl, "base", node);
-
-        // only forward declarations like
-        // `const IDENTIFIER = fn ...`
-        if (self.tokens[decl.let_const].id == .Keyword_const and
-            decl.capture.id != .Identifier or decl.value.id != .Fn)
-            return;
-
-        const ident = @fieldParentPtr(Node.SingleToken, "base", decl.capture);
-        const reg = self.registerAlloc();
-
-        try self.cur_scope.declSymbol(.{
-            .name = self.tokenSlice(ident.tok),
-            .mutable = false,
-            .reg = reg,
-            .forward_decl = true,
-        });
-    }
 
     fn genNode(self: *Compiler, node: *Node, res: Result) Error!Value {
         switch (node.id) {
@@ -616,68 +537,14 @@ pub const Compiler = struct {
             return self.reportErr("too many items", node.base.firstToken());
         }
 
-        if (res == .lval) {
-            switch (res.lval) {
-                .Const, .let, .assign => |lval| {
-                    if (!lval.isRt()) {
-                        return self.reportErr("expected a map", node.base.firstToken());
-                    }
-                    const container_reg = lval.getRt();
-                    const index_reg = self.registerAlloc();
-                    var result_reg = self.registerAlloc();
-
-                    for (node.values) |val, i| {
-                        const item = @fieldParentPtr(Node.MapItem, "base", val);
-
-                        if (item.key) |some| {
-                            const last_node = self.getLastNode(some);
-                            if (last_node.id == .Identifier) {
-                                // `oldname: newname` is equal to `"oldname": newname`
-                                const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
-                                const str_loc = try self.putString(self.tokenSlice(ident.tok));
-                                try self.emitOff(.const_string_off, index_reg, str_loc);
-                            } else {
-                                _ = try self.genNode(some, .{ .rt = index_reg });
-                            }
-                        } else {
-                            const last_node = self.getLastNode(item.value);
-                            if (last_node.id != .Identifier) {
-                                return self.reportErr("expected a key", item.value.firstToken());
-                            }
-                            // `oldname` is equal to `"oldname": oldname`
-                            const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
-                            const str_loc = try self.putString(self.tokenSlice(ident.tok));
-                            try self.emitOff(.const_string_off, index_reg, str_loc);
-                        }
-
-                        try self.emitTriple(.get_triple, result_reg, container_reg, index_reg);
-                        const rt_val = Value{ .rt = result_reg };
-                        const l_val = try self.genNode(item.value, switch (res.lval) {
-                            .Const => .{ .lval = .{ .Const = &rt_val } },
-                            .let => .{ .lval = .{ .let = &rt_val } },
-                            .assign => .{ .lval = .{ .assign = &rt_val } },
-                            else => unreachable,
-                        });
-                        std.debug.assert(l_val == .empty);
-
-                        if (i + 1 != node.values.len and res.lval != .assign) result_reg = self.registerAlloc();
-                    }
-                    return Value.empty;
-                },
-                .aug_assign => {
-                    return self.reportErr("invalid left hand side to augmented assignment", node.r_tok);
-                },
-            }
-        }
-
         const sub_res = res.toRt(self);
         try self.emitOff(.build_map_off, sub_res.rt, @intCast(u32, node.values.len));
 
         // prepare registers
         const container_reg = sub_res.rt;
-        const index_reg = self.registerAlloc();
+        const index_reg = try self.func.regAlloc();
         defer self.registerFree(index_reg);
-        const result_reg = self.registerAlloc();
+        const result_reg = try self.func.regAlloc();
         defer self.registerFree(result_reg);
 
         for (node.values) |val| {
@@ -715,45 +582,6 @@ pub const Compiler = struct {
         if (node.values.len > std.math.maxInt(u32)) {
             return self.reportErr("too many items", node.base.firstToken());
         }
-        if (res == .lval) {
-            switch (res.lval) {
-                .Const, .let, .assign => |lval| {
-                    if (!lval.isRt()) {
-                        return self.reportErr("expected a tuple/list", node.base.firstToken());
-                    }
-
-                    // prepare registers
-                    const container_reg = lval.getRt();
-                    const index_reg = self.registerAlloc();
-                    var result_reg = self.registerAlloc();
-
-                    var index = Value{ .int = 0 };
-                    for (node.values) |val, i| {
-                        if (val.id == .Discard) {
-                            index.int += 1;
-                            continue;
-                        }
-                        try self.makeRuntime(index_reg, index);
-                        try self.emitTriple(.get_triple, result_reg, container_reg, index_reg);
-                        const rt_val = Value{ .rt = result_reg };
-                        const l_val = try self.genNode(val, switch (res.lval) {
-                            .Const => .{ .lval = .{ .Const = &rt_val } },
-                            .let => .{ .lval = .{ .let = &rt_val } },
-                            .assign => .{ .lval = .{ .assign = &rt_val } },
-                            else => unreachable,
-                        });
-                        std.debug.assert(l_val == .empty);
-                        index.int += 1;
-
-                        if (i + 1 != node.values.len and res.lval != .assign) result_reg = self.registerAlloc();
-                    }
-                    return Value.empty;
-                },
-                .aug_assign => {
-                    return self.reportErr("invalid left hand side to augmented assignment", node.r_tok);
-                },
-            }
-        }
 
         const sub_res = res.toRt(self);
         try self.emitOff(switch (node.base.id) {
@@ -764,9 +592,9 @@ pub const Compiler = struct {
 
         // prepare registers
         const container_reg = sub_res.rt;
-        const index_reg = self.registerAlloc();
+        const index_reg = try self.func.regAlloc();
         defer self.registerFree(index_reg);
-        const result_reg = self.registerAlloc();
+        const result_reg = try self.func.regAlloc();
         defer self.registerFree(result_reg);
 
         var index = Value{ .int = 0 };
@@ -782,49 +610,30 @@ pub const Compiler = struct {
     }
 
     fn genFn(self: *Compiler, node: *Node.Fn, res: Result) Error!Value {
-        try res.notLval(self, node.fn_tok);
-
         if (node.params.len > max_params) {
             return self.reportErr("too many parameters", node.fn_tok);
         }
         const param_count = @truncate(u8, node.params.len);
 
-        const old_used_regs = self.used_regs;
+        const prev_func = self.func;
+        defer self.func = prev_func;
 
-        const captures = try self.arena.create(Symbol.List);
-        captures.* = Symbol.List.init(self.arena);
-
-        var fn_scope = Scope.Fn{
-            .base = .{
-                .id = .func,
-                .parent = self.cur_scope,
-                .syms = Symbol.List.init(self.errors.list.allocator),
-            },
-            .code = try Code.initCapacity(self.arena, 256),
-            .captures = captures,
+        var func = Fn{
+            .code = Fn.Code.init(self.gpa),
         };
-        self.cur_scope = &fn_scope.base;
-        defer {
-            fn_scope.code.deinit();
-            fn_scope.base.syms.deinit();
-            self.cur_scope = fn_scope.base.parent.?;
-        }
+        defer func.code.deinit();
 
-        // function body is emitted to a new arraylist and finally added to module_code
-        const old_code = self.code;
-        self.code = &fn_scope.code;
+        try self.scope.append(.{ .func = &func });
+        self.func = &func;
 
         // destructure parameters
-        self.used_regs = param_count;
-        var i: RegRef = 0;
         for (node.params) |param| {
-            const param_res = try self.genNode(param, .{
-                .lval = .{
-                    .let = &Value{ .rt = i },
-                },
+            // we checked that there are less than max_params params
+            const reg = func.regAlloc() catch unreachable;
+            const param_res = try self.genLVal(param, .{
+                .let = &Value{ .rt = reg },
             });
             std.debug.assert(param_res == .empty);
-            i += 1;
         }
 
         // gen body and return result
@@ -846,7 +655,7 @@ pub const Compiler = struct {
         const body_val = try self.genNode(node.body, if (should_discard) .discard else .value);
 
         if (body_val == .empty or body_val == .none) {
-            try self.code.append(.{ .op = .{ .op = .return_none } });
+            try self.func.code.append(.{ .op = .{ .op = .return_none } });
         } else {
             const reg = try body_val.toRt(self);
             defer body_val.free(self, reg);
@@ -855,11 +664,12 @@ pub const Compiler = struct {
         }
 
         // reset regs after generating body
-        self.used_regs = old_used_regs;
-        self.code = old_code;
+        self.func = old_func;
 
-        const offset = @intCast(u32, self.module_code.items.len);
-        try self.module_code.appendSlice(fn_scope.code.items);
+        const module = &self.scope.items[0].module;
+
+        const offset = @intCast(u32, module.code.items.len);
+        try module.code.appendSlice(func.code.items);
 
         const ret_val = Value{
             .func = .{
@@ -872,7 +682,6 @@ pub const Compiler = struct {
     }
 
     fn genBlock(self: *Compiler, node: *Node.Block, res: Result) Error!Value {
-        try res.notLval(self, node.stmts[0].firstToken());
         var block_scope = Scope{
             .id = .block,
             .parent = self.cur_scope,
@@ -905,8 +714,6 @@ pub const Compiler = struct {
     }
 
     fn genIf(self: *Compiler, node: *Node.If, res: Result) Error!Value {
-        try res.notLval(self, node.if_tok);
-
         var capture_scope = Scope{
             .id = .capture,
             .parent = self.cur_scope,
@@ -923,12 +730,10 @@ pub const Compiler = struct {
             if_skip = try self.emitJump(.jump_none, cond_reg);
 
             self.cur_scope = &capture_scope;
-            const lval_res = if (self.tokens[node.let_const.?].id == .Keyword_let)
-                Result{ .lval = .{ .let = &Value{ .rt = cond_reg } } }
+            const lval_res = try self.genLVal(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let)
+                .{ .let = &Value{ .rt = cond_reg } }
             else
-                Result{ .lval = .{ .Const = &Value{ .rt = cond_reg } } };
-
-            assert((try self.genNode(node.capture.?, lval_res)) == .empty);
+                .{ .constant = &Value{ .rt = cond_reg } });
         } else if (!cond_val.isRt()) {
             const bool_val = try cond_val.getBool(self, node.cond.firstToken());
 
@@ -948,9 +753,8 @@ pub const Compiler = struct {
             .rt, .discard => res,
             .value => Result{
                 // value is only known at runtime
-                .rt = self.registerAlloc(),
+                .rt = try self.func.regAlloc(),
             },
-            .lval => unreachable,
         };
 
         const if_val = try self.genNode(node.if_body, sub_res);
@@ -974,7 +778,7 @@ pub const Compiler = struct {
                 try self.emitSingle(.discard_single, else_val.getRt());
             }
         } else if (sub_res == .rt) {
-            try self.code.append(.{
+            try self.func.code.append(.{
                 .primitive = .{ .res = sub_res.rt, .kind = .none },
             });
         }
@@ -998,7 +802,7 @@ pub const Compiler = struct {
 
                 try self.emitSingle(.return_single, reg);
             } else {
-                try self.code.append(.{ .op = .{ .op = .return_none } });
+                try self.func.code.append(.{ .op = .{ .op = .return_none } });
             }
             return Value{ .empty = {} };
         }
@@ -1017,8 +821,8 @@ pub const Compiler = struct {
             break :blk @fieldParentPtr(Scope.Loop, "base", scope);
         };
         if (node.op == .Continue) {
-            self.code.items[try self.emitJump(.jump, null)] = .{
-                .bare_signed = @intCast(i32, -@intCast(isize, self.code.items.len - loop_scope.cond_begin)),
+            self.func.code.items[try self.emitJump(.jump, null)] = .{
+                .bare_signed = @intCast(i32, -@intCast(isize, self.func.code.items.len - loop_scope.cond_begin)),
             };
         } else {
             try loop_scope.breaks.append(try self.emitJump(.jump, null));
@@ -1028,17 +832,14 @@ pub const Compiler = struct {
     }
 
     fn createListComprehension(self: *Compiler, reg: ?RegRef) !Result {
-        const list = reg orelse self.registerAlloc();
+        const list = reg orelse try self.func.regAlloc();
         try self.emitOff(.build_list_off, list, 0);
         return Result{ .rt = list };
     }
 
     fn genWhile(self: *Compiler, node: *Node.While, res: Result) Error!Value {
-        try res.notLval(self, node.while_tok);
-
         const sub_res = switch (res) {
             .discard => res,
-            .lval => unreachable,
             .value => try self.createListComprehension(null),
             .rt => |reg| try self.createListComprehension(reg),
         };
@@ -1049,8 +850,8 @@ pub const Compiler = struct {
                 .parent = self.cur_scope,
                 .syms = Symbol.List.init(self.errors.list.allocator),
             },
-            .breaks = Scope.Loop.BreakList.init(self.errors.list.allocator),
-            .cond_begin = @intCast(u32, self.code.items.len),
+            .breaks = Scope.Loop.BreakList.init(self.gpa),
+            .cond_begin = @intCast(u32, self.func.code.items.len),
         };
         self.cur_scope = &loop_scope.base;
         defer {
@@ -1069,12 +870,10 @@ pub const Compiler = struct {
             // jump past exit loop if cond == .none
             cond_jump = try self.emitJump(.jump_none, cond_reg);
 
-            const lval_res = if (self.tokens[node.let_const.?].id == .Keyword_let)
-                Result{ .lval = .{ .let = &Value{ .rt = cond_reg } } }
+            try self.genLVal(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let)
+                .{ .let = &Value{ .rt = cond_reg } }
             else
-                Result{ .lval = .{ .Const = &Value{ .rt = cond_reg } } };
-
-            assert((try self.genNode(node.capture.?, lval_res)) == .empty);
+                .{ .constant = &Value{ .rt = cond_reg } });
         } else if (cond_val.isRt()) {
             cond_jump = try self.emitJump(.jump_false, cond_val.getRt());
         } else {
@@ -1104,7 +903,7 @@ pub const Compiler = struct {
 
         // jump back to condition
         const end = try self.emitJump(.jump, null);
-        self.code.items[end] = .{
+        self.func.code.items[end] = .{
             .bare_signed = @truncate(i32, -@intCast(isize, end - loop_scope.cond_begin)),
         };
 
@@ -1120,8 +919,6 @@ pub const Compiler = struct {
     }
 
     fn genFor(self: *Compiler, node: *Node.For, res: Result) Error!Value {
-        try res.notLval(self, node.for_tok);
-
         var loop_scope = Scope.Loop{
             .base = .{
                 .id = .loop,
@@ -1140,7 +937,6 @@ pub const Compiler = struct {
 
         const sub_res = switch (res) {
             .discard => res,
-            .lval => unreachable,
             .value => try self.createListComprehension(null),
             .rt => |reg| try self.createListComprehension(reg),
         };
@@ -1152,30 +948,28 @@ pub const Compiler = struct {
         const cond_reg = try cond_val.toRt(self);
         defer cond_val.free(self, cond_reg);
 
-        const iter_reg = self.registerAlloc();
+        const iter_reg = try self.func.regAlloc();
         defer self.registerFree(iter_reg);
 
         // initialize the iterator
         try self.emitDouble(.iter_init_double, iter_reg, cond_reg);
 
-        const iter_val_reg = self.registerAlloc();
+        const iter_val_reg = try self.func.regAlloc();
         defer self.registerFree(iter_val_reg);
 
         // loop condition
-        loop_scope.cond_begin = @intCast(u32, self.code.items.len);
+        loop_scope.cond_begin = @intCast(u32, self.func.code.items.len);
 
         // iter_next is fused with a jump_none
         try self.emitDouble(.iter_next_double, iter_val_reg, iter_reg);
-        const exit_jump = self.code.items.len;
-        try self.code.append(.{ .bare = 0 });
+        const exit_jump = self.func.code.items.len;
+        try self.func.code.append(.{ .bare = 0 });
 
         if (node.capture != null) {
-            const lval_res = if (self.tokens[node.let_const.?].id == .Keyword_let)
-                Result{ .lval = .{ .let = &Value{ .rt = iter_val_reg } } }
+            try self.genLVal(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let)
+                .{ .let = &Value{ .rt = iter_val_reg } }
             else
-                Result{ .lval = .{ .Const = &Value{ .rt = iter_val_reg } } };
-
-            assert((try self.genNode(node.capture.?, lval_res)) == .empty);
+                .{ .constant = &Value{ .rt = iter_val_reg } });
         }
 
         switch (sub_res) {
@@ -1196,7 +990,7 @@ pub const Compiler = struct {
 
         // jump to the start of the loop
         const end = try self.emitJump(.jump, null);
-        self.code.items[end] = .{
+        self.func.code.items[end] = .{
             .bare_signed = @truncate(i32, -@intCast(isize, end - loop_scope.cond_begin)),
         };
 
@@ -1210,7 +1004,6 @@ pub const Compiler = struct {
     }
 
     fn genPrefix(self: *Compiler, node: *Node.Prefix, res: Result) Error!Value {
-        try res.notLval(self, node.tok);
         const r_val = try self.genNodeNonEmpty(node.rhs, .value);
 
         if (r_val.isRt()) {
@@ -1249,7 +1042,6 @@ pub const Compiler = struct {
     }
 
     fn genTypeInfix(self: *Compiler, node: *Node.TypeInfix, res: Result) Error!Value {
-        try res.notLval(self, node.tok);
         const l_val = try self.genNodeNonEmpty(node.lhs, .value);
 
         const type_str = self.tokenSlice(node.type_tok);
@@ -1285,7 +1077,7 @@ pub const Compiler = struct {
             const reg = l_val.getRt();
             defer l_val.free(self, reg);
 
-            try self.code.append(.{
+            try self.func.code.append(.{
                 .type_id = .{
                     .op = if (node.op == .as) .as_type_id else .is_type_id,
                     .res = sub_res.rt,
@@ -1364,9 +1156,6 @@ pub const Compiler = struct {
     }
 
     fn genSuffix(self: *Compiler, node: *Node.Suffix, res: Result) Error!Value {
-        if (node.op == .call) {
-            try res.notLval(self, node.r_tok);
-        }
         const l_val = try self.genNode(node.lhs, .value);
         if (l_val != .str and l_val != .func and !l_val.isRt()) {
             return self.reportErr("invalid left hand side to suffix op", node.lhs.firstToken());
@@ -1390,14 +1179,14 @@ pub const Compiler = struct {
                     i += 1;
                 }
 
-                try self.code.append(.{
+                try self.func.code.append(.{
                     .call = .{
                         .res = sub_res.rt,
                         .func = l_reg,
                         .first = start,
                     },
                 });
-                try self.code.append(.{ .bare = @truncate(u8, args.len) });
+                try self.func.code.append(.{ .bare = @truncate(u8, args.len) });
 
                 if (self.cur_scope.getTry()) |try_scope| {
                     try self.emitDouble(.move_double, try_scope.err_reg, sub_res.rt);
@@ -1414,17 +1203,7 @@ pub const Compiler = struct {
 
         const res_reg = switch (res) {
             .rt => |r| r,
-            .lval => |l| switch (l) {
-                .let, .Const => return self.reportErr("cannot declare to subscript", node.l_tok),
-                .aug_assign => self.registerAlloc(),
-                .assign => |r_val| {
-                    const r_reg = try r_val.toRt(self);
-                    defer r_val.free(self, r_reg);
-                    try self.emitTriple(.set_triple, l_reg, index_reg, r_reg);
-                    return Value.empty;
-                },
-            },
-            .discard, .value => self.registerAlloc(),
+            .discard, .value => try self.func.regAlloc(),
         };
 
         try self.emitTriple(.get_triple, res_reg, l_reg, index_reg);
@@ -1432,7 +1211,6 @@ pub const Compiler = struct {
     }
 
     fn genInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
-        try res.notLval(self, node.tok);
         switch (node.op) {
             .bool_or,
             .bool_and,
@@ -1520,12 +1298,12 @@ pub const Compiler = struct {
         const r_val = try self.genNodeNonEmpty(node.rhs, .value);
 
         if (node.op == .assign) {
-            const l_val = try self.genNode(node.lhs, .{ .lval = .{ .assign = &r_val } });
-            std.debug.assert(l_val == .empty);
-            return l_val;
+            try self.genLVal(node.lhs, .{ .assign = &r_val });
+            return .empty;
         }
 
-        const l_val = try self.genNode(node.lhs, .{ .lval = .aug_assign });
+        var l_val = Value{.none};
+        try self.genLVal(node.lhs, .{ .aug_assign = &l_val });
         if (!r_val.isRt()) switch (node.op) {
             .add_assign,
             .sub_assign,
@@ -1832,75 +1610,17 @@ pub const Compiler = struct {
     }
 
     fn genDecl(self: *Compiler, node: *Node.Decl, res: Result) Error!Value {
-        assert(res != .lval);
         const r_val = try self.genNodeNonEmpty(node.value, .value);
 
-        const lval_kind = if (self.tokens[node.let_const].id == .Keyword_let)
-            Result{ .lval = .{ .let = &r_val } }
+        try self.genLVal(node.capture, if (self.tokens[node.let_const].id == .Keyword_let)
+            .{ .let = &r_val }
         else
-            Result{ .lval = .{ .Const = &r_val } };
-
-        assert((try self.genNode(node.capture, lval_kind)) == .empty);
+            .{ .constant = &r_val });
         return Value.empty;
     }
 
     fn genIdentifier(self: *Compiler, node: *Node.SingleToken, res: Result) Error!Value {
-        const name = self.tokenSlice(node.tok);
-        if (res == .lval) {
-            switch (res.lval) {
-                .let, .Const => |val| {
-                    const sym = self.cur_scope.isDeclared(name);
-                    if (sym != null and !sym.?.forward_decl) {
-                        return self.reportErr("redeclaration of identifier", node.tok);
-                    }
-                    if (sym) |some| {
-                        some.forward_decl = false;
-
-                        // only functions can be forward declared
-                        assert(val.* == .func);
-                        try self.makeRuntime(some.reg, val.*);
-
-                        return Value.empty;
-                    }
-                    var reg = try val.toRt(self);
-
-                    if (val.* == .ref and res.lval == .let) {
-                        // copy on assign
-                        const copy_reg = self.registerAlloc();
-                        try self.emitDouble(.copy_double, copy_reg, reg);
-                        reg = copy_reg;
-                    }
-                    try self.cur_scope.declSymbol(.{
-                        .name = name,
-                        .mutable = res.lval == .let,
-                        .reg = reg,
-                    });
-                    return Value.empty;
-                },
-                .assign => |val| {
-                    const sym = try self.cur_scope.getSymbol(self, name, node.tok);
-                    if (!sym.mutable) {
-                        return self.reportErr("assignment to constant", node.tok);
-                    }
-                    if (val.* == .ref) {
-                        try self.emitDouble(.copy_double, sym.reg, val.getRt());
-                    } else if (val.isRt()) {
-                        try self.emitDouble(.move_double, sym.reg, val.getRt());
-                    } else {
-                        try self.makeRuntime(sym.reg, val.*);
-                    }
-                    return Value.empty;
-                },
-                .aug_assign => {
-                    const sym = try self.cur_scope.getSymbol(self, name, node.tok);
-                    if (!sym.mutable) {
-                        return self.reportErr("assignment to constant", node.tok);
-                    }
-                    return Value{ .ref = sym.reg };
-                },
-            }
-        }
-        const sym = try self.cur_scope.getSymbol(self, name, node.tok);
+        const sym = try self.findSymbol(node.tok);
         if (res == .rt) {
             try self.emitDouble(if (sym.mutable) .move_double else .copy_double, res.rt, sym.reg);
             return res.toVal();
@@ -1909,16 +1629,12 @@ pub const Compiler = struct {
     }
 
     fn genThis(self: *Compiler, node: *Node.SingleToken, res: Result) Error!Value {
-        // `this` cannot be assigned to
-        try res.notLval(self, node.tok);
-
         const sub_res = res.toRt(self);
         try self.emitSingle(.load_this_single, sub_res.rt);
         return sub_res.toVal();
     }
 
     fn genLiteral(self: *Compiler, node: *Node.Literal, res: Result) Error!Value {
-        try res.notLval(self, node.tok);
         const ret_val: Value = switch (node.kind) {
             .int => .{
                 .int = util.parseInt(self.tokenSlice(node.tok)) catch
@@ -1934,8 +1650,6 @@ pub const Compiler = struct {
     }
 
     fn genImport(self: *Compiler, node: *Node.Import, res: Result) Error!Value {
-        try res.notLval(self, node.tok);
-
         const sub_res = res.toRt(self);
         const str = try self.parseStr(node.str_tok);
         const str_loc = try self.putString(str);
@@ -1945,30 +1659,6 @@ pub const Compiler = struct {
     }
 
     fn genError(self: *Compiler, node: *Node.Error, res: Result) Error!Value {
-        if (res == .lval) switch (res.lval) {
-            .Const, .let, .assign => |val| {
-                if (!val.isRt()) {
-                    return self.reportErr("expected an error", node.base.firstToken());
-                }
-                if (node.capture == null) {
-                    return self.reportErr("expected a capture", node.base.firstToken());
-                }
-                const unwrap_reg = self.registerAlloc();
-                try self.emitDouble(.unwrap_error_double, unwrap_reg, val.getRt());
-                const r_val = Value{ .rt = unwrap_reg };
-                const l_val = try self.genNode(node.capture.?, switch (res.lval) {
-                    .Const => Result{ .lval = .{ .Const = &r_val } },
-                    .let => Result{ .lval = .{ .let = &r_val } },
-                    .assign => Result{ .lval = .{ .assign = &r_val } },
-                    else => unreachable,
-                });
-                std.debug.assert(l_val == .empty);
-                return Value.empty;
-            },
-            .aug_assign => {
-                return self.reportErr("invalid left hand side to augmented assignment", node.tok);
-            },
-        };
         const val = if (node.capture) |some|
             try self.genNodeNonEmpty(some, .value)
         else
@@ -1983,39 +1673,10 @@ pub const Compiler = struct {
     }
 
     fn genTagged(self: *Compiler, node: *Node.Tagged, res: Result) Error!Value {
-        if (res == .lval) switch (res.lval) {
-            .Const, .let, .assign => |val| {
-                if (!val.isRt()) {
-                    return self.reportErr("expected a tagged value", node.base.firstToken());
-                }
-                if (node.capture == null) {
-                    return self.reportErr("expected a capture", node.base.firstToken());
-                }
-                const str_loc = try self.putString(self.tokenSlice(node.name));
-                const unwrap_reg = self.registerAlloc();
-                try self.emitDouble(.unwrap_tagged, unwrap_reg, val.getRt());
-                try self.code.append(.{
-                    .bare = str_loc,
-                });
-                const r_val = Value{ .rt = unwrap_reg };
-                const l_val = try self.genNode(node.capture.?, switch (res.lval) {
-                    .Const => Result{ .lval = .{ .Const = &r_val } },
-                    .let => Result{ .lval = .{ .let = &r_val } },
-                    .assign => Result{ .lval = .{ .assign = &r_val } },
-                    else => unreachable,
-                });
-                std.debug.assert(l_val == .empty);
-                return Value.empty;
-            },
-            .aug_assign => {
-                return self.reportErr("invalid left hand side to augmented assignment", node.at);
-            },
-        };
-
         const sub_res = res.toRt(self);
         const str_loc = try self.putString(self.tokenSlice(node.name));
 
-        try self.code.append(.{
+        try self.func.code.append(.{
             .tagged = .{
                 .res = sub_res.rt,
                 .kind = if (node.capture == null) .none else .some,
@@ -2027,37 +1688,25 @@ pub const Compiler = struct {
                 } else 0,
             },
         });
-        try self.code.append(.{
+        try self.func.code.append(.{
             .bare = str_loc,
         });
         return sub_res.toVal();
     }
 
     fn genRange(self: *Compiler, node: *Node.Range, res: Result) Error!Value {
-        if (res == .lval) switch (res.lval) {
-            .Const, .let, .assign => |val| {
-                if (!val.isRt()) {
-                    return self.reportErr("expected a range", node.base.firstToken());
-                }
-                return self.reportErr("TODO: range destructure", node.base.firstToken());
-            },
-            .aug_assign => {
-                return self.reportErr("invalid left hand side to augmented assignment", node.base.firstToken());
-            },
-        };
-
         const sub_res = res.toRt(self);
         const start = try self.genRangePart(node.start);
         const end = try self.genRangePart(node.end);
         const step = try self.genRangePart(node.step);
-        try self.code.append(.{
+        try self.func.code.append(.{
             .range = .{
                 .res = sub_res.rt,
                 .start = start.val,
                 .end = end.val,
             },
         });
-        try self.code.append(.{
+        try self.func.code.append(.{
             .range_cont = .{
                 .step = step.val,
                 .start_kind = start.kind,
@@ -2362,16 +2011,300 @@ pub const Compiler = struct {
         return sub_res.toVal();
     }
 
+    const LVal = union(enum) {
+        constant: *const Value,
+        mut: *const Value,
+        assign: *const Value,
+        aug_assign: *Value,
+    };
+
+    fn genLVal(self: *Compiler, node: *Node, lval: LVal) Error!void {
+        switch (node.id) {
+            .Literal,
+            .Block,
+            .Prefix,
+            .Decl,
+            .Infix,
+            .If,
+            .TypeInfix,
+            .Fn,
+            .While,
+            .Jump,
+            .Catch,
+            .Import,
+            .For,
+            .This,
+            .Match,
+            .MatchCatchAll,
+            .MatchLet,
+            .MatchCase,
+            .FormatString,
+            => return self.reportErr("invalid left hand side to assignment", node.firstToken()),
+
+            .Discard => return self.reportErr("'_' can only be used to discard unwanted tuple/list items in destructuring assignment", node.firstToken()),
+            .Grouped => return self.genLVal(@fieldParentPtr(Node.Grouped, "base", node).expr, lval),
+            .Tagged => return self.genLValTagged(@fieldParentPtr(Node.Tagged, "base", node), lval),
+            .Range => return self.genLValRange(@fieldParentPtr(Node.Range, "base", node), lval),
+            .Error => return self.genLValError(@fieldParentPtr(Node.Error, "base", node), lval),
+            .MapItem => unreachable,
+            .List => return self.genLValTupleList(@fieldParentPtr(Node.ListTupleMap, "base", node), lval),
+            .Tuple => return self.genLValTupleList(@fieldParentPtr(Node.ListTupleMap, "base", node), lval),
+            .Map => return self.genLValMap(@fieldParentPtr(Node.ListTupleMap, "base", node), lval),
+            .Identifier => return self.genLValIdentifier(@fieldParentPtr(Node.Identifier, "base", node), lval),
+            .Suffix => return self.genLValSuffix(@fieldParentPtr(Node.Grouped, "base", node).expr, lval),
+        }
+    }
+
+    fn genLValRange(self: *Compiler, node: *Node.Range, lval: LVal) Error!void {
+        const val = switch (lval) {
+            .constant, .let, .assign => |val| val,
+            .aug_assign => return self.reportErr("invalid left hand side to augmented assignment", node.base.firstToken()),
+        };
+        if (!val.isRt()) {
+            return self.reportErr("expected a range", node.base.firstToken());
+        }
+        return self.reportErr("TODO: range destructure", node.base.firstToken());
+    }
+
+    fn genLValTagged(self: *Compiler, node: *Node.Tagged, lval: LVal) Error!void {
+        const val = switch (lval) {
+            .constant, .let, .assign => |val| val,
+            .aug_assign => return self.reportErr("invalid left hand side to augmented assignment", node.at),
+        };
+        if (!val.isRt()) {
+            return self.reportErr("expected a tagged value", node.base.firstToken());
+        }
+        if (node.capture == null) {
+            return self.reportErr("expected a capture", node.base.firstToken());
+        }
+        const str_loc = try self.putString(self.tokenSlice(node.name));
+        const unwrap_reg = try self.func.regAlloc();
+        try self.emitDouble(.unwrap_tagged, unwrap_reg, val.getRt());
+        try self.func.code.append(.{ .bare = str_loc });
+
+        const r_val = Value{ .rt = unwrap_reg };
+        try self.genLVal(node.capture.?, switch (lval) {
+            .constant => .{ .constant = &r_val },
+            .let => .{ .let = &r_val },
+            .assign => .{ .assign = &r_val },
+            else => unreachable,
+        });
+    }
+
+    fn genLValError(self: *Compiler, node: *Node.Error, lval: LVal) Error!void {
+        const val = switch (lval) {
+            .constant, .let, .assign => |val| val,
+            .aug_assign => return self.reportErr("invalid left hand side to augmented assignment", node.tok),
+        };
+        if (!val.isRt()) {
+            return self.reportErr("expected an error", node.tok);
+        }
+        if (node.capture == null) {
+            return self.reportErr("expected a capture", node.tok);
+        }
+        const unwrap_reg = try self.func.regAlloc();
+        try self.emitDouble(.unwrap_error_double, unwrap_reg, val.getRt());
+
+        const r_val = Value{ .rt = unwrap_reg };
+        try self.genLVal(node.capture.?, switch (lval) {
+            .Const => .{ .constant = &r_val },
+            .let => .{ .let = &r_val },
+            .assign => .{ .assign = &r_val },
+            else => unreachable,
+        });
+    }
+
+    fn genLValTupleList(self: *Compiler, node: *Node.ListTupleMap, lval: LVal) Error!void {
+        if (node.values.len > std.math.maxInt(u32)) {
+            return self.reportErr("too many items", node.l_tok);
+        }
+        const val = switch (lval) {
+            .constant, .let, .assign => |val| val,
+            .aug_assign => return self.reportErr("invalid left hand side to augmented assignment", node.l_tok),
+        };
+        if (!val.isRt()) {
+            return self.reportErr("expected a tuple/list", node.l_tok);
+        }
+
+        // prepare registers
+        const container_reg = val.getRt();
+        const index_reg = try self.func.regAlloc();
+        defer self.func.regFree(index_reg);
+        var result_reg = try self.func.regAlloc();
+
+        var index = Value{ .int = 0 };
+        for (node.values) |val, i| {
+            if (val.id == .Discard) {
+                index.int += 1;
+                continue;
+            }
+
+            try self.makeRuntime(index_reg, index);
+            try self.emitTriple(.get_triple, result_reg, container_reg, index_reg);
+            const rt_val = Value{ .rt = result_reg };
+            try self.genNode(val, switch (lval) {
+                .constant => .{ .constant = &rt_val },
+                .let => .{ .let = &rt_val },
+                .assign => .{ .assign = &rt_val },
+                else => unreachable,
+            });
+            index.int += 1;
+
+            if (i + 1 != node.values.len and lval != .assign)
+                result_reg = try self.func.regAlloc();
+        }
+    }
+
+    fn genLValMap(self: *Compiler, node: *Node.ListTupleMap, lval: LVal) Error!void {
+        if (node.values.len > std.math.maxInt(u32)) {
+            return self.reportErr("too many items", node.base.firstToken());
+        }
+        const val = switch (lval) {
+            .constant, .let, .assign => |val| val,
+            .aug_assign => return self.reportErr("invalid left hand side to augmented assignment", node.l_tok),
+        };
+        if (!lval.isRt()) {
+            return self.reportErr("expected a map", node.base.firstToken());
+        }
+        const container_reg = lval.getRt();
+        const index_reg = try self.func.regAlloc();
+        defer self.func.regFree(index_reg);
+        var result_reg = try self.func.regAlloc();
+
+        for (node.values) |val, i| {
+            const item = @fieldParentPtr(Node.MapItem, "base", val);
+
+            if (item.key) |some| {
+                const last_node = self.getLastNode(some);
+                if (last_node.id == .Identifier) {
+                    // `oldname: newname` is equal to `"oldname": newname`
+                    const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
+                    const str_loc = try self.putString(self.tokenSlice(ident.tok));
+                    try self.emitOff(.const_string_off, index_reg, str_loc);
+                } else {
+                    _ = try self.genNode(some, .{ .rt = index_reg });
+                }
+            } else {
+                const last_node = self.getLastNode(item.value);
+                if (last_node.id != .Identifier) {
+                    return self.reportErr("expected a key", item.value.firstToken());
+                }
+                // `oldname` is equal to `"oldname": oldname`
+                const ident = @fieldParentPtr(Node.SingleToken, "base", last_node);
+                const str_loc = try self.putString(self.tokenSlice(ident.tok));
+                try self.emitOff(.const_string_off, index_reg, str_loc);
+            }
+
+            try self.emitTriple(.get_triple, result_reg, container_reg, index_reg);
+            const rt_val = Value{ .rt = result_reg };
+            try self.genNode(item.value, switch (lval) {
+                .Const => .{ .constant = &rt_val },
+                .let => .{ .let = &rt_val },
+                .assign => .{ .assign = &rt_val },
+                else => unreachable,
+            });
+
+            if (i + 1 != node.values.len and res.lval != .assign) result_reg = try self.func.regAlloc();
+        }
+    }
+
+    fn genLValIdentifier(self: *Compiler, node: *Node.SingleToken, res: LVal) Error!void {
+        switch (lval) {
+            .let, .constant => |val| {
+                if (self.isForwardDecl(node.tok)) |some| {
+                    // only functions can be forward declared
+                    assert(val.* == .func);
+                    return self.makeRuntime(some.reg, val.*);
+                }
+                var reg = try val.toRt(self);
+
+                if (val.* == .ref and res.lval == .let) {
+                    // copy on assign
+                    const copy_reg = try self.func.regAlloc();
+                    try self.emitDouble(.copy_double, copy_reg, reg);
+                    reg = copy_reg;
+                }
+                try self.cur_scope.declSymbol(.{
+                    .name = name,
+                    .mutable = res.lval == .let,
+                    .reg = reg,
+                });
+                const sym = Symbol{
+                    .name = name,
+                    .reg = reg,
+                };
+                try self.scope.append(if (lval == .let)
+                    .{ .mut = sym }
+                else
+                    .{ .constant = sym });
+            },
+            .assign => |val| {
+                const sym = try self.findSymbol(node.tok);
+                if (!sym.mutable) {
+                    return self.reportErr("assignment to constant", node.tok);
+                }
+                if (val.* == .ref) {
+                    try self.emitDouble(.copy_double, sym.reg, val.getRt());
+                } else if (val.isRt()) {
+                    try self.emitDouble(.move_double, sym.reg, val.getRt());
+                } else {
+                    try self.makeRuntime(sym.reg, val.*);
+                }
+            },
+            .aug_assign => |val| {
+                const sym = try self.findSymbol(node.tok);
+                if (!sym.mutable) {
+                    return self.reportErr("assignment to constant", node.tok);
+                }
+                val.* = Value{ .ref = sym.reg };
+            },
+        }
+    }
+
+    fn genLValSuffix(self: *Compiler, node: *Node.Suffix, res: LVal) Error!void {
+        if (node.op == .call) {
+            return self.reportErr("invalid left hand side to assignment", node.firstToken());
+        }
+        const l_val = try self.genNode(node.lhs, .value);
+        if (l_val != .str and !l_val.isRt()) {
+            return self.reportErr("invalid left hand side to suffix op", node.lhs.firstToken());
+        }
+        const l_reg = try l_val.toRt(self);
+        defer l_val.free(self, l_reg);
+
+        const index_val = switch (node.op) {
+            .call => unreachable,
+            .member => Value{ .str = self.tokenSlice(node.r_tok) },
+            .subscript => |val| try self.genNodeNonEmpty(val, .value),
+        };
+        const index_reg = try index_val.toRt(self);
+        defer index_val.free(self, index_reg);
+
+        switch (lval) {
+            .let, .constant => return self.reportErr("cannot declare to subscript", node.l_tok),
+            .aug_assign => |val| {
+                const res_reg = try self.func.regAlloc();
+                try self.emitTriple(.get_triple, res_reg, l_reg, index_reg);
+                val.* = Value{ .rt = res_reg };
+            },
+            .assign => |r_val| {
+                const r_reg = try r_val.toRt(self);
+                defer r_val.free(self, r_reg);
+                try self.emitTriple(.set_triple, l_reg, index_reg, r_reg);
+            },
+        }
+    }
+
     fn addLineInfo(self: *Compiler, node: *Node) !void {
         const tok = self.tokens[node.firstToken()];
 
-        try self.code.append(.{ .op = .{ .op = .line_info } });
-        try self.code.append(.{ .bare = tok.start });
+        try self.func.code.append(.{ .op = .{ .op = .line_info } });
+        try self.func.code.append(.{ .bare = tok.start });
     }
 
     fn finishJump(self: *Compiler, jump_addr: usize) void {
-        self.code.items[jump_addr] = .{
-            .bare = @intCast(u32, self.code.items.len - jump_addr),
+        self.func.code.items[jump_addr] = .{
+            .bare = @intCast(u32, self.func.code.items.len - jump_addr),
         };
     }
 
