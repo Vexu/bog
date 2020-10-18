@@ -778,43 +778,42 @@ pub const Value = union(Type) {
 
 fn wrapZigFunc(func: anytype) Value.Native {
     const Fn = @typeInfo(@TypeOf(func)).Fn;
-    if (Fn.is_generic or Fn.is_var_args or Fn.return_type == null)
+    if (Fn.is_generic or Fn.is_var_args)
         @compileError("unsupported function");
 
-    comptime var bog_arg_i: u8 = 0;
+    @setEvalBranchQuota(Fn.args.len * 1000);
+
     const S = struct {
         // cannot directly use `func` so declare a pointer to it
         var _func: @TypeOf(func) = undefined;
 
         fn native(vm: *Vm, bog_args: []*Value) Vm.Error!*Value {
-            if (Fn.args.len == 0)
-                return Value.zigToBog(vm, _func());
+            var args: std.meta.ArgsTuple(@TypeOf(_func)) = undefined;
 
-            const arg_1 = try bog_args[bog_arg_i].bogToZig(Fn.args[0].arg_type.?, vm);
-            if (@TypeOf(arg_1) != *Vm) bog_arg_i += 1;
-            if (Fn.args.len == 1)
-                return Value.zigToBog(vm, _func(arg_1));
-
-            const arg_2 = try bog_args[bog_arg_i].bogToZig(Fn.args[1].arg_type.?, vm);
-            if (@TypeOf(arg_2) != *Vm) bog_arg_i += 1;
-            if (Fn.args.len == 2)
-                return Value.zigToBog(vm, _func(arg_1, arg_2));
-
-            // @compileError("TODO too many args");
-            // var args = .{};
-            // inline for (Fn.args) |arg, i| {
-            //     const val = bog_args[i];
-            //     const T = arg.arg_type.?;
-            //     // args = args ++
-            // }
-            // return Value.zigToBog(vm, @call(.{}, func, args));
+            comptime var bog_arg_i: u8 = 0;
+            inline for (Fn.args) |arg, i| {
+                if (arg.arg_type.? == *Vm) {
+                    args[i] = vm;
+                } else {
+                    args[i] = try bog_args[bog_arg_i].bogToZig(arg.arg_type.?, vm);
+                    bog_arg_i += 1;
+                }
+            }
+            return Value.zigToBog(vm, @call(.{}, _func, args));
         }
     };
     S._func = func;
 
+    // TODO can't use bog_arg_i due to a stage1 bug.
+    comptime var bog_arg_count = 0;
+    comptime {
+        for (Fn.args) |arg| {
+            if (arg.arg_type != *Vm) bog_arg_count += 1;
+        }
+    }
+
     return .{
-        // TODO this is reset to 0 for some reason
-        .arg_count = bog_arg_i,
+        .arg_count = bog_arg_count,
         .func = S.native,
     };
 }

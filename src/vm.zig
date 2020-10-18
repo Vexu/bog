@@ -694,11 +694,10 @@ pub const Vm = struct {
                         return error.MalformedByteCode;
 
                     if (func.* == .native) {
-                        // TODO see note comment in native.zig
-                        // if (func.native.arg_count != arg_count) {
-                        //     // TODO improve this error message to tell the expected and given counts
-                        //     return vm.reportErr("unexpected arg count");
-                        // }
+                        if (func.native.arg_count != arg_count) {
+                            // TODO improve this error message to tell the expected and given counts
+                            return vm.reportErr("unexpected arg count");
+                        }
                         const args = vm.gc.stack.items[vm.sp + first ..][0..arg_count];
                         for (args) |arg| {
                             if (arg == null)

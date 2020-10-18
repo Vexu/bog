@@ -6,7 +6,6 @@ pub fn build(b: *Builder) void {
 
     const lib = b.addStaticLibrary("bog", "src/lib.zig");
     lib.linkLibC();
-    lib.bundle_compiler_rt = true;
     lib.addBuildOption(
         bool,
         "no_std",
