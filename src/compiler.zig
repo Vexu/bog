@@ -43,7 +43,11 @@ pub fn compile(gpa: *Allocator, source: []const u8, errors: *Errors) (Compiler.E
         .cur_scope = &root_scope.base,
         .string_interner = std.StringHashMap(u32).init(gpa),
     };
-    defer compiler.string_interner.deinit();
+    defer {
+        compiler.module_code.deinit();
+        compiler.strings.deinit();
+        compiler.string_interner.deinit();
+    }
 
     for (tree.nodes) |node| {
         try compiler.autoForwardDecl(node);

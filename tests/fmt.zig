@@ -317,20 +317,20 @@ const mem = std.mem;
 const warn = std.debug.warn;
 const bog = @import("bog");
 
-var state = std.heap.GeneralPurposeAllocator(.{}){};
-const alloc = &state.allocator;
-
 fn testTransform(source: []const u8, expected: []const u8) void {
-    var errors = bog.Errors.init(alloc);
-    var tree = bog.parse(alloc, source, &errors) catch |e| switch (e) {
+    var errors = bog.Errors.init(std.testing.allocator);
+    defer errors.deinit();
+    var tree = bog.parse(std.testing.allocator, source, &errors) catch |e| switch (e) {
         else => @panic("test failure"),
         error.TokenizeError, error.ParseError => {
             errors.render(source, std.io.getStdErr().outStream()) catch {};
             @panic("test failure");
         },
     };
+    defer tree.deinit();
 
-    var out_buf = std.ArrayList(u8).init(alloc);
+    var out_buf = std.ArrayList(u8).init(std.testing.allocator);
+    defer out_buf.deinit();
     tree.render(out_buf.outStream()) catch @panic("test failure");
     std.testing.expectEqualStrings(expected, out_buf.items);
 }

@@ -643,19 +643,18 @@ const testing = std.testing;
 const bog = @import("bog");
 const Vm = bog.Vm;
 
-var state = std.heap.GeneralPurposeAllocator(.{}){};
-const alloc = &state.allocator;
-
 fn expectCallOutput(source: []const u8, args: anytype, expected: []const u8) void {
-    var vm = Vm.init(alloc, .{});
+    var vm = Vm.init(std.testing.allocator, .{});
     defer vm.deinit();
-    const res = run(source, &vm) catch |e| switch (e) {
+    var module: *bog.Module = undefined;
+    const res = run(&module, source, &vm) catch |e| switch (e) {
         else => @panic("test failure"),
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
             vm.errors.render(source, std.io.getStdErr().outStream()) catch {};
             @panic("test failure");
         },
     };
+    defer module.deinit(std.testing.allocator);
 
     const call_res = vm.call(res, "doTheTest", args) catch |e| switch (e) {
         else => @panic("test failure"),
@@ -664,30 +663,36 @@ fn expectCallOutput(source: []const u8, args: anytype, expected: []const u8) voi
             @panic("test failure");
         },
     };
-    var out_buf = std.ArrayList(u8).init(alloc);
+    var out_buf = std.ArrayList(u8).init(std.testing.allocator);
+    defer out_buf.deinit();
     call_res.dump(out_buf.outStream(), 2) catch @panic("test failure");
     testing.expectEqualStrings(expected, out_buf.items);
 }
 
 fn expectOutput(source: []const u8, expected: []const u8) void {
-    var vm = Vm.init(alloc, .{});
+    var vm = Vm.init(std.testing.allocator, .{});
     defer vm.deinit();
     vm.addStd() catch unreachable;
-    const res = run(source, &vm) catch |e| switch (e) {
+    var module: *bog.Module = undefined;
+    const res = run(&module, source, &vm) catch |e| switch (e) {
         else => @panic("test failure"),
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
             vm.errors.render(source, std.io.getStdErr().outStream()) catch {};
             @panic("test failure");
         },
     };
+    defer module.deinit(std.testing.allocator);
 
-    var out_buf = std.ArrayList(u8).init(alloc);
+    var out_buf = std.ArrayList(u8).init(std.testing.allocator);
+    defer out_buf.deinit();
     res.dump(out_buf.outStream(), 2) catch @panic("test failure");
     testing.expectEqualStrings(expected, out_buf.items);
 }
 
-fn run(source: []const u8, vm: *Vm) !*bog.Value {
-    var module = try bog.compile(alloc, source, &vm.errors);
+fn run(mp: **bog.Module, source: []const u8, vm: *Vm) !*bog.Value {
+    const module = try bog.compile(std.testing.allocator, source, &vm.errors);
+    errdefer module.deinit(std.testing.allocator);
+    mp.* = module;
 
     // TODO this should happen in vm.exec but currently that would break repl
     vm.ip = module.entry;

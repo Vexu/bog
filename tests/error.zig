@@ -69,11 +69,8 @@ const bog = @import("bog");
 const Vm = bog.Vm;
 const Errors = bog.Errors;
 
-var state = std.heap.GeneralPurposeAllocator(.{}){};
-const alloc = &state.allocator;
-
 fn expectError(source: []const u8, expected: []const u8) void {
-    var vm = Vm.init(alloc, .{});
+    var vm = Vm.init(std.testing.allocator, .{});
     defer vm.deinit();
 
     _ = vm.run(source) catch |e| switch (e) {
