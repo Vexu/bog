@@ -1,3 +1,11 @@
+test "comma decimals" {
+    expectOutput(
+        \\return 0,5 + 0,2;
+    ,
+        \\0.7
+    );
+}
+
 test "range" {
     expectOutput(
         \\return for (let i in 0:7:2) i
@@ -56,7 +64,7 @@ test "list comprehension" {
 
 test "list.append" {
     expectOutput(
-        \\let list = [1,2]
+        \\let list = [1, 2]
         \\list.append(3)
         \\return list
     ,
@@ -122,7 +130,7 @@ test "tagged values" {
         \\true
     );
     expectOutput(
-        \\const foo = @foo[1,2]
+        \\const foo = @foo[1, 2]
         \\const @foo[bar, baz] = foo
         \\return bar + baz
     ,
@@ -267,7 +275,7 @@ test "for loops" {
     );
     expectOutput(
         \\let sum = 0
-        \\for (let (x,y) in [(1,2), (2,3), (5,6)])
+        \\for (let (x,y) in [(1, 2), (2, 3), (5, 6)])
         \\    sum += x * y
         \\
         \\return sum
@@ -348,7 +356,7 @@ test "const value not modified by function" {
 
 test "in" {
     expectOutput(
-        \\let y = [1,2,3]
+        \\let y = [1, 2, 3]
         \\if (not true in y)
         \\    y[-2] = false
         \\return y == [1, false, 3]
@@ -359,7 +367,7 @@ test "in" {
 
 test "get/set" {
     expectOutput(
-        \\let y = [1,2,3]
+        \\let y = [1, 2, 3]
         \\y[-2] = true
         \\return y[1]
     ,
@@ -458,7 +466,7 @@ test "while loop" {
 
 test "subscript" {
     expectOutput(
-        \\const y = (1,2)
+        \\const y = (1, 2)
         \\return y[-1]
     ,
         \\2
@@ -478,14 +486,14 @@ test "functions" {
     expectOutput(
         \\const add = fn ((a,b)) a + b
         \\const tuplify = fn (a,b) (a,b)
-        \\return add(tuplify(1,2))
+        \\return add(tuplify(1, 2))
     ,
         \\3
     );
     expectOutput(
         \\const add = fn (a,b) a + b
         \\const sub = fn (a,b) a - b
-        \\return sub(add(3,4), add(1,2))
+        \\return sub(add(3, 4), add(1,2))
     ,
         \\4
     );

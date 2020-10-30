@@ -1,3 +1,16 @@
+test "numbers" {
+    testTransform(
+        \\[0,0]
+        \\[0.0]
+        \\[0,0,0]
+    ,
+        \\[0,0]
+        \\[0.0]
+        \\[0,0, 0]
+        \\
+    );
+}
+
 test "ranges" {
     testCanonical(
         \\1:2:3
@@ -239,7 +252,7 @@ test "trailing comma in call" {
         \\
     );
     testTransform(
-        \\foo(2,3,)
+        \\foo(2, 3,)
         \\bar(
         \\    2,
         \\    3

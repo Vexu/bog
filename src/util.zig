@@ -42,7 +42,10 @@ pub fn parseNum(str: []const u8) !f64 {
 
     var i: u32 = 0;
     for (str) |c| {
-        if (c != '_') {
+        if (c == ',') {
+            buf[i] = '.';
+            i += 1;
+        } else if (c != '_') {
             buf[i] = c;
             i += 1;
         }

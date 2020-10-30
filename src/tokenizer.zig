@@ -941,7 +941,7 @@ pub const Tokenizer = struct {
                     'x' => {
                         state = .HexNumber;
                     },
-                    '.' => {
+                    '.', ',' => {
                         state = .NumberDot;
                         dot_index = self.it.i - 1;
                     },
@@ -967,9 +967,14 @@ pub const Tokenizer = struct {
                         res = .Integer;
                         break;
                     },
-                    else => {
-                        self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                    '0'...'9', 'e', 'E', '_' => {
+                        self.it.i -= 1;
                         state = .FloatFraction;
+                    },
+                    else => {
+                        self.it.i = dot_index.?;
+                        res = .Integer;
+                        break;
                     },
                 },
                 .BinaryNumber => switch (c) {
@@ -1034,6 +1039,11 @@ pub const Tokenizer = struct {
                     '0'...'9', '_' => {},
                     'e', 'E' => {
                         state = .FloatExponent;
+                    },
+                    '.', ',' => {
+                        self.it.i -= 1;
+                        res = .Number;
+                        break;
                     },
                     else => {
                         if (isIdentifier(c)) {
@@ -1126,6 +1136,10 @@ pub const Tokenizer = struct {
                 .Caret => res = .Caret,
                 .Asterisk => res = .Asterisk,
                 .AsteriskAsterisk => res = .AsteriskAsterisk,
+                .NumberDot => {
+                    self.it.i -= 1;
+                    res = .Integer;
+                },
                 else => {
                     return self.reportErr("unexpected EOF", 'a');
                 },
@@ -1330,5 +1344,34 @@ test "identifiers" {
         .Identifier,
         .Plus,
         .Minus,
+    });
+}
+
+test "numbers" {
+    expectTokens(
+        \\0.
+        \\0,
+        \\0.0
+        \\0,0
+        \\0.0.0
+        \\0,0,0
+    , &[_]Token.Id{
+        .Integer,
+        .Period,
+        .Nl,
+        .Integer,
+        .Comma,
+        .Nl,
+        .Number,
+        .Nl,
+        .Number,
+        .Nl,
+        .Number,
+        .Period,
+        .Integer,
+        .Nl,
+        .Number,
+        .Comma,
+        .Integer,
     });
 }

@@ -46,7 +46,7 @@ test "invalid map" {
 
 test "index out of bounds" {
     expectError(
-        \\let y = [0,0,0]
+        \\let y = [0, 0, 0]
         \\y[y["len"]] = true
     ,
         \\index out of bounds
