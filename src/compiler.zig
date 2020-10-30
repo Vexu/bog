@@ -21,30 +21,25 @@ pub fn compile(gpa: *Allocator, source: []const u8, errors: *Errors) (Compiler.E
     defer arena_state.deinit();
     const arena = &arena_state.allocator;
 
-    var root_scope: ModuleScope = .{
-        .base = .{
-            .syms = Compiler.Symbol.List.init(arena),
-            .id = .module,
-            .parent = null,
-        },
-        .code = Compiler.Code.init(arena),
+    var module = Compiler.Fn{
+        .code = Compiler.Code.init(gpa),
     };
+    defer module.code.deinit();
+
     var compiler = Compiler{
         .errors = errors,
         .tokens = tree.tokens,
         .source = source,
         .arena = arena,
+        .func = &module,
         .module_code = Compiler.Code.init(gpa),
+        .scope = std.ArrayList(Compiler.Scope).init(gpa),
         .strings = std.ArrayList(u8).init(gpa),
-        .code = &root_scope.code,
-        .cur_scope = &root_scope.base,
         .string_interner = std.StringHashMap(u32).init(gpa),
     };
-    defer {
-        compiler.module_code.deinit();
-        compiler.strings.deinit();
-        compiler.string_interner.deinit();
-    }
+    defer compiler.deinit();
+
+    try compiler.scope.append(.{ .module = &module });
 
     for (tree.nodes) |node| {
         try compiler.autoForwardDecl(node);
@@ -62,7 +57,7 @@ pub fn compile(gpa: *Allocator, source: []const u8, errors: *Errors) (Compiler.E
     }
 
     const entry = compiler.module_code.items.len;
-    try compiler.module_code.appendSlice(compiler.code.items);
+    try compiler.module_code.appendSlice(module.code.items);
     const mod = try gpa.create(bog.Module);
     mod.* = .{
         .name = "",
@@ -120,13 +115,23 @@ pub const Compiler = struct {
     arena: *Allocator,
     scope: std.ArrayList(Scope),
     func: *Fn,
+    module_code: Code,
     strings: std.ArrayList(u8),
     string_interner: std.StringHashMap(u32),
 
-    pub const Fn = struct {
-        code: std.ArrayList(bog.Instruction),
-        registers: std.PackedIntArray(u1, 256) = .{
-            .bytes = [0]u8{0} ** 32,
+    fn deinit(self: *Compiler) void {
+        self.scope.deinit();
+        self.strings.deinit();
+        self.module_code.deinit();
+        self.string_interner.deinit();
+    }
+
+    const Code = std.ArrayList(bog.Instruction);
+
+    const Fn = struct {
+        code: Code,
+        regs: std.PackedIntArray(u1, 256) = .{
+            .bytes = [_]u8{0} ** 32,
         },
         // index of first free register
         free_index: u8 = 0,
@@ -136,11 +141,12 @@ pub const Compiler = struct {
             while (i < 256) : (i += 1) {
                 if (self.regs.get(i) == 0) {
                     self.regs.set(i, 1);
-                    self.free_index = i;
-                    return i;
+                    self.free_index = @truncate(u8, i);
+                    return @truncate(u8, i);
                 }
             }
-            return error.RanOutOfRegisters;
+            // return error.RanOutOfRegisters;
+            @panic("TODO RanOutOfRegisters");
         }
 
         fn regFree(self: *Fn, reg: RegRef) void {
@@ -149,31 +155,34 @@ pub const Compiler = struct {
         }
     };
 
-    pub const Symbol = struct {
+    const Symbol = struct {
         name: []const u8,
         // val: Value,
         reg: u8,
     };
 
+    const Loop = struct {
+        breaks: BreakList,
+        cond_begin: u32,
+
+        const BreakList = std.ArrayList(u32);
+    };
+
     const Scope = union(enum) {
         module: *Fn,
         func: *Fn,
-        loop: struct {
-            breaks: BreakList,
-            cond_begin: u32,
-
-            const BreakList = std.ArrayList(u32);
-        },
+        loop: *Loop,
         constant: Symbol,
         mut: Symbol,
         forward_decl: Symbol,
-        try_catch: Try,
+        try_catch: *Try,
     };
 
     const Try = struct {
-        base: Scope,
         jumps: JumpList,
         err_reg: RegRef,
+
+        const JumpList = std.ArrayList(u32);
     };
 
     const JumpList = std.ArrayList(u32);
@@ -278,9 +287,9 @@ pub const Compiler = struct {
         var i = self.scopes.items.len;
         while (true) {
             i -= 1;
-            const scope = &self.scopes.items[i];
-            switch (scope.*) {
-                .try_catch => |*t| return t,
+            const scope = self.scopes.items[i];
+            switch (scope) {
+                .try_catch => |t| return t,
                 .func, .module => return null,
                 else => {},
             }
@@ -404,7 +413,7 @@ pub const Compiler = struct {
         const reg = try self.func.regAlloc();
         try self.scope.append(.{
             .forward_decl = .{
-                .val = undefined,
+                // .val = undefined,
                 .name = self.tokenSlice(ident.tok),
                 .reg = reg,
             },
@@ -543,9 +552,9 @@ pub const Compiler = struct {
         // prepare registers
         const container_reg = sub_res.rt;
         const index_reg = try self.func.regAlloc();
-        defer self.registerFree(index_reg);
+        defer self.func.regFree(index_reg);
         const result_reg = try self.func.regAlloc();
-        defer self.registerFree(result_reg);
+        defer self.func.regFree(result_reg);
 
         for (node.values) |val| {
             const item = @fieldParentPtr(Node.MapItem, "base", val);
@@ -593,9 +602,9 @@ pub const Compiler = struct {
         // prepare registers
         const container_reg = sub_res.rt;
         const index_reg = try self.func.regAlloc();
-        defer self.registerFree(index_reg);
+        defer self.func.regFree(index_reg);
         const result_reg = try self.func.regAlloc();
-        defer self.registerFree(result_reg);
+        defer self.func.regFree(result_reg);
 
         var index = Value{ .int = 0 };
         for (node.values) |val| {
@@ -618,8 +627,11 @@ pub const Compiler = struct {
         const prev_func = self.func;
         defer self.func = prev_func;
 
+        const scopes = self.scope.items.len;
+        defer self.scope.items.len = scopes;
+
         var func = Fn{
-            .code = Fn.Code.init(self.gpa),
+            .code = Code.init(self.gpa),
         };
         defer func.code.deinit();
 
@@ -666,10 +678,8 @@ pub const Compiler = struct {
         // reset regs after generating body
         self.func = old_func;
 
-        const module = &self.scope.items[0].module;
-
-        const offset = @intCast(u32, module.code.items.len);
-        try module.code.appendSlice(func.code.items);
+        const offset = @intCast(u32, self.module_code.items.len);
+        try self.module_code.appendSlice(func.code.items);
 
         const ret_val = Value{
             .func = .{
@@ -682,16 +692,8 @@ pub const Compiler = struct {
     }
 
     fn genBlock(self: *Compiler, node: *Node.Block, res: Result) Error!Value {
-        var block_scope = Scope{
-            .id = .block,
-            .parent = self.cur_scope,
-            .syms = Symbol.List.init(self.errors.list.allocator),
-        };
-        self.cur_scope = &block_scope;
-        defer {
-            block_scope.syms.deinit();
-            self.cur_scope = block_scope.parent.?;
-        }
+        const scopes = self.scope.items.len;
+        defer self.scope.items.len = scopes;
 
         for (node.stmts) |stmt, i| {
             try self.addLineInfo(stmt);
@@ -714,12 +716,7 @@ pub const Compiler = struct {
     }
 
     fn genIf(self: *Compiler, node: *Node.If, res: Result) Error!Value {
-        var capture_scope = Scope{
-            .id = .capture,
-            .parent = self.cur_scope,
-            .syms = Symbol.List.init(self.errors.list.allocator),
-        };
-        defer capture_scope.syms.deinit();
+        const scopes = self.scope.items.len;
         var if_skip: usize = undefined;
 
         const cond_val = try self.genNodeNonEmpty(node.cond, .value);
@@ -729,9 +726,8 @@ pub const Compiler = struct {
             // jump past if_body if cond == .none
             if_skip = try self.emitJump(.jump_none, cond_reg);
 
-            self.cur_scope = &capture_scope;
             const lval_res = try self.genLVal(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let)
-                .{ .let = &Value{ .rt = cond_reg } }
+                .{ .mut = &Value{ .rt = cond_reg } }
             else
                 .{ .constant = &Value{ .rt = cond_reg } });
         } else if (!cond_val.isRt()) {
@@ -770,7 +766,7 @@ pub const Compiler = struct {
 
         self.finishJump(if_skip);
         // end capture scope
-        self.cur_scope = capture_scope.parent.?;
+        self.scope.items.len = scopes;
 
         if (node.else_body) |some| {
             const else_val = try self.genNode(some, sub_res);
@@ -809,16 +805,19 @@ pub const Compiler = struct {
 
         // find inner most loop
         const loop_scope = blk: {
-            var scope = self.cur_scope;
-            while (true) switch (scope.id) {
-                .module, .func => return self.reportErr(if (node.op == .Continue)
-                    "continue outside of loop"
-                else
-                    "break outside of loop", node.tok),
-                .loop => break,
-                else => scope = scope.parent.?,
-            };
-            break :blk @fieldParentPtr(Scope.Loop, "base", scope);
+            var i = self.scope.items.len;
+            while (true) {
+                i -= 1;
+                const scope = self.scope.items[i];
+                switch (scope.id) {
+                    .module, .func => return self.reportErr(if (node.op == .Continue)
+                        "continue outside of loop"
+                    else
+                        "break outside of loop", node.tok),
+                    .loop => break :blk @fieldParentPtr(Scope.Loop, "base", scope),
+                    else => {},
+                }
+            }
         };
         if (node.op == .Continue) {
             self.func.code.items[try self.emitJump(.jump, null)] = .{
@@ -844,21 +843,16 @@ pub const Compiler = struct {
             .rt => |reg| try self.createListComprehension(reg),
         };
 
-        var loop_scope = Scope.Loop{
-            .base = .{
-                .id = .loop,
-                .parent = self.cur_scope,
-                .syms = Symbol.List.init(self.errors.list.allocator),
-            },
-            .breaks = Scope.Loop.BreakList.init(self.gpa),
+        const scopes = self.scope.items.len;
+        defer self.scope.items.len = scopes;
+
+        var loop = Loop{
+            .breaks = Loop.BreakList.init(self.strings.allocator),
             .cond_begin = @intCast(u32, self.func.code.items.len),
         };
-        self.cur_scope = &loop_scope.base;
-        defer {
-            self.cur_scope = loop_scope.base.parent.?;
-            loop_scope.base.syms.deinit();
-            loop_scope.breaks.deinit();
-        }
+        defer loop.breaks.deinit();
+
+        try self.scope.append(.{ .loop = &loop });
 
         // beginning of condition
         var cond_jump: ?usize = null;
@@ -895,7 +889,7 @@ pub const Compiler = struct {
             .rt => |list| {
                 const body_val = try self.genNodeNonEmpty(node.body, .value);
                 const reg = try body_val.toRt(self);
-                defer self.registerFree(reg);
+                defer self.func.regFree(reg);
                 try self.emitDouble(.append_double, list, reg);
             },
             else => unreachable,
@@ -904,42 +898,37 @@ pub const Compiler = struct {
         // jump back to condition
         const end = try self.emitJump(.jump, null);
         self.func.code.items[end] = .{
-            .bare_signed = @truncate(i32, -@intCast(isize, end - loop_scope.cond_begin)),
+            .bare_signed = @truncate(i32, -@intCast(isize, end - loop.cond_begin)),
         };
 
         // exit loop if cond == false
         if (cond_jump) |some| {
             self.finishJump(some);
         }
-        for (loop_scope.breaks.items) |jump| {
-            self.finishJump(jump);
+        for (breaks.items) |some| {
+            self.finishJump(some);
         }
 
         return sub_res.toVal();
     }
 
     fn genFor(self: *Compiler, node: *Node.For, res: Result) Error!Value {
-        var loop_scope = Scope.Loop{
-            .base = .{
-                .id = .loop,
-                .parent = self.cur_scope,
-                .syms = Symbol.List.init(self.errors.list.allocator),
-            },
-            .breaks = Scope.Loop.BreakList.init(self.errors.list.allocator),
-            .cond_begin = undefined,
-        };
-        self.cur_scope = &loop_scope.base;
-        defer {
-            self.cur_scope = loop_scope.base.parent.?;
-            loop_scope.base.syms.deinit();
-            loop_scope.breaks.deinit();
-        }
-
         const sub_res = switch (res) {
             .discard => res,
             .value => try self.createListComprehension(null),
             .rt => |reg| try self.createListComprehension(reg),
         };
+
+        const scopes = self.scope.items.len;
+        defer self.scope.items.len = scopes;
+
+        var loop = Loop{
+            .breaks = Loop.BreakList.init(self.strings.allocator),
+            .cond_begin = @intCast(u32, self.func.code.items.len),
+        };
+        defer loop.breaks.deinit();
+
+        try self.scope.append(.{ .loop = &loop });
 
         const cond_val = try self.genNode(node.cond, .value);
         if (!cond_val.isRt() and cond_val != .str)
@@ -949,16 +938,16 @@ pub const Compiler = struct {
         defer cond_val.free(self, cond_reg);
 
         const iter_reg = try self.func.regAlloc();
-        defer self.registerFree(iter_reg);
+        defer self.func.regFree(iter_reg);
 
         // initialize the iterator
         try self.emitDouble(.iter_init_double, iter_reg, cond_reg);
 
         const iter_val_reg = try self.func.regAlloc();
-        defer self.registerFree(iter_val_reg);
+        defer self.func.regFree(iter_val_reg);
 
         // loop condition
-        loop_scope.cond_begin = @intCast(u32, self.func.code.items.len);
+        scope.cond_begin = @intCast(u32, self.func.code.items.len);
 
         // iter_next is fused with a jump_none
         try self.emitDouble(.iter_next_double, iter_val_reg, iter_reg);
@@ -982,7 +971,7 @@ pub const Compiler = struct {
             .rt => |list| {
                 const body_val = try self.genNodeNonEmpty(node.body, .value);
                 const reg = try body_val.toRt(self);
-                defer self.registerFree(reg);
+                defer self.func.regFree(reg);
                 try self.emitDouble(.append_double, list, reg);
             },
             else => unreachable,
@@ -991,13 +980,14 @@ pub const Compiler = struct {
         // jump to the start of the loop
         const end = try self.emitJump(.jump, null);
         self.func.code.items[end] = .{
-            .bare_signed = @truncate(i32, -@intCast(isize, end - loop_scope.cond_begin)),
+            .bare_signed = @truncate(i32, -@intCast(isize, end - scope.cond_begin)),
         };
 
         // exit loop when IterNext results in None
         self.finishJump(exit_jump);
-        for (loop_scope.breaks.items) |jump| {
-            self.finishJump(jump);
+
+        for (scope.breaks.items) |some| {
+            self.finishJump(some);
         }
 
         return sub_res.toVal();
@@ -1042,7 +1032,7 @@ pub const Compiler = struct {
     }
 
     fn genTypeInfix(self: *Compiler, node: *Node.TypeInfix, res: Result) Error!Value {
-        const l_val = try self.genNodeNonEmpty(node.lhs, .value);
+        const lhs = try self.genNodeNonEmpty(node.lhs, .value);
 
         const type_str = self.tokenSlice(node.type_tok);
         const type_id = if (mem.eql(u8, type_str, "none"))
@@ -1072,10 +1062,10 @@ pub const Compiler = struct {
         else
             return self.reportErr("expected a type name", node.type_tok);
 
-        if (l_val.isRt()) {
+        if (lhs.isRt()) {
             const sub_res = res.toRt(self);
-            const reg = l_val.getRt();
-            defer l_val.free(self, reg);
+            const reg = lhs.getRt();
+            defer lhs.free(self, reg);
 
             try self.func.code.append(.{
                 .type_id = .{
@@ -1092,7 +1082,7 @@ pub const Compiler = struct {
             .as => switch (type_id) {
                 .none => Value{ .none = {} },
                 .int => Value{
-                    .int = switch (l_val) {
+                    .int = switch (lhs) {
                         .int => |val| val,
                         .num => |val| @floatToInt(i64, val),
                         .Bool => |val| @boolToInt(val),
@@ -1102,7 +1092,7 @@ pub const Compiler = struct {
                     },
                 },
                 .num => Value{
-                    .num = switch (l_val) {
+                    .num = switch (lhs) {
                         .num => |val| val,
                         .int => |val| @intToFloat(f64, val),
                         .Bool => |val| @intToFloat(f64, @boolToInt(val)),
@@ -1112,7 +1102,7 @@ pub const Compiler = struct {
                     },
                 },
                 .bool => Value{
-                    .Bool = switch (l_val) {
+                    .Bool = switch (lhs) {
                         .int => |val| val != 0,
                         .num => |val| val != 0,
                         .Bool => |val| val,
@@ -1126,7 +1116,7 @@ pub const Compiler = struct {
                     },
                 },
                 .str => Value{
-                    .str = switch (l_val) {
+                    .str = switch (lhs) {
                         .int => |val| try std.fmt.allocPrint(self.arena, "{}", .{val}),
                         .num => |val| try std.fmt.allocPrint(self.arena, "{d}", .{val}),
                         .Bool => |val| if (val) "true" else "false",
@@ -1142,11 +1132,11 @@ pub const Compiler = struct {
             },
             .is => Value{
                 .Bool = switch (type_id) {
-                    .none => l_val == .none,
-                    .int => l_val == .int,
-                    .num => l_val == .num,
-                    .bool => l_val == .Bool,
-                    .str => l_val == .str,
+                    .none => lhs == .none,
+                    .int => lhs == .int,
+                    .num => lhs == .num,
+                    .bool => lhs == .Bool,
+                    .str => lhs == .str,
                     else => false,
                 },
             },
@@ -1170,7 +1160,7 @@ pub const Compiler = struct {
                 }
 
                 const sub_res = res.toRt(self);
-                const start = self.used_regs;
+                var start = self.used_regs;
                 self.used_regs += @truncate(RegRef, args.len);
 
                 var i = start;
@@ -1613,7 +1603,7 @@ pub const Compiler = struct {
         const r_val = try self.genNodeNonEmpty(node.value, .value);
 
         try self.genLVal(node.capture, if (self.tokens[node.let_const].id == .Keyword_let)
-            .{ .let = &r_val }
+            .{ .mut = &r_val }
         else
             .{ .constant = &r_val });
         return Value.empty;
@@ -1622,7 +1612,7 @@ pub const Compiler = struct {
     fn genIdentifier(self: *Compiler, node: *Node.SingleToken, res: Result) Error!Value {
         const sym = try self.findSymbol(node.tok);
         if (res == .rt) {
-            try self.emitDouble(if (sym.mutable) .move_double else .copy_double, res.rt, sym.reg);
+            try self.emitDouble(if (sym.mut) .move_double else .copy_double, res.rt, sym.reg);
             return res.toVal();
         }
         return Value{ .ref = sym.reg };
@@ -1749,7 +1739,7 @@ pub const Compiler = struct {
 
     fn genFormatString(self: *Compiler, node: *Node.FormatString, res: Result) Error!Value {
         // transform f"foo{255:X}bar" into "foo{X}bar".format((255,))
-        var buf = std.ArrayList(u8).init(self.errors.list.allocator);
+        var buf = std.ArrayList(u8).init(self.gpa);
         defer buf.deinit();
 
         var i: usize = 0;
@@ -1808,32 +1798,28 @@ pub const Compiler = struct {
             .rt, .discard => res,
             .value => Result{
                 // value is only known at runtime
-                .rt = self.registerAlloc(),
+                .rt = try self.func.regAlloc(),
             },
             .lval => unreachable,
         };
 
-        var try_scope = Scope.Try{
-            .base = .{
-                .id = .try_catch,
-                .parent = self.cur_scope,
-                .syms = Symbol.List.init(self.errors.list.allocator),
-            },
-            .jumps = Scope.Loop.BreakList.init(self.errors.list.allocator),
-            .err_reg = self.registerAlloc(),
+        var try_scope = Try{
+            .jumps = Try.JumpList.init(self.gpa),
+            .err_reg = try self.func.regAlloc(),
         };
-        self.cur_scope = &try_scope.base;
         defer {
-            try_scope.base.syms.deinit();
             try_scope.jumps.deinit();
+            self.func.regFree(try_scope.err_reg);
         }
+
+        try self.scope.append(.{ .try_catch = &try_scope });
 
         const expr_val = try self.genNode(node.expr, sub_res);
         if (sub_res != .rt and expr_val.isRt()) {
             try self.emitSingle(.discard_single, expr_val.getRt());
         }
         // no longer in try scope
-        self.cur_scope = try_scope.base.parent.?;
+        assert(self.scope.pop() == .try_catch);
 
         if (try_scope.jumps.items.len == 0) {
             // no possible error to be handled
@@ -1850,18 +1836,12 @@ pub const Compiler = struct {
         // otherwise unwrap the error
         try self.emitDouble(.unwrap_error_double, try_scope.err_reg, try_scope.err_reg);
 
-        var capture_scope = Scope{
-            .id = .capture,
-            .parent = self.cur_scope,
-            .syms = Symbol.List.init(self.errors.list.allocator),
-        };
-        self.cur_scope = &capture_scope;
-        defer {
-            capture_scope.syms.deinit();
-            self.cur_scope = capture_scope.parent.?;
-        }
+        const scope_count = self.scope.items.len;
+        defer self.scope.items.len = scope_count;
 
-        const capture_reg = self.registerAlloc();
+        const capture_reg = try self.func.regAlloc();
+        defer self.func.regFree(capture_reg);
+
         var seen_catch_all = false;
         for (node.catches) |catcher, catcher_i| {
             if (seen_catch_all) {
@@ -1874,12 +1854,10 @@ pub const Compiler = struct {
                 if (catch_node.let_const) |tok| {
                     seen_catch_all = true;
 
-                    const lval_res = if (self.tokens[tok].id == .Keyword_let)
-                        Result{ .lval = .{ .let = &Value{ .rt = try_scope.err_reg } } }
+                    try self.genNode(some, if (self.tokens[tok].id == .Keyword_let)
+                        .{ .let = &Value{ .rt = try_scope.err_reg } }
                     else
-                        Result{ .lval = .{ .Const = &Value{ .rt = try_scope.err_reg } } };
-
-                    assert((try self.genNode(some, lval_res)) == .empty);
+                        .{ .constant = &Value{ .rt = try_scope.err_reg } });
                 } else {
                     _ = try self.genNodeNonEmpty(some, .{ .rt = capture_reg });
                     // if not equal to the error value jump over this handler
@@ -1923,7 +1901,7 @@ pub const Compiler = struct {
             .rt, .discard => res,
             .value => Result{
                 // value is only known at runtime
-                .rt = self.registerAlloc(),
+                .rt = try self.func.regAlloc(),
             },
             .lval => unreachable,
         };
@@ -1931,26 +1909,19 @@ pub const Compiler = struct {
         const cond_val = try self.genNodeNonEmpty(node.expr, .value);
         const cond_reg = try cond_val.toRt(self);
 
-        var capture_scope = Scope{
-            .id = .capture,
-            .parent = self.cur_scope,
-            .syms = Symbol.List.init(self.errors.list.allocator),
-        };
-        self.cur_scope = &capture_scope;
-        defer {
-            capture_scope.syms.deinit();
-            self.cur_scope = capture_scope.parent.?;
-        }
-
-        var jumps = Scope.Loop.BreakList.init(self.errors.list.allocator);
+        var jumps = Scope.Try.JumpList.init(self.gpa);
         defer jumps.deinit();
 
-        var case_reg = self.registerAlloc();
+        var case_reg = try self.func.regAlloc();
+        defer self.func.regFree(case_reg);
         var seen_catch_all = false;
         for (node.cases) |uncasted_case, case_i| {
             if (seen_catch_all) {
                 return self.reportErr("additional cases after catch-all case", uncasted_case.firstToken());
             }
+
+            const scope_count = self.scope.items.len;
+            defer self.scope.items.len = scope_count;
 
             var expr: *Node = undefined;
             var case_skip: ?usize = null;
@@ -1962,12 +1933,10 @@ pub const Compiler = struct {
                 seen_catch_all = true;
                 expr = case.expr;
 
-                const lval_res = if (self.tokens[case.let_const].id == .Keyword_let)
-                    Result{ .lval = .{ .let = &Value{ .rt = cond_reg } } }
+                try self.genLval(case.capture, if (self.tokens[case.let_const].id == .Keyword_let)
+                     .{ .let = &Value{ .rt = cond_reg } }
                 else
-                    Result{ .lval = .{ .Const = &Value{ .rt = cond_reg } } };
-
-                assert((try self.genNode(case.capture, lval_res)) == .empty);
+                     .{ .constant = &Value{ .rt = cond_reg } });
             } else if (uncasted_case.cast(.MatchCase)) |case| {
                 expr = case.expr;
 
@@ -1999,7 +1968,7 @@ pub const Compiler = struct {
 
         // result in none if no matches
         if (!seen_catch_all and sub_res == .rt) {
-            try self.code.append(.{
+            try self.func.code.append(.{
                 .primitive = .{ .res = sub_res.rt, .kind = .none },
             });
         }
@@ -2224,11 +2193,6 @@ pub const Compiler = struct {
                     try self.emitDouble(.copy_double, copy_reg, reg);
                     reg = copy_reg;
                 }
-                try self.cur_scope.declSymbol(.{
-                    .name = name,
-                    .mutable = res.lval == .let,
-                    .reg = reg,
-                });
                 const sym = Symbol{
                     .name = name,
                     .reg = reg,
@@ -2240,7 +2204,7 @@ pub const Compiler = struct {
             },
             .assign => |val| {
                 const sym = try self.findSymbol(node.tok);
-                if (!sym.mutable) {
+                if (!sym.mut) {
                     return self.reportErr("assignment to constant", node.tok);
                 }
                 if (val.* == .ref) {
@@ -2253,7 +2217,7 @@ pub const Compiler = struct {
             },
             .aug_assign => |val| {
                 const sym = try self.findSymbol(node.tok);
-                if (!sym.mutable) {
+                if (!sym.mut) {
                     return self.reportErr("assignment to constant", node.tok);
                 }
                 val.* = Value{ .ref = sym.reg };
