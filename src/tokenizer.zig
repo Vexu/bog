@@ -524,6 +524,7 @@ pub const Tokenizer = struct {
         var res: Token.Id = .Eof;
         var str_delimit: u32 = undefined;
         var counter: u32 = 0;
+        var dot_index: ?usize = null;
 
         while (self.it.nextCodepoint()) |c| {
             switch (state) {
@@ -942,14 +943,19 @@ pub const Tokenizer = struct {
                     },
                     '.' => {
                         state = .NumberDot;
+                        dot_index = self.it.i - 1;
                     },
-                    '0'...'9', 'a', 'c'...'f', 'A'...'F' => {
+                    '0'...'7' => {
                         return self.reportErr("invalid character, octal literals start with '0o'", c);
                     },
                     '_' => {
                         state = .Number;
                     },
                     else => {
+                        if (isIdentifier(c)) {
+                            state = .Identifier;
+                            continue;
+                        }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         res = .Integer;
                         break;
@@ -968,13 +974,11 @@ pub const Tokenizer = struct {
                 },
                 .BinaryNumber => switch (c) {
                     '0', '1', '_' => {},
-                    '2'...'9', 'a'...'f', 'A'...'F' => {
-                        return self.reportErr("invalid digit in binary number", c);
-                    },
-                    '.' => {
-                        return self.reportErr("invalid base for floating point number", c);
-                    },
                     else => {
+                        if (isIdentifier(c)) {
+                            state = .Identifier;
+                            continue;
+                        }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         res = .Integer;
                         break;
@@ -982,13 +986,11 @@ pub const Tokenizer = struct {
                 },
                 .OctalNumber => switch (c) {
                     '0'...'7', '_' => {},
-                    '8'...'9', 'a'...'f', 'A'...'F' => {
-                        return self.reportErr("invalid digit in octal number", c);
-                    },
-                    '.' => {
-                        return self.reportErr("invalid base for floating point number", c);
-                    },
                     else => {
+                        if (isIdentifier(c)) {
+                            state = .Identifier;
+                            continue;
+                        }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         res = .Integer;
                         break;
@@ -996,13 +998,14 @@ pub const Tokenizer = struct {
                 },
                 .HexNumber => switch (c) {
                     '0'...'9', 'a'...'f', 'A'...'F', '_' => {},
-                    '.' => {
-                        return self.reportErr("invalid base for floating point number", c);
-                    },
                     'p', 'P' => {
                         state = .FloatExponent;
                     },
                     else => {
+                        if (isIdentifier(c)) {
+                            state = .Identifier;
+                            continue;
+                        }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         res = .Integer;
                         break;
@@ -1010,16 +1013,18 @@ pub const Tokenizer = struct {
                 },
                 .Number => switch (c) {
                     '0'...'9', '_' => {},
-                    'a'...'d', 'f', 'A'...'F' => {
-                        return self.reportErr("invalid digit in number", c);
-                    },
                     '.' => {
                         state = .NumberDot;
+                        dot_index = self.it.i - 1;
                     },
-                    'e' => {
+                    'e', 'E' => {
                         state = .FloatExponent;
                     },
                     else => {
+                        if (isIdentifier(c)) {
+                            state = .Identifier;
+                            continue;
+                        }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         res = .Integer;
                         break;
@@ -1027,10 +1032,18 @@ pub const Tokenizer = struct {
                 },
                 .FloatFraction => switch (c) {
                     '0'...'9', '_' => {},
-                    'e' => {
+                    'e', 'E' => {
                         state = .FloatExponent;
                     },
                     else => {
+                        if (isIdentifier(c)) {
+                            self.it.i = dot_index orelse {
+                                state = .Identifier;
+                                continue;
+                            };
+                            res = .Integer;
+                            break;
+                        }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         res = .Number;
                         break;
@@ -1041,6 +1054,14 @@ pub const Tokenizer = struct {
                         state = .FloatExponentDigits;
                     },
                     else => {
+                        if (isIdentifier(c)) {
+                            self.it.i = dot_index orelse {
+                                state = .Identifier;
+                                continue;
+                            };
+                            res = .Integer;
+                            break;
+                        }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         state = .FloatExponentDigits;
                     },
@@ -1051,11 +1072,17 @@ pub const Tokenizer = struct {
                     },
                     '_' => {},
                     else => {
-                        if (counter == 0) {
-                            return self.reportErr("invalid exponent digit", c);
+                        if (counter != 0 and !isIdentifier(c)) {
+                            self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                            res = .Number;
+                            break;
                         }
-                        self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res = .Number;
+                        self.it.i = dot_index orelse {
+                            self.it.i = start_index;
+                            state = .Identifier;
+                            continue;
+                        };
+                        res = .Integer;
                         break;
                     },
                 },
@@ -1253,5 +1280,55 @@ test "indentation" {
         .{ .Indent = 1 },
         .Keyword_if,
         .Nl,
+    });
+}
+
+test "identifiers" {
+    expectTokens(
+        \\0b1gg
+        \\0x1gg
+        \\0o1gg
+        \\0gg
+        \\1gg
+    , &[_]Token.Id{
+        .Identifier,
+        .Nl,
+        .Identifier,
+        .Nl,
+        .Identifier,
+        .Nl,
+        .Identifier,
+        .Nl,
+        .Identifier,
+    });
+    expectTokens(
+        \\30.30f
+        \\30.30ee
+        \\30.30e+12a
+        \\30.30e+12-
+        \\30.30e+-
+    , &[_]Token.Id{
+        .Integer,
+        .Period,
+        .Identifier,
+        .Nl,
+        .Integer,
+        .Period,
+        .Identifier,
+        .Nl,
+        .Integer,
+        .Period,
+        .Identifier,
+        .Plus,
+        .Identifier,
+        .Nl,
+        .Number,
+        .Minus,
+        .Nl,
+        .Integer,
+        .Period,
+        .Identifier,
+        .Plus,
+        .Minus,
     });
 }
