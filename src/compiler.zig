@@ -22,11 +22,13 @@ pub fn compile(gpa: *Allocator, source: []const u8, errors: *Errors) (Compiler.E
     const arena = &arena_state.allocator;
 
     var module = Compiler.Fn{
+        .captures = undefined,
         .code = Compiler.Code.init(gpa),
     };
     defer module.code.deinit();
 
     var compiler = Compiler{
+        .gpa = gpa,
         .errors = errors,
         .tokens = tree.tokens,
         .source = source,
@@ -112,6 +114,7 @@ pub const Compiler = struct {
     tokens: []const bog.Token,
     source: []const u8,
     errors: *Errors,
+    gpa: *Allocator,
     arena: *Allocator,
     scope: std.ArrayList(Scope),
     func: *Fn,
@@ -126,10 +129,11 @@ pub const Compiler = struct {
         self.string_interner.deinit();
     }
 
-    const Code = std.ArrayList(bog.Instruction);
+    pub const Code = std.ArrayList(bog.Instruction);
 
     const Fn = struct {
         code: Code,
+        captures: std.ArrayList(Symbol),
         regs: std.PackedIntArray(u1, 256) = .{
             .bytes = [_]u8{0} ** 32,
         },
@@ -152,6 +156,14 @@ pub const Compiler = struct {
         fn regFree(self: *Fn, reg: RegRef) void {
             self.regs.set(reg, 0);
             self.free_index = std.math.min(self.free_index, reg);
+        }
+
+        fn regAllocN(self: *Fn, n: usize) !RegRef {
+            if (self.free_index + n >= 256) {
+                @panic("TODO RanOutOfRegisters");
+            }
+            // TODO there may be used regs after self.free_index
+            return self.free_index;
         }
     };
 
@@ -181,8 +193,6 @@ pub const Compiler = struct {
     const Try = struct {
         jumps: JumpList,
         err_reg: RegRef,
-
-        const JumpList = std.ArrayList(u32);
     };
 
     const JumpList = std.ArrayList(u32);
@@ -203,6 +213,7 @@ pub const Compiler = struct {
         func: struct {
             params: u8,
             offset: u32,
+            captures: []Symbol,
         },
 
         fn isRt(val: Value) bool {
@@ -284,10 +295,10 @@ pub const Compiler = struct {
     pub const Error = error{CompileError} || Allocator.Error;
 
     fn getTry(self: *Compiler) ?*Try {
-        var i = self.scopes.items.len;
+        var i = self.scope.items.len;
         while (true) {
             i -= 1;
-            const scope = self.scopes.items[i];
+            const scope = self.scope.items[i];
             switch (scope) {
                 .try_catch => |t| return t,
                 .func, .module => return null,
@@ -372,12 +383,12 @@ pub const Compiler = struct {
                     .func = .{
                         .res = res,
                         .arg_count = v.params,
-                        .capture_count = @intCast(u8, v.captures.items.len),
+                        .capture_count = @intCast(u8, v.captures.len),
                     },
                 });
                 try self.func.code.append(.{ .bare = v.offset });
 
-                for (v.captures.items) |capture, i| {
+                for (v.captures) |capture, i| {
                     try self.emitTriple(
                         .store_capture_triple,
                         res,
@@ -437,7 +448,7 @@ pub const Compiler = struct {
                 .func => {
                     @panic("TODO captures");
                 },
-                .loop => {},
+                .loop, .try_catch => {},
                 .constant, .mut, .forward_decl => |sym| if (mem.eql(u8, sym.name, name)) {
                     return RegAndMut{
                         .reg = sym.reg,
@@ -449,7 +460,7 @@ pub const Compiler = struct {
         return self.reportErr("use of undeclared identifier", tok);
     }
 
-    fn isForwardDecl(self: *Compiler, tok: TokenIndex) bool {
+    fn getForwardDecl(self: *Compiler, tok: TokenIndex) ?RegRef {
         const name = self.tokenSlice(tok);
         var i = self.scope.items.len;
         var in_fn_scope = false;
@@ -460,10 +471,8 @@ pub const Compiler = struct {
             switch (item) {
                 .module => break,
                 .func => in_fn_scope = true,
-                .loop => {},
-                .constant, .mut => |sym| if (mem.eql(u8, sym.name, name)) {
-                    return self.reportErr("redeclaration of identifier", node.tok);
-                },
+                .loop, .try_catch => {},
+                .constant, .mut => return null,
                 .forward_decl => |sym| if (mem.eql(u8, sym.name, name)) {
                     assert(!in_fn_scope);
                     return sym.reg;
@@ -483,8 +492,8 @@ pub const Compiler = struct {
         /// No value is expected if some is given it will be discarded
         discard,
 
-        fn toRt(res: Result, compiler: *Compiler) Result {
-            return if (res == .rt) res else .{ .rt = compiler.registerAlloc() };
+        fn toRt(res: Result, compiler: *Compiler) !Result {
+            return if (res == .rt) res else .{ .rt = try compiler.func.regAlloc() };
         }
 
         /// returns .empty if res != .rt
@@ -546,7 +555,7 @@ pub const Compiler = struct {
             return self.reportErr("too many items", node.base.firstToken());
         }
 
-        const sub_res = res.toRt(self);
+        const sub_res = try res.toRt(self);
         try self.emitOff(.build_map_off, sub_res.rt, @intCast(u32, node.values.len));
 
         // prepare registers
@@ -592,7 +601,7 @@ pub const Compiler = struct {
             return self.reportErr("too many items", node.base.firstToken());
         }
 
-        const sub_res = res.toRt(self);
+        const sub_res = try res.toRt(self);
         try self.emitOff(switch (node.base.id) {
             .Tuple => .build_tuple_off,
             .List => .build_list_off,
@@ -631,21 +640,23 @@ pub const Compiler = struct {
         defer self.scope.items.len = scopes;
 
         var func = Fn{
+            .captures = std.ArrayList(Symbol).init(self.gpa),
             .code = Code.init(self.gpa),
         };
+        defer func.captures.deinit();
         defer func.code.deinit();
 
         try self.scope.append(.{ .func = &func });
+        const old_func = self.func;
         self.func = &func;
 
         // destructure parameters
         for (node.params) |param| {
             // we checked that there are less than max_params params
             const reg = func.regAlloc() catch unreachable;
-            const param_res = try self.genLVal(param, .{
-                .let = &Value{ .rt = reg },
+            try self.genLval(param, .{
+                .mut = &Value{ .rt = reg },
             });
-            std.debug.assert(param_res == .empty);
         }
 
         // gen body and return result
@@ -685,7 +696,7 @@ pub const Compiler = struct {
             .func = .{
                 .params = param_count,
                 .offset = offset,
-                .captures = captures,
+                .captures = try self.arena.dupe(Symbol, func.captures.items),
             },
         };
         return ret_val.maybeRt(self, res);
@@ -726,7 +737,7 @@ pub const Compiler = struct {
             // jump past if_body if cond == .none
             if_skip = try self.emitJump(.jump_none, cond_reg);
 
-            const lval_res = try self.genLVal(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let)
+            const lval_res = try self.genLval(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let)
                 .{ .mut = &Value{ .rt = cond_reg } }
             else
                 .{ .constant = &Value{ .rt = cond_reg } });
@@ -809,12 +820,12 @@ pub const Compiler = struct {
             while (true) {
                 i -= 1;
                 const scope = self.scope.items[i];
-                switch (scope.id) {
+                switch (scope) {
                     .module, .func => return self.reportErr(if (node.op == .Continue)
                         "continue outside of loop"
                     else
                         "break outside of loop", node.tok),
-                    .loop => break :blk @fieldParentPtr(Scope.Loop, "base", scope),
+                    .loop => |loop| break :blk loop,
                     else => {},
                 }
             }
@@ -864,8 +875,8 @@ pub const Compiler = struct {
             // jump past exit loop if cond == .none
             cond_jump = try self.emitJump(.jump_none, cond_reg);
 
-            try self.genLVal(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let)
-                .{ .let = &Value{ .rt = cond_reg } }
+            try self.genLval(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let)
+                .{ .mut = &Value{ .rt = cond_reg } }
             else
                 .{ .constant = &Value{ .rt = cond_reg } });
         } else if (cond_val.isRt()) {
@@ -905,7 +916,7 @@ pub const Compiler = struct {
         if (cond_jump) |some| {
             self.finishJump(some);
         }
-        for (breaks.items) |some| {
+        for (loop.breaks.items) |some| {
             self.finishJump(some);
         }
 
@@ -947,7 +958,7 @@ pub const Compiler = struct {
         defer self.func.regFree(iter_val_reg);
 
         // loop condition
-        scope.cond_begin = @intCast(u32, self.func.code.items.len);
+        loop.cond_begin = @intCast(u32, self.func.code.items.len);
 
         // iter_next is fused with a jump_none
         try self.emitDouble(.iter_next_double, iter_val_reg, iter_reg);
@@ -955,8 +966,8 @@ pub const Compiler = struct {
         try self.func.code.append(.{ .bare = 0 });
 
         if (node.capture != null) {
-            try self.genLVal(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let)
-                .{ .let = &Value{ .rt = iter_val_reg } }
+            try self.genLval(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let)
+                .{ .mut = &Value{ .rt = iter_val_reg } }
             else
                 .{ .constant = &Value{ .rt = iter_val_reg } });
         }
@@ -980,13 +991,13 @@ pub const Compiler = struct {
         // jump to the start of the loop
         const end = try self.emitJump(.jump, null);
         self.func.code.items[end] = .{
-            .bare_signed = @truncate(i32, -@intCast(isize, end - scope.cond_begin)),
+            .bare_signed = @truncate(i32, -@intCast(isize, end - loop.cond_begin)),
         };
 
         // exit loop when IterNext results in None
         self.finishJump(exit_jump);
 
-        for (scope.breaks.items) |some| {
+        for (loop.breaks.items) |some| {
             self.finishJump(some);
         }
 
@@ -994,38 +1005,38 @@ pub const Compiler = struct {
     }
 
     fn genPrefix(self: *Compiler, node: *Node.Prefix, res: Result) Error!Value {
-        const r_val = try self.genNodeNonEmpty(node.rhs, .value);
+        const rhs_val = try self.genNodeNonEmpty(node.rhs, .value);
 
-        if (r_val.isRt()) {
+        if (rhs_val.isRt()) {
             const op_id: bog.Op = switch (node.op) {
                 .bool_not => .bool_not_double,
                 .bit_not => .bit_not_double,
                 .minus => .negate_double,
                 // TODO should unary + be a no-op
-                .plus => return r_val,
+                .plus => return rhs_val,
             };
-            const reg = r_val.getRt();
-            defer r_val.free(self, reg);
+            const reg = rhs_val.getRt();
+            defer rhs_val.free(self, reg);
 
-            const sub_res = res.toRt(self);
+            const sub_res = try res.toRt(self);
             try self.emitDouble(op_id, sub_res.rt, reg);
             return sub_res.toVal();
         }
         const ret_val: Value = switch (node.op) {
-            .bool_not => .{ .Bool = !try r_val.getBool(self, node.rhs.firstToken()) },
-            .bit_not => .{ .int = ~try r_val.getInt(self, node.rhs.firstToken()) },
+            .bool_not => .{ .Bool = !try rhs_val.getBool(self, node.rhs.firstToken()) },
+            .bit_not => .{ .int = ~try rhs_val.getInt(self, node.rhs.firstToken()) },
             .minus => blk: {
-                try r_val.checkNum(self, node.rhs.firstToken());
-                if (r_val == .int) {
+                try rhs_val.checkNum(self, node.rhs.firstToken());
+                if (rhs_val == .int) {
                     // TODO check for overflow
-                    break :blk Value{ .int = -r_val.int };
+                    break :blk Value{ .int = -rhs_val.int };
                 } else {
-                    break :blk Value{ .num = -r_val.num };
+                    break :blk Value{ .num = -rhs_val.num };
                 }
             },
             .plus => blk: {
-                try r_val.checkNum(self, node.rhs.firstToken());
-                break :blk r_val;
+                try rhs_val.checkNum(self, node.rhs.firstToken());
+                break :blk rhs_val;
             },
         };
         return ret_val.maybeRt(self, res);
@@ -1063,7 +1074,7 @@ pub const Compiler = struct {
             return self.reportErr("expected a type name", node.type_tok);
 
         if (lhs.isRt()) {
-            const sub_res = res.toRt(self);
+            const sub_res = try res.toRt(self);
             const reg = lhs.getRt();
             defer lhs.free(self, reg);
 
@@ -1146,12 +1157,12 @@ pub const Compiler = struct {
     }
 
     fn genSuffix(self: *Compiler, node: *Node.Suffix, res: Result) Error!Value {
-        const l_val = try self.genNode(node.lhs, .value);
-        if (l_val != .str and l_val != .func and !l_val.isRt()) {
+        const lhs_val = try self.genNode(node.lhs, .value);
+        if (lhs_val != .str and lhs_val != .func and !lhs_val.isRt()) {
             return self.reportErr("invalid left hand side to suffix op", node.lhs.firstToken());
         }
-        const l_reg = try l_val.toRt(self);
-        defer l_val.free(self, l_reg);
+        const l_reg = try lhs_val.toRt(self);
+        defer lhs_val.free(self, l_reg);
 
         const index_val = switch (node.op) {
             .call => |args| {
@@ -1159,9 +1170,8 @@ pub const Compiler = struct {
                     return self.reportErr("too many arguments", node.l_tok);
                 }
 
-                const sub_res = res.toRt(self);
-                var start = self.used_regs;
-                self.used_regs += @truncate(RegRef, args.len);
+                const sub_res = try res.toRt(self);
+                var start = try self.func.regAllocN(args.len);
 
                 var i = start;
                 for (args) |arg| {
@@ -1178,7 +1188,7 @@ pub const Compiler = struct {
                 });
                 try self.func.code.append(.{ .bare = @truncate(u8, args.len) });
 
-                if (self.cur_scope.getTry()) |try_scope| {
+                if (self.getTry()) |try_scope| {
                     try self.emitDouble(.move_double, try_scope.err_reg, sub_res.rt);
                     try try_scope.jumps.append(try self.emitJump(.jump_error, sub_res.rt));
                 }
@@ -1247,13 +1257,13 @@ pub const Compiler = struct {
             => return self.genAssignInfix(node, res),
 
             .append => {
-                var l_val = try self.genNodeNonEmpty(node.lhs, .value);
-                var r_val = try self.genNodeNonEmpty(node.rhs, .value);
+                var lhs_val = try self.genNodeNonEmpty(node.lhs, .value);
+                var rhs_val = try self.genNodeNonEmpty(node.rhs, .value);
 
-                if (l_val.isRt() or r_val.isRt()) {
-                    const l_reg = try l_val.toRt(self);
-                    const r_reg = try r_val.toRt(self);
-                    defer r_val.free(self, r_reg);
+                if (lhs_val.isRt() or rhs_val.isRt()) {
+                    const l_reg = try lhs_val.toRt(self);
+                    const r_reg = try rhs_val.toRt(self);
+                    defer rhs_val.free(self, r_reg);
 
                     try self.emitDouble(.append_double, l_reg, r_reg);
                     if (res == .discard) {
@@ -1270,8 +1280,8 @@ pub const Compiler = struct {
                     return Value{ .none = {} };
                 }
 
-                const l_str = try l_val.getStr(self, node.lhs.firstToken());
-                const r_str = try r_val.getStr(self, node.rhs.firstToken());
+                const l_str = try lhs_val.getStr(self, node.lhs.firstToken());
+                const r_str = try rhs_val.getStr(self, node.rhs.firstToken());
 
                 const concatted = Value{
                     .str = try mem.concat(self.arena, u8, &[_][]const u8{ l_str, r_str }),
@@ -1285,16 +1295,16 @@ pub const Compiler = struct {
         if (res != .discard) {
             return self.reportErr("assignment produces no value", node.tok);
         }
-        const r_val = try self.genNodeNonEmpty(node.rhs, .value);
+        const rhs_val = try self.genNodeNonEmpty(node.rhs, .value);
 
         if (node.op == .assign) {
-            try self.genLVal(node.lhs, .{ .assign = &r_val });
+            try self.genLval(node.lhs, .{ .assign = &rhs_val });
             return .empty;
         }
 
-        var l_val = Value{.none};
-        try self.genLVal(node.lhs, .{ .aug_assign = &l_val });
-        if (!r_val.isRt()) switch (node.op) {
+        var lhs_val: Value = .none;
+        try self.genLval(node.lhs, .{ .aug_assign = &lhs_val });
+        if (!rhs_val.isRt()) switch (node.op) {
             .add_assign,
             .sub_assign,
             .mul_assign,
@@ -1302,19 +1312,19 @@ pub const Compiler = struct {
             .div_assign,
             .div_floor_assign,
             .mod_assign,
-            => try r_val.checkNum(self, node.rhs.firstToken()),
+            => try rhs_val.checkNum(self, node.rhs.firstToken()),
 
             .l_shift_assign,
             .r_shift_assign,
             .bit_and_assign,
             .bit_or_assign,
             .bit_x_or_assign,
-            => _ = try r_val.getInt(self, node.rhs.firstToken()),
+            => _ = try rhs_val.getInt(self, node.rhs.firstToken()),
             else => unreachable,
         };
 
-        const reg = try r_val.toRt(self);
-        defer r_val.free(self, reg);
+        const reg = try rhs_val.toRt(self);
+        defer rhs_val.free(self, reg);
 
         try self.emitTriple(switch (node.op) {
             .add_assign => .add_triple,
@@ -1330,7 +1340,7 @@ pub const Compiler = struct {
             .bit_or_assign => .bit_or_triple,
             .bit_x_or_assign => .bit_xor_triple,
             else => unreachable,
-        }, l_val.getRt(), l_val.getRt(), reg);
+        }, lhs_val.getRt(), lhs_val.getRt(), reg);
         return Value.empty;
     }
 
@@ -1339,17 +1349,17 @@ pub const Compiler = struct {
     }
 
     fn genNumericInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
-        var l_val = try self.genNodeNonEmpty(node.lhs, .value);
-        var r_val = try self.genNodeNonEmpty(node.rhs, .value);
+        var lhs_val = try self.genNodeNonEmpty(node.lhs, .value);
+        var rhs_val = try self.genNodeNonEmpty(node.rhs, .value);
 
-        if (r_val.isRt() or l_val.isRt()) {
-            const sub_res = res.toRt(self);
+        if (rhs_val.isRt() or lhs_val.isRt()) {
+            const sub_res = try res.toRt(self);
 
-            const l_reg = try l_val.toRt(self);
-            const r_reg = try r_val.toRt(self);
+            const l_reg = try lhs_val.toRt(self);
+            const r_reg = try rhs_val.toRt(self);
             defer {
-                r_val.free(self, r_reg);
-                l_val.free(self, l_reg);
+                rhs_val.free(self, r_reg);
+                lhs_val.free(self, l_reg);
             }
 
             try self.emitTriple(switch (node.op) {
@@ -1364,48 +1374,48 @@ pub const Compiler = struct {
             }, sub_res.rt, l_reg, r_reg);
             return sub_res.toVal();
         }
-        try l_val.checkNum(self, node.lhs.firstToken());
-        try r_val.checkNum(self, node.rhs.firstToken());
+        try lhs_val.checkNum(self, node.lhs.firstToken());
+        try rhs_val.checkNum(self, node.rhs.firstToken());
 
         // TODO makeRuntime if overflow
         const ret_val = switch (node.op) {
             .add => blk: {
-                if (needNum(l_val, r_val)) {
-                    break :blk Value{ .num = l_val.getNum() + r_val.getNum() };
+                if (needNum(lhs_val, rhs_val)) {
+                    break :blk Value{ .num = lhs_val.getNum() + rhs_val.getNum() };
                 }
-                break :blk Value{ .int = l_val.int + r_val.int };
+                break :blk Value{ .int = lhs_val.int + rhs_val.int };
             },
             .sub => blk: {
-                if (needNum(l_val, r_val)) {
-                    break :blk Value{ .num = l_val.getNum() - r_val.getNum() };
+                if (needNum(lhs_val, rhs_val)) {
+                    break :blk Value{ .num = lhs_val.getNum() - rhs_val.getNum() };
                 }
-                break :blk Value{ .int = l_val.int - r_val.int };
+                break :blk Value{ .int = lhs_val.int - rhs_val.int };
             },
             .mul => blk: {
-                if (needNum(l_val, r_val)) {
-                    break :blk Value{ .num = l_val.getNum() * r_val.getNum() };
+                if (needNum(lhs_val, rhs_val)) {
+                    break :blk Value{ .num = lhs_val.getNum() * rhs_val.getNum() };
                 }
-                break :blk Value{ .int = l_val.int * r_val.int };
+                break :blk Value{ .int = lhs_val.int * rhs_val.int };
             },
-            .div => Value{ .num = l_val.getNum() / r_val.getNum() },
+            .div => Value{ .num = lhs_val.getNum() / rhs_val.getNum() },
             .div_floor => blk: {
-                if (needNum(l_val, r_val)) {
-                    break :blk Value{ .int = @floatToInt(i64, @divFloor(l_val.getNum(), r_val.getNum())) };
+                if (needNum(lhs_val, rhs_val)) {
+                    break :blk Value{ .int = @floatToInt(i64, @divFloor(lhs_val.getNum(), rhs_val.getNum())) };
                 }
-                break :blk Value{ .int = @divFloor(l_val.int, r_val.int) };
+                break :blk Value{ .int = @divFloor(lhs_val.int, rhs_val.int) };
             },
             .mod => blk: {
-                if (needNum(l_val, r_val)) {
-                    break :blk Value{ .num = @rem(l_val.getNum(), r_val.getNum()) };
+                if (needNum(lhs_val, rhs_val)) {
+                    break :blk Value{ .num = @rem(lhs_val.getNum(), rhs_val.getNum()) };
                 }
-                break :blk Value{ .int = std.math.rem(i64, l_val.int, r_val.int) catch @panic("TODO") };
+                break :blk Value{ .int = std.math.rem(i64, lhs_val.int, rhs_val.int) catch @panic("TODO") };
             },
             .pow => blk: {
-                if (needNum(l_val, r_val)) {
-                    break :blk Value{ .num = std.math.pow(f64, l_val.getNum(), r_val.getNum()) };
+                if (needNum(lhs_val, rhs_val)) {
+                    break :blk Value{ .num = std.math.pow(f64, lhs_val.getNum(), rhs_val.getNum()) };
                 }
                 break :blk Value{
-                    .int = std.math.powi(i64, l_val.int, r_val.int) catch
+                    .int = std.math.powi(i64, lhs_val.int, rhs_val.int) catch
                         return self.reportErr("TODO integer overflow", node.tok),
                 };
             },
@@ -1416,17 +1426,17 @@ pub const Compiler = struct {
     }
 
     fn genComparisonInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
-        var l_val = try self.genNodeNonEmpty(node.lhs, .value);
-        var r_val = try self.genNodeNonEmpty(node.rhs, .value);
+        var lhs_val = try self.genNodeNonEmpty(node.lhs, .value);
+        var rhs_val = try self.genNodeNonEmpty(node.rhs, .value);
 
-        if (r_val.isRt() or l_val.isRt()) {
-            const sub_res = res.toRt(self);
+        if (rhs_val.isRt() or lhs_val.isRt()) {
+            const sub_res = try res.toRt(self);
 
-            const l_reg = try l_val.toRt(self);
-            const r_reg = try r_val.toRt(self);
+            const l_reg = try lhs_val.toRt(self);
+            const r_reg = try rhs_val.toRt(self);
             defer {
-                r_val.free(self, r_reg);
-                l_val.free(self, l_reg);
+                rhs_val.free(self, r_reg);
+                lhs_val.free(self, l_reg);
             }
 
             try self.emitTriple(switch (node.op) {
@@ -1446,57 +1456,57 @@ pub const Compiler = struct {
         switch (node.op) {
             .in, .equal, .not_equal => {},
             else => {
-                try l_val.checkNum(self, node.lhs.firstToken());
-                try r_val.checkNum(self, node.rhs.firstToken());
+                try lhs_val.checkNum(self, node.lhs.firstToken());
+                try rhs_val.checkNum(self, node.rhs.firstToken());
             },
         }
 
         const ret_val: Value = switch (node.op) {
             .less_than => .{
-                .Bool = if (needNum(l_val, r_val))
-                    l_val.getNum() < r_val.getNum()
+                .Bool = if (needNum(lhs_val, rhs_val))
+                    lhs_val.getNum() < rhs_val.getNum()
                 else
-                    l_val.int < r_val.int,
+                    lhs_val.int < rhs_val.int,
             },
             .less_than_equal => .{
-                .Bool = if (needNum(l_val, r_val))
-                    l_val.getNum() <= r_val.getNum()
+                .Bool = if (needNum(lhs_val, rhs_val))
+                    lhs_val.getNum() <= rhs_val.getNum()
                 else
-                    l_val.int <= r_val.int,
+                    lhs_val.int <= rhs_val.int,
             },
             .greater_than => .{
-                .Bool = if (needNum(l_val, r_val))
-                    l_val.getNum() > r_val.getNum()
+                .Bool = if (needNum(lhs_val, rhs_val))
+                    lhs_val.getNum() > rhs_val.getNum()
                 else
-                    l_val.int > r_val.int,
+                    lhs_val.int > rhs_val.int,
             },
             .greater_than_equal => .{
-                .Bool = if (needNum(l_val, r_val))
-                    l_val.getNum() >= r_val.getNum()
+                .Bool = if (needNum(lhs_val, rhs_val))
+                    lhs_val.getNum() >= rhs_val.getNum()
                 else
-                    l_val.int >= r_val.int,
+                    lhs_val.int >= rhs_val.int,
             },
             .equal, .not_equal => blk: {
-                const eql = switch (l_val) {
-                    .none => |a_val| switch (r_val) {
+                const eql = switch (lhs_val) {
+                    .none => |a_val| switch (rhs_val) {
                         .none => true,
                         else => false,
                     },
-                    .int => |a_val| switch (r_val) {
+                    .int => |a_val| switch (rhs_val) {
                         .int => |b_val| a_val == b_val,
                         .num => |b_val| @intToFloat(f64, a_val) == b_val,
                         else => false,
                     },
-                    .num => |a_val| switch (r_val) {
+                    .num => |a_val| switch (rhs_val) {
                         .int => |b_val| a_val == @intToFloat(f64, b_val),
                         .num => |b_val| a_val == b_val,
                         else => false,
                     },
-                    .Bool => |a_val| switch (r_val) {
+                    .Bool => |a_val| switch (rhs_val) {
                         .Bool => |b_val| a_val == b_val,
                         else => false,
                     },
-                    .str => |a_val| switch (r_val) {
+                    .str => |a_val| switch (rhs_val) {
                         .str => |b_val| mem.eql(u8, a_val, b_val),
                         else => false,
                     },
@@ -1508,11 +1518,11 @@ pub const Compiler = struct {
                 break :blk Value{ .Bool = copy };
             },
             .in => .{
-                .Bool = switch (l_val) {
+                .Bool = switch (lhs_val) {
                     .str => mem.indexOf(
                         u8,
-                        try l_val.getStr(self, node.lhs.firstToken()),
-                        try r_val.getStr(self, node.rhs.firstToken()),
+                        try lhs_val.getStr(self, node.lhs.firstToken()),
+                        try rhs_val.getStr(self, node.rhs.firstToken()),
                     ) != null,
                     else => return self.reportErr("TODO: range without strings", node.lhs.firstToken()),
                 },
@@ -1523,20 +1533,20 @@ pub const Compiler = struct {
     }
 
     fn genBoolInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
-        var l_val = try self.genNodeNonEmpty(node.lhs, .value);
+        var lhs_val = try self.genNodeNonEmpty(node.lhs, .value);
 
-        if (!l_val.isRt()) {
-            const l_bool = try l_val.getBool(self, node.lhs.firstToken());
+        if (!lhs_val.isRt()) {
+            const l_bool = try lhs_val.getBool(self, node.lhs.firstToken());
             if (node.op == .bool_and) {
-                if (!l_bool) return l_val;
+                if (!l_bool) return lhs_val;
             } else {
-                if (l_bool) return l_val;
+                if (l_bool) return lhs_val;
             }
             return self.genNodeNonEmpty(node.rhs, res);
         }
 
-        const sub_res = res.toRt(self);
-        const l_reg = l_val.getRt();
+        const sub_res = try res.toRt(self);
+        const l_reg = lhs_val.getRt();
         try self.emitDouble(.move_double, sub_res.rt, l_reg);
 
         const rhs_skip = if (node.op == .bool_and)
@@ -1551,17 +1561,17 @@ pub const Compiler = struct {
     }
 
     fn genIntInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
-        var l_val = try self.genNodeNonEmpty(node.lhs, .value);
-        var r_val = try self.genNodeNonEmpty(node.rhs, .value);
+        var lhs_val = try self.genNodeNonEmpty(node.lhs, .value);
+        var rhs_val = try self.genNodeNonEmpty(node.rhs, .value);
 
-        if (l_val.isRt() or r_val.isRt()) {
-            const sub_res = res.toRt(self);
+        if (lhs_val.isRt() or rhs_val.isRt()) {
+            const sub_res = try res.toRt(self);
 
-            const l_reg = try l_val.toRt(self);
-            const r_reg = try r_val.toRt(self);
+            const l_reg = try lhs_val.toRt(self);
+            const r_reg = try rhs_val.toRt(self);
             defer {
-                r_val.free(self, r_reg);
-                l_val.free(self, l_reg);
+                rhs_val.free(self, r_reg);
+                lhs_val.free(self, l_reg);
             }
 
             try self.emitTriple(switch (node.op) {
@@ -1574,8 +1584,8 @@ pub const Compiler = struct {
             }, sub_res.rt, l_reg, r_reg);
             return sub_res.toVal();
         }
-        const l_int = try l_val.getInt(self, node.lhs.firstToken());
-        const r_int = try r_val.getInt(self, node.rhs.firstToken());
+        const l_int = try lhs_val.getInt(self, node.lhs.firstToken());
+        const r_int = try rhs_val.getInt(self, node.rhs.firstToken());
 
         const ret_val: Value = switch (node.op) {
             .bit_and => .{ .int = l_int & r_int },
@@ -1600,12 +1610,12 @@ pub const Compiler = struct {
     }
 
     fn genDecl(self: *Compiler, node: *Node.Decl, res: Result) Error!Value {
-        const r_val = try self.genNodeNonEmpty(node.value, .value);
+        const rhs_val = try self.genNodeNonEmpty(node.value, .value);
 
-        try self.genLVal(node.capture, if (self.tokens[node.let_const].id == .Keyword_let)
-            .{ .mut = &r_val }
+        try self.genLval(node.capture, if (self.tokens[node.let_const].id == .Keyword_let)
+            .{ .mut = &rhs_val }
         else
-            .{ .constant = &r_val });
+            .{ .constant = &rhs_val });
         return Value.empty;
     }
 
@@ -1619,7 +1629,7 @@ pub const Compiler = struct {
     }
 
     fn genThis(self: *Compiler, node: *Node.SingleToken, res: Result) Error!Value {
-        const sub_res = res.toRt(self);
+        const sub_res = try res.toRt(self);
         try self.emitSingle(.load_this_single, sub_res.rt);
         return sub_res.toVal();
     }
@@ -1640,7 +1650,7 @@ pub const Compiler = struct {
     }
 
     fn genImport(self: *Compiler, node: *Node.Import, res: Result) Error!Value {
-        const sub_res = res.toRt(self);
+        const sub_res = try res.toRt(self);
         const str = try self.parseStr(node.str_tok);
         const str_loc = try self.putString(str);
 
@@ -1654,7 +1664,7 @@ pub const Compiler = struct {
         else
             Value{ .none = {} };
 
-        const sub_res = res.toRt(self);
+        const sub_res = try res.toRt(self);
         const reg = try val.toRt(self);
         defer val.free(self, reg);
 
@@ -1663,7 +1673,7 @@ pub const Compiler = struct {
     }
 
     fn genTagged(self: *Compiler, node: *Node.Tagged, res: Result) Error!Value {
-        const sub_res = res.toRt(self);
+        const sub_res = try res.toRt(self);
         const str_loc = try self.putString(self.tokenSlice(node.name));
 
         try self.func.code.append(.{
@@ -1685,7 +1695,7 @@ pub const Compiler = struct {
     }
 
     fn genRange(self: *Compiler, node: *Node.Range, res: Result) Error!Value {
-        const sub_res = res.toRt(self);
+        const sub_res = try res.toRt(self);
         const start = try self.genRangePart(node.start);
         const end = try self.genRangePart(node.end);
         const step = try self.genRangePart(node.step);
@@ -1756,21 +1766,21 @@ pub const Compiler = struct {
         const format_string = try self.arena.dupe(u8, buf.items[0..i]);
 
         // format_reg = "formatstring".format
-        const sub_res = res.toRt(self);
+        const sub_res = try res.toRt(self);
         const format_reg = try (Value{ .str = format_string }).toRt(self);
         const format_member_str = try (Value{ .str = "format" }).toRt(self);
         try self.emitTriple(.get_triple, format_reg, format_reg, format_member_str);
-        defer self.registerFree(format_member_str);
+        defer self.func.regFree(format_member_str);
 
         // arg_reg = (args...)
         const arg_reg = format_member_str;
         try self.emitOff(.build_tuple_off, arg_reg, @intCast(u32, node.args.len));
 
         // prepare registers
-        const index_reg = self.registerAlloc();
-        defer self.registerFree(index_reg);
-        const result_reg = self.registerAlloc();
-        defer self.registerFree(result_reg);
+        const index_reg = try self.func.regAlloc();
+        defer self.func.regFree(index_reg);
+        const result_reg = try self.func.regAlloc();
+        defer self.func.regFree(result_reg);
 
         var index = Value{ .int = 0 };
         for (node.args) |arg| {
@@ -1782,14 +1792,14 @@ pub const Compiler = struct {
         }
 
         // sub_res.rt = format_reg(arg_reg)
-        try self.code.append(.{
+        try self.func.code.append(.{
             .call = .{
                 .res = sub_res.rt,
                 .func = format_reg,
                 .first = arg_reg,
             },
         });
-        try self.code.append(.{ .bare = 1 });
+        try self.func.code.append(.{ .bare = 1 });
         return sub_res.toVal();
     }
 
@@ -1800,11 +1810,10 @@ pub const Compiler = struct {
                 // value is only known at runtime
                 .rt = try self.func.regAlloc(),
             },
-            .lval => unreachable,
         };
 
         var try_scope = Try{
-            .jumps = Try.JumpList.init(self.gpa),
+            .jumps = JumpList.init(self.gpa),
             .err_reg = try self.func.regAlloc(),
         };
         defer {
@@ -1854,8 +1863,8 @@ pub const Compiler = struct {
                 if (catch_node.let_const) |tok| {
                     seen_catch_all = true;
 
-                    try self.genNode(some, if (self.tokens[tok].id == .Keyword_let)
-                        .{ .let = &Value{ .rt = try_scope.err_reg } }
+                    try self.genLval(some, if (self.tokens[tok].id == .Keyword_let)
+                        .{ .mut = &Value{ .rt = try_scope.err_reg } }
                     else
                         .{ .constant = &Value{ .rt = try_scope.err_reg } });
                 } else {
@@ -1903,13 +1912,12 @@ pub const Compiler = struct {
                 // value is only known at runtime
                 .rt = try self.func.regAlloc(),
             },
-            .lval => unreachable,
         };
 
         const cond_val = try self.genNodeNonEmpty(node.expr, .value);
         const cond_reg = try cond_val.toRt(self);
 
-        var jumps = Scope.Try.JumpList.init(self.gpa);
+        var jumps = JumpList.init(self.gpa);
         defer jumps.deinit();
 
         var case_reg = try self.func.regAlloc();
@@ -1934,7 +1942,7 @@ pub const Compiler = struct {
                 expr = case.expr;
 
                 try self.genLval(case.capture, if (self.tokens[case.let_const].id == .Keyword_let)
-                     .{ .let = &Value{ .rt = cond_reg } }
+                     .{ .mut = &Value{ .rt = cond_reg } }
                 else
                      .{ .constant = &Value{ .rt = cond_reg } });
             } else if (uncasted_case.cast(.MatchCase)) |case| {
@@ -1980,14 +1988,14 @@ pub const Compiler = struct {
         return sub_res.toVal();
     }
 
-    const LVal = union(enum) {
+    const Lval = union(enum) {
         constant: *const Value,
         mut: *const Value,
         assign: *const Value,
         aug_assign: *Value,
     };
 
-    fn genLVal(self: *Compiler, node: *Node, lval: LVal) Error!void {
+    fn genLval(self: *Compiler, node: *Node, lval: Lval) Error!void {
         switch (node.id) {
             .Literal,
             .Block,
@@ -2008,10 +2016,11 @@ pub const Compiler = struct {
             .MatchLet,
             .MatchCase,
             .FormatString,
+            .Try,
             => return self.reportErr("invalid left hand side to assignment", node.firstToken()),
 
             .Discard => return self.reportErr("'_' can only be used to discard unwanted tuple/list items in destructuring assignment", node.firstToken()),
-            .Grouped => return self.genLVal(@fieldParentPtr(Node.Grouped, "base", node).expr, lval),
+            .Grouped => return self.genLval(@fieldParentPtr(Node.Grouped, "base", node).expr, lval),
             .Tagged => return self.genLValTagged(@fieldParentPtr(Node.Tagged, "base", node), lval),
             .Range => return self.genLValRange(@fieldParentPtr(Node.Range, "base", node), lval),
             .Error => return self.genLValError(@fieldParentPtr(Node.Error, "base", node), lval),
@@ -2019,14 +2028,14 @@ pub const Compiler = struct {
             .List => return self.genLValTupleList(@fieldParentPtr(Node.ListTupleMap, "base", node), lval),
             .Tuple => return self.genLValTupleList(@fieldParentPtr(Node.ListTupleMap, "base", node), lval),
             .Map => return self.genLValMap(@fieldParentPtr(Node.ListTupleMap, "base", node), lval),
-            .Identifier => return self.genLValIdentifier(@fieldParentPtr(Node.Identifier, "base", node), lval),
-            .Suffix => return self.genLValSuffix(@fieldParentPtr(Node.Grouped, "base", node).expr, lval),
+            .Identifier => return self.genLValIdentifier(@fieldParentPtr(Node.SingleToken, "base", node), lval),
+            .Suffix => return self.genLValSuffix(@fieldParentPtr(Node.Suffix, "base", node), lval),
         }
     }
 
-    fn genLValRange(self: *Compiler, node: *Node.Range, lval: LVal) Error!void {
+    fn genLValRange(self: *Compiler, node: *Node.Range, lval: Lval) Error!void {
         const val = switch (lval) {
-            .constant, .let, .assign => |val| val,
+            .constant, .mut, .assign => |val| val,
             .aug_assign => return self.reportErr("invalid left hand side to augmented assignment", node.base.firstToken()),
         };
         if (!val.isRt()) {
@@ -2035,9 +2044,9 @@ pub const Compiler = struct {
         return self.reportErr("TODO: range destructure", node.base.firstToken());
     }
 
-    fn genLValTagged(self: *Compiler, node: *Node.Tagged, lval: LVal) Error!void {
+    fn genLValTagged(self: *Compiler, node: *Node.Tagged, lval: Lval) Error!void {
         const val = switch (lval) {
-            .constant, .let, .assign => |val| val,
+            .constant, .mut, .assign => |val| val,
             .aug_assign => return self.reportErr("invalid left hand side to augmented assignment", node.at),
         };
         if (!val.isRt()) {
@@ -2051,18 +2060,18 @@ pub const Compiler = struct {
         try self.emitDouble(.unwrap_tagged, unwrap_reg, val.getRt());
         try self.func.code.append(.{ .bare = str_loc });
 
-        const r_val = Value{ .rt = unwrap_reg };
-        try self.genLVal(node.capture.?, switch (lval) {
-            .constant => .{ .constant = &r_val },
-            .let => .{ .let = &r_val },
-            .assign => .{ .assign = &r_val },
+        const rhs_val = Value{ .rt = unwrap_reg };
+        try self.genLval(node.capture.?, switch (lval) {
+            .constant => .{ .constant = &rhs_val },
+            .mut => .{ .mut = &rhs_val },
+            .assign => .{ .assign = &rhs_val },
             else => unreachable,
         });
     }
 
-    fn genLValError(self: *Compiler, node: *Node.Error, lval: LVal) Error!void {
+    fn genLValError(self: *Compiler, node: *Node.Error, lval: Lval) Error!void {
         const val = switch (lval) {
-            .constant, .let, .assign => |val| val,
+            .constant, .mut, .assign => |val| val,
             .aug_assign => return self.reportErr("invalid left hand side to augmented assignment", node.tok),
         };
         if (!val.isRt()) {
@@ -2074,29 +2083,29 @@ pub const Compiler = struct {
         const unwrap_reg = try self.func.regAlloc();
         try self.emitDouble(.unwrap_error_double, unwrap_reg, val.getRt());
 
-        const r_val = Value{ .rt = unwrap_reg };
-        try self.genLVal(node.capture.?, switch (lval) {
-            .Const => .{ .constant = &r_val },
-            .let => .{ .let = &r_val },
-            .assign => .{ .assign = &r_val },
+        const rhs_val = Value{ .rt = unwrap_reg };
+        try self.genLval(node.capture.?, switch (lval) {
+            .constant => .{ .constant = &rhs_val },
+            .mut => .{ .mut = &rhs_val },
+            .assign => .{ .assign = &rhs_val },
             else => unreachable,
         });
     }
 
-    fn genLValTupleList(self: *Compiler, node: *Node.ListTupleMap, lval: LVal) Error!void {
+    fn genLValTupleList(self: *Compiler, node: *Node.ListTupleMap, lval: Lval) Error!void {
         if (node.values.len > std.math.maxInt(u32)) {
             return self.reportErr("too many items", node.l_tok);
         }
-        const val = switch (lval) {
-            .constant, .let, .assign => |val| val,
+        const res = switch (lval) {
+            .constant, .mut, .assign => |val| val,
             .aug_assign => return self.reportErr("invalid left hand side to augmented assignment", node.l_tok),
         };
-        if (!val.isRt()) {
+        if (!res.isRt()) {
             return self.reportErr("expected a tuple/list", node.l_tok);
         }
 
         // prepare registers
-        const container_reg = val.getRt();
+        const container_reg = res.getRt();
         const index_reg = try self.func.regAlloc();
         defer self.func.regFree(index_reg);
         var result_reg = try self.func.regAlloc();
@@ -2111,9 +2120,9 @@ pub const Compiler = struct {
             try self.makeRuntime(index_reg, index);
             try self.emitTriple(.get_triple, result_reg, container_reg, index_reg);
             const rt_val = Value{ .rt = result_reg };
-            try self.genNode(val, switch (lval) {
+            try self.genLval(val, switch (lval) {
                 .constant => .{ .constant = &rt_val },
-                .let => .{ .let = &rt_val },
+                .mut => .{ .mut = &rt_val },
                 .assign => .{ .assign = &rt_val },
                 else => unreachable,
             });
@@ -2124,18 +2133,18 @@ pub const Compiler = struct {
         }
     }
 
-    fn genLValMap(self: *Compiler, node: *Node.ListTupleMap, lval: LVal) Error!void {
+    fn genLValMap(self: *Compiler, node: *Node.ListTupleMap, lval: Lval) Error!void {
         if (node.values.len > std.math.maxInt(u32)) {
             return self.reportErr("too many items", node.base.firstToken());
         }
-        const val = switch (lval) {
-            .constant, .let, .assign => |val| val,
+        const res = switch (lval) {
+            .constant, .mut, .assign => |val| val,
             .aug_assign => return self.reportErr("invalid left hand side to augmented assignment", node.l_tok),
         };
-        if (!lval.isRt()) {
+        if (!res.isRt()) {
             return self.reportErr("expected a map", node.base.firstToken());
         }
-        const container_reg = lval.getRt();
+        const container_reg = res.getRt();
         const index_reg = try self.func.regAlloc();
         defer self.func.regFree(index_reg);
         var result_reg = try self.func.regAlloc();
@@ -2166,38 +2175,38 @@ pub const Compiler = struct {
 
             try self.emitTriple(.get_triple, result_reg, container_reg, index_reg);
             const rt_val = Value{ .rt = result_reg };
-            try self.genNode(item.value, switch (lval) {
-                .Const => .{ .constant = &rt_val },
-                .let => .{ .let = &rt_val },
+            try self.genLval(item.value, switch (lval) {
+                .constant => .{ .constant = &rt_val },
+                .mut => .{ .mut = &rt_val },
                 .assign => .{ .assign = &rt_val },
                 else => unreachable,
             });
 
-            if (i + 1 != node.values.len and res.lval != .assign) result_reg = try self.func.regAlloc();
+            if (i + 1 != node.values.len and lval != .assign) result_reg = try self.func.regAlloc();
         }
     }
 
-    fn genLValIdentifier(self: *Compiler, node: *Node.SingleToken, res: LVal) Error!void {
+    fn genLValIdentifier(self: *Compiler, node: *Node.SingleToken, lval: Lval) Error!void {
         switch (lval) {
-            .let, .constant => |val| {
-                if (self.isForwardDecl(node.tok)) |some| {
+            .mut, .constant => |val| {
+                if (self.getForwardDecl(node.tok)) |some| {
                     // only functions can be forward declared
                     assert(val.* == .func);
-                    return self.makeRuntime(some.reg, val.*);
+                    return self.makeRuntime(some, val.*);
                 }
                 var reg = try val.toRt(self);
 
-                if (val.* == .ref and res.lval == .let) {
+                if (val.* == .ref and lval == .mut) {
                     // copy on assign
                     const copy_reg = try self.func.regAlloc();
                     try self.emitDouble(.copy_double, copy_reg, reg);
                     reg = copy_reg;
                 }
                 const sym = Symbol{
-                    .name = name,
+                    .name = self.tokenSlice(node.tok),
                     .reg = reg,
                 };
-                try self.scope.append(if (lval == .let)
+                try self.scope.append(if (lval == .mut)
                     .{ .mut = sym }
                 else
                     .{ .constant = sym });
@@ -2225,16 +2234,16 @@ pub const Compiler = struct {
         }
     }
 
-    fn genLValSuffix(self: *Compiler, node: *Node.Suffix, res: LVal) Error!void {
+    fn genLValSuffix(self: *Compiler, node: *Node.Suffix, lval: Lval) Error!void {
         if (node.op == .call) {
-            return self.reportErr("invalid left hand side to assignment", node.firstToken());
+            return self.reportErr("invalid left hand side to assignment", node.lhs.firstToken());
         }
-        const l_val = try self.genNode(node.lhs, .value);
-        if (l_val != .str and !l_val.isRt()) {
+        const lhs_val = try self.genNode(node.lhs, .value);
+        if (lhs_val != .str and !lhs_val.isRt()) {
             return self.reportErr("invalid left hand side to suffix op", node.lhs.firstToken());
         }
-        const l_reg = try l_val.toRt(self);
-        defer l_val.free(self, l_reg);
+        const l_reg = try lhs_val.toRt(self);
+        defer lhs_val.free(self, l_reg);
 
         const index_val = switch (node.op) {
             .call => unreachable,
@@ -2245,15 +2254,15 @@ pub const Compiler = struct {
         defer index_val.free(self, index_reg);
 
         switch (lval) {
-            .let, .constant => return self.reportErr("cannot declare to subscript", node.l_tok),
+            .mut, .constant => return self.reportErr("cannot declare to subscript", node.l_tok),
             .aug_assign => |val| {
                 const res_reg = try self.func.regAlloc();
                 try self.emitTriple(.get_triple, res_reg, l_reg, index_reg);
                 val.* = Value{ .rt = res_reg };
             },
-            .assign => |r_val| {
-                const r_reg = try r_val.toRt(self);
-                defer r_val.free(self, r_reg);
+            .assign => |rhs_val| {
+                const r_reg = try rhs_val.toRt(self);
+                defer rhs_val.free(self, r_reg);
                 try self.emitTriple(.set_triple, l_reg, index_reg, r_reg);
             },
         }
