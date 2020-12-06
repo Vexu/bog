@@ -55,8 +55,8 @@ pub fn parse(gpa: *Allocator, source: []const u8, errors: *bog.Errors) (Parser.E
 
 pub fn parseRepl(repl: *@import("repl.zig").Repl) Parser.Error!?*Node {
     var parser = Parser{
-        .arena = &repl.arena.allocator,
-        .gpa = repl.gpa,
+        .arena = repl.compiler.arena,
+        .gpa = repl.compiler.gpa,
         .errors = &repl.vm.errors,
         .tokens = repl.tokenizer.tokens.items,
         .tok_index = repl.tok_index,

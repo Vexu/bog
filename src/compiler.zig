@@ -35,13 +35,13 @@ pub fn compile(gpa: *Allocator, source: []const u8, errors: *Errors) (Compiler.E
         .arena = arena,
         .func = &module,
         .module_code = Compiler.Code.init(gpa),
-        .scope = std.ArrayList(Compiler.Scope).init(gpa),
+        .scopes = std.ArrayList(Compiler.Scope).init(gpa),
         .strings = std.ArrayList(u8).init(gpa),
         .string_interner = std.StringHashMap(u32).init(gpa),
     };
     defer compiler.deinit();
 
-    try compiler.scope.append(.{ .module = &module });
+    try compiler.scopes.append(.{ .module = &module });
 
     for (tree.nodes) |node| {
         try compiler.autoForwardDecl(node);
@@ -71,41 +71,26 @@ pub fn compile(gpa: *Allocator, source: []const u8, errors: *Errors) (Compiler.E
 }
 
 pub fn compileRepl(repl: *@import("repl.zig").Repl, node: *Node) Compiler.Error!bog.Module {
-    var compiler = Compiler{
-        .tokens = repl.tokenizer.tokens.items,
-        .source = repl.buffer.items,
-        .errors = &repl.vm.errors,
-        .arena = &repl.arena.allocator,
-        .module_code = repl.module_code,
-        .strings = repl.strings,
-        .code = &repl.root_scope.code,
-        .cur_scope = &repl.root_scope.base,
-        .string_interner = repl.string_interner,
-        .used_regs = repl.used_regs,
-    };
-    defer {
-        repl.used_regs = compiler.used_regs;
-        repl.strings = compiler.strings;
-        repl.string_interner = compiler.string_interner;
-    }
-    const start_len = repl.module_code.items.len;
+    repl.compiler.tokens = repl.tokenizer.tokens.items;
+    repl.compiler.source = repl.buffer.items;
+    const start_len = repl.compiler.module_code.items.len;
 
-    try compiler.autoForwardDecl(node);
-    try compiler.addLineInfo(node);
-    const val = try compiler.genNode(node, .discard);
+    try repl.compiler.autoForwardDecl(node);
+    try repl.compiler.addLineInfo(node);
+    const val = try repl.compiler.genNode(node, .discard);
     if (val != .empty) {
-        const reg = try val.toRt(&compiler);
-        defer val.free(&compiler, reg);
+        const reg = try val.toRt(&repl.compiler);
+        defer val.free(&repl.compiler, reg);
 
-        try compiler.emitSingle(.discard_single, reg);
+        try repl.compiler.emitSingle(.discard_single, reg);
     }
-    try compiler.module_code.appendSlice(compiler.code.items);
-    compiler.code.resize(0) catch unreachable;
+    try repl.compiler.module_code.appendSlice(repl.compiler.func.code.items);
+    repl.compiler.func.code.items.len = 0;
 
     return bog.Module{
         .name = "<stdin>",
-        .code = compiler.module_code.items,
-        .strings = compiler.strings.items,
+        .code = repl.compiler.module_code.items,
+        .strings = repl.compiler.strings.items,
         .entry = @intCast(u32, start_len),
     };
 }
@@ -116,14 +101,14 @@ pub const Compiler = struct {
     errors: *Errors,
     gpa: *Allocator,
     arena: *Allocator,
-    scope: std.ArrayList(Scope),
+    scopes: std.ArrayList(Scope),
     func: *Fn,
     module_code: Code,
     strings: std.ArrayList(u8),
     string_interner: std.StringHashMap(u32),
 
-    fn deinit(self: *Compiler) void {
-        self.scope.deinit();
+    pub fn deinit(self: *Compiler) void {
+        self.scopes.deinit();
         self.strings.deinit();
         self.module_code.deinit();
         self.string_interner.deinit();
@@ -131,7 +116,7 @@ pub const Compiler = struct {
 
     pub const Code = std.ArrayList(bog.Instruction);
 
-    const Fn = struct {
+    pub const Fn = struct {
         code: Code,
         captures: std.ArrayList(Symbol),
         regs: std.PackedIntArray(u1, 256) = .{
@@ -140,7 +125,7 @@ pub const Compiler = struct {
         // index of first free register
         free_index: u8 = 0,
 
-        fn regAlloc(self: *Fn) !RegRef {
+        pub fn regAlloc(self: *Fn) !RegRef {
             var i: u32 = self.free_index;
             while (i < 256) : (i += 1) {
                 if (self.regs.get(i) == 0) {
@@ -153,7 +138,7 @@ pub const Compiler = struct {
             @panic("TODO RanOutOfRegisters");
         }
 
-        fn regFree(self: *Fn, reg: RegRef) void {
+        pub fn regFree(self: *Fn, reg: RegRef) void {
             self.regs.set(reg, 0);
             self.free_index = std.math.min(self.free_index, reg);
         }
@@ -180,7 +165,7 @@ pub const Compiler = struct {
         const BreakList = std.ArrayList(u32);
     };
 
-    const Scope = union(enum) {
+    pub const Scope = union(enum) {
         module: *Fn,
         func: *Fn,
         loop: *Loop,
@@ -295,10 +280,10 @@ pub const Compiler = struct {
     pub const Error = error{CompileError} || Allocator.Error;
 
     fn getTry(self: *Compiler) ?*Try {
-        var i = self.scope.items.len;
+        var i = self.scopes.items.len;
         while (true) {
             i -= 1;
-            const scope = self.scope.items[i];
+            const scope = self.scopes.items[i];
             switch (scope) {
                 .try_catch => |t| return t,
                 .func, .module => return null,
@@ -422,7 +407,7 @@ pub const Compiler = struct {
 
         const ident = @fieldParentPtr(Node.SingleToken, "base", decl.capture);
         const reg = try self.func.regAlloc();
-        try self.scope.append(.{
+        try self.scopes.append(.{
             .forward_decl = .{
                 // .val = undefined,
                 .name = self.tokenSlice(ident.tok),
@@ -438,11 +423,11 @@ pub const Compiler = struct {
 
     fn findSymbol(self: *Compiler, tok: TokenIndex) !RegAndMut {
         const name = self.tokenSlice(tok);
-        var i = self.scope.items.len;
+        var i = self.scopes.items.len;
 
         while (true) {
             i -= 1;
-            const item = self.scope.items[i];
+            const item = self.scopes.items[i];
             switch (item) {
                 .module => break,
                 .func => {
@@ -462,12 +447,12 @@ pub const Compiler = struct {
 
     fn getForwardDecl(self: *Compiler, tok: TokenIndex) ?RegRef {
         const name = self.tokenSlice(tok);
-        var i = self.scope.items.len;
+        var i = self.scopes.items.len;
         var in_fn_scope = false;
 
         while (true) {
             i -= 1;
-            const item = self.scope.items[i];
+            const item = self.scopes.items[i];
             switch (item) {
                 .module => break,
                 .func => in_fn_scope = true,
@@ -636,8 +621,8 @@ pub const Compiler = struct {
         const prev_func = self.func;
         defer self.func = prev_func;
 
-        const scopes = self.scope.items.len;
-        defer self.scope.items.len = scopes;
+        const scopes = self.scopes.items.len;
+        defer self.scopes.items.len = scopes;
 
         var func = Fn{
             .captures = std.ArrayList(Symbol).init(self.gpa),
@@ -646,7 +631,7 @@ pub const Compiler = struct {
         defer func.captures.deinit();
         defer func.code.deinit();
 
-        try self.scope.append(.{ .func = &func });
+        try self.scopes.append(.{ .func = &func });
         const old_func = self.func;
         self.func = &func;
 
@@ -703,8 +688,8 @@ pub const Compiler = struct {
     }
 
     fn genBlock(self: *Compiler, node: *Node.Block, res: Result) Error!Value {
-        const scopes = self.scope.items.len;
-        defer self.scope.items.len = scopes;
+        const scopes = self.scopes.items.len;
+        defer self.scopes.items.len = scopes;
 
         for (node.stmts) |stmt, i| {
             try self.addLineInfo(stmt);
@@ -727,7 +712,7 @@ pub const Compiler = struct {
     }
 
     fn genIf(self: *Compiler, node: *Node.If, res: Result) Error!Value {
-        const scopes = self.scope.items.len;
+        const scopes = self.scopes.items.len;
         var if_skip: usize = undefined;
 
         const cond_val = try self.genNodeNonEmpty(node.cond, .value);
@@ -777,7 +762,7 @@ pub const Compiler = struct {
 
         self.finishJump(if_skip);
         // end capture scope
-        self.scope.items.len = scopes;
+        self.scopes.items.len = scopes;
 
         if (node.else_body) |some| {
             const else_val = try self.genNode(some, sub_res);
@@ -816,10 +801,10 @@ pub const Compiler = struct {
 
         // find inner most loop
         const loop_scope = blk: {
-            var i = self.scope.items.len;
+            var i = self.scopes.items.len;
             while (true) {
                 i -= 1;
-                const scope = self.scope.items[i];
+                const scope = self.scopes.items[i];
                 switch (scope) {
                     .module, .func => return self.reportErr(if (node.op == .Continue)
                         "continue outside of loop"
@@ -854,8 +839,8 @@ pub const Compiler = struct {
             .rt => |reg| try self.createListComprehension(reg),
         };
 
-        const scopes = self.scope.items.len;
-        defer self.scope.items.len = scopes;
+        const scopes = self.scopes.items.len;
+        defer self.scopes.items.len = scopes;
 
         var loop = Loop{
             .breaks = Loop.BreakList.init(self.strings.allocator),
@@ -863,7 +848,7 @@ pub const Compiler = struct {
         };
         defer loop.breaks.deinit();
 
-        try self.scope.append(.{ .loop = &loop });
+        try self.scopes.append(.{ .loop = &loop });
 
         // beginning of condition
         var cond_jump: ?usize = null;
@@ -930,8 +915,8 @@ pub const Compiler = struct {
             .rt => |reg| try self.createListComprehension(reg),
         };
 
-        const scopes = self.scope.items.len;
-        defer self.scope.items.len = scopes;
+        const scopes = self.scopes.items.len;
+        defer self.scopes.items.len = scopes;
 
         var loop = Loop{
             .breaks = Loop.BreakList.init(self.strings.allocator),
@@ -939,7 +924,7 @@ pub const Compiler = struct {
         };
         defer loop.breaks.deinit();
 
-        try self.scope.append(.{ .loop = &loop });
+        try self.scopes.append(.{ .loop = &loop });
 
         const cond_val = try self.genNode(node.cond, .value);
         if (!cond_val.isRt() and cond_val != .str)
@@ -1821,14 +1806,14 @@ pub const Compiler = struct {
             self.func.regFree(try_scope.err_reg);
         }
 
-        try self.scope.append(.{ .try_catch = &try_scope });
+        try self.scopes.append(.{ .try_catch = &try_scope });
 
         const expr_val = try self.genNode(node.expr, sub_res);
         if (sub_res != .rt and expr_val.isRt()) {
             try self.emitSingle(.discard_single, expr_val.getRt());
         }
         // no longer in try scope
-        assert(self.scope.pop() == .try_catch);
+        assert(self.scopes.pop() == .try_catch);
 
         if (try_scope.jumps.items.len == 0) {
             // no possible error to be handled
@@ -1845,8 +1830,8 @@ pub const Compiler = struct {
         // otherwise unwrap the error
         try self.emitDouble(.unwrap_error_double, try_scope.err_reg, try_scope.err_reg);
 
-        const scope_count = self.scope.items.len;
-        defer self.scope.items.len = scope_count;
+        const scope_count = self.scopes.items.len;
+        defer self.scopes.items.len = scope_count;
 
         const capture_reg = try self.func.regAlloc();
         defer self.func.regFree(capture_reg);
@@ -1928,8 +1913,8 @@ pub const Compiler = struct {
                 return self.reportErr("additional cases after catch-all case", uncasted_case.firstToken());
             }
 
-            const scope_count = self.scope.items.len;
-            defer self.scope.items.len = scope_count;
+            const scope_count = self.scopes.items.len;
+            defer self.scopes.items.len = scope_count;
 
             var expr: *Node = undefined;
             var case_skip: ?usize = null;
@@ -2206,7 +2191,7 @@ pub const Compiler = struct {
                     .name = self.tokenSlice(node.tok),
                     .reg = reg,
                 };
-                try self.scope.append(if (lval == .mut)
+                try self.scopes.append(if (lval == .mut)
                     .{ .mut = sym }
                 else
                     .{ .constant = sym });
