@@ -51,7 +51,7 @@ pub const Repl = struct {
         errdefer syms.deinit();
 
         // declare 'ans' for the result of the previous input
-        try syms.push(.{
+        try syms.append(.{
             .name = "ans",
             .reg = 0,
             .mutable = false,

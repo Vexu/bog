@@ -90,7 +90,7 @@ fn run(gpa: *std.mem.Allocator, args: [][]const u8) !void {
         }
     };
     S._args = args[0..];
-    try vm.imports.putNoClobber("args", S.argsToBog);
+    try vm.imports.putNoClobber(vm.gc.gpa, "args", S.argsToBog);
 
     const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,

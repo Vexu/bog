@@ -18,7 +18,7 @@ pub const Vm = struct {
     /// Stack pointer
     sp: usize,
 
-    call_stack: CallStack,
+    call_stack: std.ArrayListUnmanaged(FunctionFrame) = .{},
     gc: Gc,
 
     errors: Errors,
@@ -26,18 +26,16 @@ pub const Vm = struct {
     // TODO come up with better debug info
     line_loc: u32 = 0,
 
-    imports: Imports,
+    imports: std.StringHashMapUnmanaged(fn (*Vm) Vm.Error!*bog.Value) = .{},
 
     /// all currently loaded packages and files
-    imported_modules: std.StringHashMap(*Module),
+    imported_modules: std.StringHashMapUnmanaged(*Module) = .{},
 
     options: Options,
 
     // TODO gc can't see this and it will be invalidated on collect
     last_get: *Value = &Value.None,
 
-    const Imports = std.StringHashMap(fn (*Vm) Vm.Error!*bog.Value);
-    const CallStack = std.SegmentedList(FunctionFrame, 16);
     const max_depth = 512;
 
     pub const Options = struct {
@@ -74,29 +72,26 @@ pub const Vm = struct {
             .ip = 0,
             .sp = 0,
             .gc = Gc.init(allocator),
-            .call_stack = CallStack.init(allocator),
             .errors = Errors.init(allocator),
             .options = options,
-            .imports = Imports.init(allocator),
-            .imported_modules = std.StringHashMap(*Module).init(allocator),
         };
     }
 
     pub fn deinit(vm: *Vm) void {
-        vm.call_stack.deinit();
+        vm.call_stack.deinit(vm.gc.gpa);
         vm.errors.deinit();
         vm.gc.deinit();
-        vm.imports.deinit();
+        vm.imports.deinit(vm.gc.gpa);
         var it = vm.imported_modules.iterator();
         while (it.next()) |mod| {
             mod.value.deinit(vm.gc.gpa);
         }
-        vm.imported_modules.deinit();
+        vm.imported_modules.deinit(vm.gc.gpa);
     }
 
     // TODO we might not want to require `importable` to be comptime
     pub fn addPackage(vm: *Vm, name: []const u8, comptime importable: anytype) Allocator.Error!void {
-        try vm.imports.putNoClobber(name, struct {
+        try vm.imports.putNoClobber(vm.gc.gpa, name, struct {
             fn func(_vm: *Vm) Vm.Error!*bog.Value {
                 return bog.Value.zigToBog(_vm, importable);
             }
@@ -128,7 +123,7 @@ pub const Vm = struct {
 
     /// Continues execution from current instruction pointer.
     pub fn exec(vm: *Vm, mod: *Module) Error!*Value {
-        const start_len = vm.call_stack.len;
+        const start_len = vm.call_stack.items.len;
         var module = mod;
         while (vm.ip < module.code.len) {
             const inst = module.code[vm.ip];
@@ -426,7 +421,7 @@ pub const Vm = struct {
                         continue;
                     }
 
-                    if (vm.call_stack.len == start_len) {
+                    if (vm.call_stack.items.len == start_len) {
                         if (start_len == 0) {
                             vm.gc.stackShrink(0);
                         }
@@ -434,7 +429,7 @@ pub const Vm = struct {
                         return arg;
                     }
 
-                    const frame = vm.call_stack.pop() orelse unreachable;
+                    const frame = vm.call_stack.pop();
                     module = frame.module;
 
                     vm.gc.stackShrink(vm.sp);
@@ -540,7 +535,7 @@ pub const Vm = struct {
                     if (arg.* == .err) {
                         return vm.reportErr("error discarded");
                     }
-                    if (vm.options.repl and vm.call_stack.len == 0) {
+                    if (vm.options.repl and vm.call_stack.items.len == 0) {
                         return arg;
                     }
                 },
@@ -719,11 +714,11 @@ pub const Vm = struct {
                         return vm.reportErr("unexpected arg count");
                     }
 
-                    if (vm.call_stack.len > max_depth) {
+                    if (vm.call_stack.items.len > max_depth) {
                         return vm.reportErr("maximum depth exceeded");
                     }
 
-                    try vm.call_stack.push(.{
+                    try vm.call_stack.append(vm.gc.gpa, .{
                         .sp = vm.sp,
                         .ip = vm.ip,
                         .line_loc = vm.line_loc,
@@ -739,7 +734,7 @@ pub const Vm = struct {
                 .return_single => {
                     const arg = try vm.getVal(module, inst.single.arg);
 
-                    if (vm.call_stack.len == start_len) {
+                    if (vm.call_stack.items.len == start_len) {
                         if (start_len == 0) {
                             vm.gc.stackShrink(0);
                         }
@@ -747,7 +742,7 @@ pub const Vm = struct {
                         return arg;
                     }
 
-                    const frame = vm.call_stack.pop() orelse unreachable;
+                    const frame = vm.call_stack.pop();
                     module = frame.module;
                     vm.gc.stackShrink(vm.sp);
                     vm.ip = frame.ip;
@@ -758,7 +753,7 @@ pub const Vm = struct {
                     ret_val.* = arg;
                 },
                 .return_none => {
-                    if (vm.call_stack.len == start_len) {
+                    if (vm.call_stack.items.len == start_len) {
                         if (start_len == 0) {
                             vm.gc.stackShrink(0);
                         }
@@ -766,7 +761,7 @@ pub const Vm = struct {
                         return &Value.None;
                     }
 
-                    const frame = vm.call_stack.pop() orelse unreachable;
+                    const frame = vm.call_stack.pop();
                     module = frame.module;
                     vm.gc.stackShrink(vm.sp);
                     vm.ip = frame.ip;
@@ -780,7 +775,7 @@ pub const Vm = struct {
                     const res = try vm.getRef(module, inst.double.res);
                     const arg = inst.double.arg;
 
-                    const frame = vm.call_stack.at(vm.call_stack.len - 1);
+                    const frame = vm.call_stack.items[vm.call_stack.items.len - 1];
                     if (arg >= frame.captures.len) return error.MalformedByteCode;
 
                     res.* = frame.captures[arg];
@@ -798,7 +793,7 @@ pub const Vm = struct {
                 .load_this_single => {
                     const res = try vm.getRef(module, inst.single.arg);
 
-                    const frame = vm.call_stack.at(vm.call_stack.len - 1);
+                    const frame = vm.call_stack.items[vm.call_stack.items.len - 1];
                     res.* = frame.this orelse
                         return vm.reportErr("this has not been set");
                 },
@@ -834,7 +829,7 @@ pub const Vm = struct {
             const mod = bog.compile(vm.gc.gpa, source, &vm.errors) catch
                 return vm.reportErr("import failed");
             mod.name = try mem.dupe(vm.gc.gpa, u8, id);
-            _ = try vm.imported_modules.put(id, mod);
+            _ = try vm.imported_modules.put(vm.gc.gpa, id, mod);
             break :blk mod;
         } else if (mem.endsWith(u8, id, bog.bytecode_extension)) blk: {
             if (!vm.options.import_files) {
@@ -855,7 +850,7 @@ pub const Vm = struct {
                 .strings = try mem.dupe(vm.gc.gpa, u8, read_module.strings),
                 .entry = read_module.entry,
             };
-            _ = try vm.imported_modules.put(id, mod);
+            _ = try vm.imported_modules.put(vm.gc.gpa, id, mod);
             break :blk mod;
         } else {
             if (vm.imports.get(id)) |some| {
@@ -975,7 +970,7 @@ pub const Vm = struct {
         @setCold(true);
         try vm.errors.add(msg, vm.line_loc, .err);
         var i: u8 = 0;
-        while (vm.call_stack.pop()) |some| {
+        while (vm.call_stack.popOrNull()) |some| {
             try vm.errors.add("called here", some.line_loc, .trace);
             i += 1;
             if (i > 32) {
@@ -988,7 +983,7 @@ pub const Vm = struct {
 
     /// Gets function `func_name` from map and calls it with `args`.
     pub fn call(vm: *Vm, val: *Value, func_name: []const u8, args: anytype) !*Value {
-        std.debug.assert(vm.call_stack.len == 0); // vm must be in a callable state
+        std.debug.assert(vm.call_stack.items.len == 0); // vm must be in a callable state
         if (val.* != .map) return error.NotAMap;
         const index: Value = .{
             .str = func_name,
@@ -1011,7 +1006,7 @@ pub const Vm = struct {
 
                 var frame: FunctionFrame = undefined;
                 frame.this = val;
-                try vm.call_stack.push(frame);
+                try vm.call_stack.append(vm.gc.gpa, frame);
 
                 vm.sp = 0;
                 vm.ip = func.offset;

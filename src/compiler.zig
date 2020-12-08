@@ -221,18 +221,20 @@ pub const Compiler = struct {
             breaks: BreakList,
             cond_begin: u32,
 
-            const BreakList = std.SegmentedList(u32, 4);
+            const BreakList = std.ArrayList(u32);
         };
 
         fn declSymbol(self: *Scope, sym: Symbol) !void {
-            try self.syms.push(sym);
+            try self.syms.append(sym);
         }
 
         fn isDeclared(scope: *Scope, name: []const u8) ?*Symbol {
             var cur: ?*Scope = scope;
             while (cur) |some| {
-                var it = some.syms.iterator(some.syms.len);
-                while (it.prev()) |sym| {
+                var i = some.syms.items.len;
+                while (i > 0) {
+                    i -= 1;
+                    const sym = &some.syms.items[i];
                     if (mem.eql(u8, sym.name, name)) {
                         return sym;
                     }
@@ -249,13 +251,15 @@ pub const Compiler = struct {
         fn getSymbolTail(scope: *Scope, self: *Compiler, name: []const u8, func: ?*Fn, tok: TokenIndex) Error!RegAndMut {
             var cur: ?*Scope = scope;
             blk: while (cur) |some| {
-                var it = some.syms.iterator(some.syms.len);
-                while (it.prev()) |sym| {
+                var i = some.syms.items.len;
+                while (i > 0) {
+                    i -= 1;
+                    const sym = some.syms.items[i];
                     if (mem.eql(u8, sym.name, name)) {
                         if (func) |parent| {
-                            try parent.captures.push(sym.*);
+                            try parent.captures.append(sym);
                             return RegAndMut{
-                                .reg = @intCast(RegRef, parent.captures.len - 1),
+                                .reg = @intCast(RegRef, parent.captures.items.len - 1),
                                 .mutable = sym.mutable,
                             };
                         }
@@ -270,8 +274,10 @@ pub const Compiler = struct {
                     const res = self.registerAlloc();
 
                     // check if we have already captured this variable
-                    it = new_func.captures.iterator(new_func.captures.len);
-                    while (it.prev()) |sym| {
+                    i = new_func.captures.items.len;
+                    while (i > 0) {
+                        i -= 1;
+                        const sym = new_func.captures.items[i];
                         if (!mem.eql(u8, sym.name, name)) continue;
 
                         try new_func.code.append(.{
@@ -298,7 +304,7 @@ pub const Compiler = struct {
 
                     // forward captured symbol
                     if (func) |parent_fn| {
-                        try parent_fn.captures.push(.{
+                        try parent_fn.captures.append(.{
                             .name = name,
                             .reg = res,
                             .mutable = sub.mutable,
@@ -327,7 +333,7 @@ pub const Compiler = struct {
 
         forward_decl: bool = false,
 
-        pub const List = std.SegmentedList(Symbol, 4);
+        pub const List = std.ArrayList(Symbol);
     };
 
     const Value = union(enum) {
@@ -453,18 +459,17 @@ pub const Compiler = struct {
                     .func = .{
                         .res = res,
                         .arg_count = v.params,
-                        .capture_count = @intCast(u8, v.captures.len),
+                        .capture_count = @intCast(u8, v.captures.items.len),
                     },
                 });
                 try self.code.append(.{ .bare = v.offset });
 
-                var capture_it = v.captures.iterator(0);
-                while (capture_it.next()) |capture| {
+                for (v.captures.items) |capture, i| {
                     try self.emitTriple(
                         .store_capture_triple,
                         res,
                         capture.reg,
-                        @intCast(u8, capture_it.index - 1),
+                        @intCast(u8, i),
                     );
                 }
             },
@@ -770,14 +775,17 @@ pub const Compiler = struct {
             .base = .{
                 .id = .func,
                 .parent = self.cur_scope,
-                .syms = Symbol.List.init(self.arena),
+                .syms = Symbol.List.init(self.errors.list.allocator),
             },
             .code = try Code.initCapacity(self.arena, 256),
             .captures = captures,
         };
-        defer fn_scope.code.deinit();
         self.cur_scope = &fn_scope.base;
-        defer self.cur_scope = fn_scope.base.parent.?;
+        defer {
+            fn_scope.code.deinit();
+            fn_scope.base.syms.deinit();
+            self.cur_scope = fn_scope.base.parent.?;
+        }
 
         // function body is emitted to a new arraylist and finally added to module_code
         const old_code = self.code;
@@ -845,10 +853,13 @@ pub const Compiler = struct {
         var block_scope = Scope{
             .id = .block,
             .parent = self.cur_scope,
-            .syms = Symbol.List.init(self.arena),
+            .syms = Symbol.List.init(self.errors.list.allocator),
         };
         self.cur_scope = &block_scope;
-        defer self.cur_scope = block_scope.parent.?;
+        defer {
+            block_scope.syms.deinit();
+            self.cur_scope = block_scope.parent.?;
+        }
 
         for (node.stmts) |stmt, i| {
             try self.addLineInfo(stmt);
@@ -876,8 +887,9 @@ pub const Compiler = struct {
         var capture_scope = Scope{
             .id = .capture,
             .parent = self.cur_scope,
-            .syms = Symbol.List.init(self.arena),
+            .syms = Symbol.List.init(self.errors.list.allocator),
         };
+        defer capture_scope.syms.deinit();
         var if_skip: usize = undefined;
 
         const cond_val = try self.genNodeNonEmpty(node.cond, .value);
@@ -986,7 +998,7 @@ pub const Compiler = struct {
                 .bare_signed = @intCast(i32, -@intCast(isize, self.code.items.len - loop_scope.cond_begin)),
             };
         } else {
-            try loop_scope.breaks.push(try self.emitJump(.jump, null));
+            try loop_scope.breaks.append(try self.emitJump(.jump, null));
         }
 
         return Value{ .empty = {} };
@@ -1012,13 +1024,17 @@ pub const Compiler = struct {
             .base = .{
                 .id = .loop,
                 .parent = self.cur_scope,
-                .syms = Symbol.List.init(self.arena),
+                .syms = Symbol.List.init(self.errors.list.allocator),
             },
-            .breaks = Scope.Loop.BreakList.init(self.arena),
+            .breaks = Scope.Loop.BreakList.init(self.errors.list.allocator),
             .cond_begin = @intCast(u32, self.code.items.len),
         };
         self.cur_scope = &loop_scope.base;
-        defer self.cur_scope = loop_scope.base.parent.?;
+        defer {
+            self.cur_scope = loop_scope.base.parent.?;
+            loop_scope.base.syms.deinit();
+            loop_scope.breaks.deinit();
+        }
 
         // beginning of condition
         var cond_jump: ?usize = null;
@@ -1073,7 +1089,7 @@ pub const Compiler = struct {
         if (cond_jump) |some| {
             self.finishJump(some);
         }
-        while (loop_scope.breaks.pop()) |some| {
+        while (loop_scope.breaks.popOrNull()) |some| {
             self.finishJump(some);
         }
 
@@ -1087,13 +1103,17 @@ pub const Compiler = struct {
             .base = .{
                 .id = .loop,
                 .parent = self.cur_scope,
-                .syms = Symbol.List.init(self.arena),
+                .syms = Symbol.List.init(self.errors.list.allocator),
             },
-            .breaks = Scope.Loop.BreakList.init(self.arena),
+            .breaks = Scope.Loop.BreakList.init(self.errors.list.allocator),
             .cond_begin = undefined,
         };
         self.cur_scope = &loop_scope.base;
-        defer self.cur_scope = loop_scope.base.parent.?;
+        defer {
+            self.cur_scope = loop_scope.base.parent.?;
+            loop_scope.base.syms.deinit();
+            loop_scope.breaks.deinit();
+        }
 
         const sub_res = switch (res) {
             .discard => res,
@@ -1160,7 +1180,7 @@ pub const Compiler = struct {
         // exit loop when IterNext results in None
         self.finishJump(exit_jump);
 
-        while (loop_scope.breaks.pop()) |some| {
+        while (loop_scope.breaks.popOrNull()) |some| {
             self.finishJump(some);
         }
 
@@ -1189,8 +1209,9 @@ pub const Compiler = struct {
         var capture_scope = Scope{
             .id = .capture,
             .parent = self.cur_scope,
-            .syms = Symbol.List.init(self.arena),
+            .syms = Symbol.List.init(self.errors.list.allocator),
         };
+        defer capture_scope.syms.deinit();
 
         if (node.capture) |some| {
             const unwrap_reg = self.registerAlloc();

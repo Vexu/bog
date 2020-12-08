@@ -58,11 +58,11 @@ pub const Errors = struct {
         trace,
     };
 
-    const List = zig_std.SegmentedList(struct {
+    const List = zig_std.ArrayList(struct {
         msg: []const u8,
         index: u32,
         kind: Kind,
-    }, 0);
+    });
 
     pub fn init(alloc: *Allocator) Errors {
         return .{ .list = List.init(alloc) };
@@ -73,7 +73,7 @@ pub const Errors = struct {
     }
 
     pub fn add(self: *Errors, msg: []const u8, index: u32, kind: Kind) !void {
-        try self.list.push(.{
+        try self.list.append(.{
             .msg = msg,
             .index = index,
             .kind = kind,
@@ -87,8 +87,7 @@ pub const Errors = struct {
         const RESET = "\x1b[0m";
         const CYAN = "\x1b[36;1m";
 
-        var it = self.list.iterator(0);
-        while (it.next()) |e| {
+        for (self.list.items) |e| {
             switch (e.kind) {
                 .err => try writer.writeAll(RED ++ "error: " ++ BOLD),
                 .note => try writer.writeAll(CYAN ++ "note: " ++ BOLD),
@@ -103,7 +102,7 @@ pub const Errors = struct {
             try writer.writeByteNTimes(' ', e.index - start);
             try writer.writeAll(GREEN ++ "^\n" ++ RESET);
         }
-        self.list.shrink(0);
+        self.list.items.len = 0;
     }
 
     fn lineBegin(slice: []const u8, start_index: usize) usize {

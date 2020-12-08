@@ -76,7 +76,7 @@ fn expectError(source: []const u8, expected: []const u8) void {
     _ = vm.run(source) catch |e| switch (e) {
         else => @panic("test failure"),
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
-            const result = vm.errors.list.at(0).*.msg;
+            const result = vm.errors.list.items[0].msg;
             std.testing.expectEqualStrings(expected, result);
             return;
         },
