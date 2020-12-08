@@ -8,6 +8,30 @@ test "format string" {
     ,
         \\f"foo {{1:2}:32} bar {2 *
         \\    3:4} baz \t"
+    );
+}
+
+test "try-catch" {
+    testCanonical(
+        \\try
+        \\    assert(x == y)
+        \\    assert(x != z)
+        \\catch ("assertion failure")
+        \\    print("assertion failure")
+        \\catch (1)
+        \\    print("got one")
+        \\catch (let err)
+        \\    print(err)
+        \\
+        \\
+        \\
+    );
+    testCanonical(
+        \\try assert(x == y) catch ("assertion failure") print("assertion failure")
+        \\
+    );
+    testCanonical(
+        \\try foo() catch (1) print("1") catch (2) print("2")
         \\
     );
 }
@@ -216,14 +240,6 @@ test "if" {
     testCanonical(
         \\if (foo) bar else baz
         \\if (const foo = bar()) baz
-        \\
-    );
-}
-
-test "catch" {
-    testCanonical(
-        \\foo() catch bar()
-        \\baz() catch (const e) return e
         \\
     );
 }

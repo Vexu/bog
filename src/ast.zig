@@ -47,6 +47,7 @@ pub const Node = struct {
         Block,
         Grouped,
         MapItem,
+        Try,
         Catch,
         If,
         For,
@@ -89,7 +90,8 @@ pub const Node = struct {
                 if (map.key) |some| return some.firstToken();
                 return map.value.firstToken();
             },
-            .Catch => @fieldParentPtr(Node.Catch, "base", node).lhs.firstToken(),
+            .Try => @fieldParentPtr(Node.Try, "base", node).tok,
+            .Catch => @fieldParentPtr(Node.Catch, "base", node).tok,
             .If => @fieldParentPtr(Node.If, "base", node).if_tok,
             .For => @fieldParentPtr(Node.For, "base", node).for_tok,
             .While => @fieldParentPtr(Node.While, "base", node).while_tok,
@@ -137,7 +139,11 @@ pub const Node = struct {
             },
             .Grouped => @fieldParentPtr(Node.Grouped, "base", node).r_tok,
             .MapItem => @fieldParentPtr(Node.MapItem, "base", node).value.lastToken(),
-            .Catch => @fieldParentPtr(Node.Catch, "base", node).rhs.lastToken(),
+            .Try => {
+                const try_node = @fieldParentPtr(Node.Try, "base", node);
+                return try_node.catches[try_node.catches.len - 1].lastToken();
+            },
+            .Catch => @fieldParentPtr(Node.Catch, "base", node).expr.lastToken(),
             .If => {
                 const if_node = @fieldParentPtr(Node.If, "base", node);
                 if (if_node.else_body) |some| return some.lastToken();
@@ -198,7 +204,6 @@ pub const Node = struct {
             bit_not,
             minus,
             plus,
-            Try,
         };
     };
 
@@ -339,15 +344,6 @@ pub const Node = struct {
         value: *Node,
     };
 
-    pub const Catch = struct {
-        base: Node = .{ .id = .Catch },
-        tok: TokenIndex,
-        lhs: *Node,
-        capture: ?*Node,
-        rhs: *Node,
-        let_const: ?TokenIndex,
-    };
-
     pub const If = struct {
         base: Node = .{ .id = .If },
         cond: *Node,
@@ -411,6 +407,21 @@ pub const Node = struct {
         lhs: []*Node,
         expr: *Node,
         eq_arr: TokenIndex,
+    };
+
+    pub const Try = struct {
+        base: Node = .{ .id = .Try },
+        tok: TokenIndex,
+        expr: *Node,
+        catches: []*Node,
+    };
+
+    pub const Catch = struct {
+        base: Node = .{ .id = .Catch },
+        tok: TokenIndex,
+        let_const: ?TokenIndex,
+        capture: ?*Node,
+        expr: *Node,
     };
 
     pub const Jump = struct {

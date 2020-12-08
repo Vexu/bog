@@ -563,7 +563,6 @@ pub const Compiler = struct {
             .While => return self.genWhile(@fieldParentPtr(Node.While, "base", node), res),
             .Jump => return self.genJump(@fieldParentPtr(Node.Jump, "base", node), res),
             .List => return self.genTupleList(@fieldParentPtr(Node.ListTupleMap, "base", node), res),
-            .Catch => return self.genCatch(@fieldParentPtr(Node.Catch, "base", node), res),
             .Import => return self.genImport(@fieldParentPtr(Node.Import, "base", node), res),
             .For => return self.genFor(@fieldParentPtr(Node.For, "base", node), res),
             .Map => return self.genMap(@fieldParentPtr(Node.ListTupleMap, "base", node), res),
@@ -577,6 +576,8 @@ pub const Compiler = struct {
             .MatchCatchAll => return self.reportErr("TODO: MatchCatchAll", node.firstToken()),
             .MatchLet => return self.reportErr("TODO: MatchLet", node.firstToken()),
             .MatchCase => return self.reportErr("TODO: MatchCase", node.firstToken()),
+            .Try => return self.reportErr("TODO: Try", node.firstToken()),
+            .Catch => return self.reportErr("TODO: Catch", node.firstToken()),
         }
     }
 
@@ -1246,7 +1247,6 @@ pub const Compiler = struct {
                 .minus => .negate_double,
                 // TODO should unary + be a no-op
                 .plus => return r_val,
-                .Try => .try_double,
             };
             const reg = r_val.getRt();
             defer r_val.free(self, reg);
@@ -1271,9 +1271,6 @@ pub const Compiler = struct {
                 try r_val.checkNum(self, node.rhs.firstToken());
                 break :blk r_val;
             },
-            // errors are runtime only currently, so ret_val does not need to be checked
-            // TODO should this be an error?
-            .Try => r_val,
         };
         return ret_val.maybeRt(self, res);
     }

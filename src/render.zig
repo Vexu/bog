@@ -116,7 +116,7 @@ const Renderer = struct {
                 const prefix = @fieldParentPtr(Node.Prefix, "base", node);
 
                 switch (prefix.op) {
-                    .bool_not, .Try => try self.renderToken(prefix.tok, writer, .space),
+                    .bool_not => try self.renderToken(prefix.tok, writer, .space),
                     .bit_not, .minus, .plus => try self.renderToken(prefix.tok, writer, .none),
                 }
                 return self.renderNode(prefix.rhs, writer, space);
@@ -278,20 +278,36 @@ const Renderer = struct {
 
                 return self.renderNode(item.value, writer, space);
             },
+            .Try => {
+                const try_expr = @fieldParentPtr(Node.Try, "base", node);
+
+                try self.renderToken(try_expr.tok, writer, getBlockIndent(try_expr.expr, .space));
+                try self.renderNode(try_expr.expr, writer, .space);
+
+                for (try_expr.catches) |catch_expr, i| {
+                    if (i + 1 == try_expr.catches.len) {
+                        try self.renderNode(catch_expr, writer, space);
+                    } else {
+                        try self.renderNode(catch_expr, writer, .space);
+                    }
+                }
+            },
             .Catch => {
                 const catch_expr = @fieldParentPtr(Node.Catch, "base", node);
 
-                try self.renderNode(catch_expr.lhs, writer, .space);
-                try self.renderToken(catch_expr.tok, writer, .space);
-
                 if (catch_expr.capture) |some| {
-                    try self.renderToken(self.nextToken(catch_expr.tok), writer, .none);
-                    try self.renderToken(catch_expr.let_const.?, writer, .space);
-                    try self.renderNode(some, writer, .none);
+                    try self.renderToken(catch_expr.tok, writer, .space);
 
-                    try self.renderToken(self.nextToken(some.lastToken()), writer, getBlockIndent(catch_expr.rhs, .space));
+                    try self.renderToken(self.nextToken(catch_expr.tok), writer, .none);
+                    if (catch_expr.let_const) |tok| {
+                        try self.renderToken(tok, writer, .space);
+                    }
+                    try self.renderNode(some, writer, .none);
+                    try self.renderToken(self.nextToken(some.lastToken()), writer, getBlockIndent(catch_expr.expr, .space));
+                } else {
+                    try self.renderToken(catch_expr.tok, writer, getBlockIndent(catch_expr.expr, .space));
                 }
-                return self.renderNode(catch_expr.rhs, writer, space);
+                return self.renderNode(catch_expr.expr, writer, space);
             },
             .If => {
                 const if_expr = @fieldParentPtr(Node.If, "base", node);
@@ -462,9 +478,13 @@ const Renderer = struct {
                 const fn_node = @fieldParentPtr(Node.Fn, "base", node);
                 return isBlock(fn_node.body);
             },
+            .Try => {
+                const try_node = @fieldParentPtr(Node.Try, "base", node);
+                return isBlock(try_node.expr);
+            },
             .Catch => {
                 const catch_node = @fieldParentPtr(Node.Catch, "base", node);
-                return isBlock(catch_node.rhs);
+                return isBlock(catch_node.expr);
             },
             else => return false,
         }

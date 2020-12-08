@@ -36,7 +36,7 @@ range_expr
     IF(allow_range) bit_expr? (":" bit_expr? (":" bit_expr?)?)?
     ELSE bit_expr
 
-bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)* | ("catch" ("(" decl ")")? block_or_expr))?
+bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)*
 
 shift_expr : add_expr (("<<" | ">>") add_expr)?
 
@@ -46,7 +46,7 @@ mul_expr : cast_expr (("*" | "/" | "//" | "%") cast_expr)*
 
 cast_expr : prefix_expr ("as" type_name)?
 
-prefix_expr : ("try" | "-" | "+" | "~")? power_expr
+prefix_expr : ("-" | "+" | "~")? power_expr
 
 power_expr : primary_expr suffix_expr* ("**" power_expr)?
 
@@ -73,6 +73,7 @@ primary_expr
     | while
     | for
     | match
+    | try
 
 format_string : FORMAT_START expr (FORMAT expr)* FORMAT_END
 
@@ -93,3 +94,5 @@ match : "match" "(" expr ")" (NL match_case)+ NL
 match_case
     : decl "=>" block_or_expr
     | expr ("," expr)* ","? "=>" block_or_expr
+
+try : "try" block_or_expr ("catch" ("(" decl ")" | expr)? block_or_expr)+

@@ -343,16 +343,6 @@ test "error destructure" {
     );
 }
 
-test "catch capture" {
-    expectOutput(
-        \\const err = fn() error(2)
-        \\
-        \\return err() catch (let foo) foo
-    ,
-        \\2
-    );
-}
-
 test "while let" {
     expectOutput(
         \\const getSome = fn(val) if (val != 0) val - 1
@@ -456,24 +446,6 @@ test "copy on assign" {
         \\return y
     ,
         \\4
-    );
-}
-
-test "try" {
-    expectOutput(
-        \\const err = fn() error("foo")
-        \\try err()
-    ,
-        \\error("foo")
-    );
-}
-
-test "catch" {
-    expectOutput(
-        \\const err = fn() error("foo")
-        \\return err() catch "success"
-    ,
-        \\"success"
     );
 }
 
