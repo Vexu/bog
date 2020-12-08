@@ -9,9 +9,8 @@ pub fn print(val: *Value) !void {
     try stream.writeByte('\n');
 }
 
-pub fn input(vm: *Vm, prompt: []const u8) ![]u8 {
-    try std.io.getStdOut().outStream().writeAll(prompt);
+pub fn input(vm: *Vm, prompt: Value.String) ![]u8 {
+    try prompt.print(std.io.getStdOut().writer());
 
-    // TODO properly gc this
     return try std.io.getStdIn().inStream().readUntilDelimiterAlloc(vm.gc.gpa, '\n', 1024 * 1024);
 }

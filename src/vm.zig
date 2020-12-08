@@ -158,9 +158,7 @@ pub const Vm = struct {
                     const res = try vm.getNewVal(module, inst.off.res);
                     const str = try vm.getString(module, inst);
 
-                    res.* = .{
-                        .str = str,
-                    };
+                    res.* = Value.string(str);
                 },
                 .add_triple => {
                     const res = try vm.getNewVal(module, inst.triple.res);
@@ -985,9 +983,7 @@ pub const Vm = struct {
     pub fn call(vm: *Vm, val: *Value, func_name: []const u8, args: anytype) !*Value {
         std.debug.assert(vm.call_stack.items.len == 0); // vm must be in a callable state
         if (val.* != .map) return error.NotAMap;
-        const index: Value = .{
-            .str = func_name,
-        };
+        const index = Value.string(func_name);
         const member = val.map.get(&index) orelse
             return error.NoSuchMember;
 

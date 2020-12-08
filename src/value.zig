@@ -40,7 +40,7 @@ pub const Value = union(Type) {
         end: i64 = std.math.maxInt(i64),
         step: i64 = 1,
     },
-    str: []const u8,
+    str: String,
     func: struct {
         /// offset to the functions first instruction
         offset: u32,
@@ -83,20 +83,22 @@ pub const Value = union(Type) {
                     res.* = list.items[iter.i.u];
                     iter.i.u += 1;
                 },
-                .str => |str| {
-                    if (iter.i.u == str.len) {
+                .str => |*str| {
+                    if (iter.i.u == str.data.len) {
                         res.* = &Value.None;
                         return;
                     }
                     if (res.* == null)
                         res.* = try vm.gc.alloc();
 
-                    const cp_len = std.unicode.utf8ByteSequenceLength(str[iter.i.u]) catch
+                    const cp_len = std.unicode.utf8ByteSequenceLength(str.data[iter.i.u]) catch
                         return vm.reportErr("invalid utf-8 sequence");
                     iter.i.u += cp_len;
 
                     res.*.?.* = .{
-                        .str = str[iter.i.u - cp_len .. iter.i.u],
+                        .str = .{
+                            .data = str.data[iter.i.u - cp_len .. iter.i.u],
+                        },
                     };
                 },
                 .map => |*map| {
@@ -139,6 +141,7 @@ pub const Value = union(Type) {
     bool: bool,
     none,
 
+    pub const String = @import("String.zig");
     pub const Map = std.array_hash_map.ArrayHashMapUnmanaged(*const Value, *Value, hash, eql, true);
     pub const List = std.ArrayListUnmanaged(*Value);
     pub const Native = struct {
@@ -150,6 +153,14 @@ pub const Value = union(Type) {
     pub var True = Value{ .bool = true };
     pub var False = Value{ .bool = false };
 
+    pub fn string(data: []const u8) Value {
+        return .{
+            .str = .{
+                .data = data,
+            },
+        };
+    }
+
     /// Frees any extra memory allocated by value.
     /// Does not free values recursively.
     pub fn deinit(value: *Value, allocator: *Allocator) void {
@@ -159,9 +170,7 @@ pub const Value = union(Type) {
             .tuple => |t| allocator.free(t),
             .map => |*m| m.deinit(allocator),
             .list => |*l| l.deinit(allocator),
-            .str => {
-                // TODO string memory management
-            },
+            .str => |*s| s.deinit(allocator),
             .func => |*f| allocator.free(f.captures),
         }
         value.* = undefined;
@@ -178,7 +187,7 @@ pub const Value = union(Type) {
             .int => |int| autoHash(&hasher, int),
             .num => {},
             .bool => |b| autoHash(&hasher, b),
-            .str => |str| hasher.update(str),
+            .str => |*str| hasher.update(str.data),
             .tuple => |tuple| {
                 autoHash(&hasher, tuple.len);
                 autoHash(&hasher, tuple.ptr);
@@ -233,9 +242,7 @@ pub const Value = union(Type) {
             .iterator, .int, .num => unreachable,
             .none => true,
             .bool => |bool_val| bool_val == b.bool,
-            .str => |s| {
-                return std.mem.eql(u8, s, b.str);
-            },
+            .str => |s| s.eql(b.str),
             .tuple => |t| {
                 const b_val = b.tuple;
                 if (t.len != b_val.len) return false;
@@ -330,23 +337,7 @@ pub const Value = union(Type) {
                     try writer.writeByte(')');
                 }
             },
-            .str => |s| {
-                try writer.writeByte('"');
-                for (s) |c| {
-                    switch (c) {
-                        '\n' => try writer.writeAll("\\n"),
-                        '\t' => try writer.writeAll("\\t"),
-                        '\r' => try writer.writeAll("\\r"),
-                        '\'' => try writer.writeAll("\\'"),
-                        '"' => try writer.writeAll("\\\""),
-                        else => if (std.ascii.isCntrl(c))
-                            try writer.print("\\x{x:0<2}", .{c})
-                        else
-                            try writer.print("{c}", .{c}),
-                    }
-                }
-                try writer.writeByte('"');
-            },
+            .str => |s| try s.print(writer),
             .func => |*f| {
                 try writer.print("fn({})@0x{X}[{}]", .{ f.arg_count, f.offset, f.captures.len });
             },
@@ -378,12 +369,12 @@ pub const Value = union(Type) {
                     res.* = tuple[@intCast(u32, i)];
                 },
                 .range => return vm.reportErr("TODO get with ranges"),
-                .str => |s| {
+                .str => |*s| {
                     if (res.* == null) {
                         res.* = try vm.gc.alloc();
                     }
 
-                    if (mem.eql(u8, s, "len")) {
+                    if (mem.eql(u8, s.data, "len")) {
                         res.*.?.* = .{ .int = @intCast(i64, tuple.len) };
                     } else {
                         return vm.reportErr("no such property");
@@ -402,14 +393,14 @@ pub const Value = union(Type) {
                     res.* = list.items[@intCast(u32, i)];
                 },
                 .range => return vm.reportErr("TODO get with ranges"),
-                .str => |s| {
+                .str => |*s| {
                     if (res.* == null) {
                         res.* = try vm.gc.alloc();
                     }
 
-                    if (mem.eql(u8, s, "len")) {
+                    if (mem.eql(u8, s.data, "len")) {
                         res.*.?.* = .{ .int = @intCast(i64, list.items.len) };
-                    } else if (mem.eql(u8, s, "append")) {
+                    } else if (mem.eql(u8, s.data, "append")) {
                         res.* = try zigToBog(vm, struct {
                             fn append(_vm: *Vm, val: *Value) !void {
                                 if (_vm.last_get.* != .list)
@@ -427,22 +418,7 @@ pub const Value = union(Type) {
                 res.* = map.get(index) orelse
                     return vm.reportErr("TODO better handling undefined key");
             },
-            .str => |str| switch (index.*) {
-                .int => return vm.reportErr("TODO get str"),
-                .range => return vm.reportErr("TODO get with ranges"),
-                .str => |s| {
-                    if (res.* == null) {
-                        res.* = try vm.gc.alloc();
-                    }
-
-                    if (mem.eql(u8, s, "len")) {
-                        res.*.?.* = .{ .int = @intCast(i64, str.len) };
-                    } else {
-                        return vm.reportErr("no such property");
-                    }
-                },
-                else => return vm.reportErr("invalid index type"),
-            },
+            .str => |*str| return str.get(vm, index, res),
             .iterator => unreachable,
             else => return vm.reportErr("invalid subscript type"),
         }
@@ -476,9 +452,7 @@ pub const Value = union(Type) {
             } else {
                 return vm.reportErr("TODO set with ranges");
             },
-            .str => |str| {
-                return vm.reportErr("TODO set string");
-            },
+            .str => |*str| try str.set(vm, index, new_val),
             .iterator => unreachable,
             else => return vm.reportErr("invalid subscript type"),
         }
@@ -493,21 +467,22 @@ pub const Value = union(Type) {
             return val;
         }
 
+        if (val.* == .str) {
+            return val.str.as(vm, type_id);
+        }
+
         if (type_id == .bool) {
             const bool_res = switch (val.*) {
                 .int => |int| int != 0,
                 .num => |num| num != 0,
                 .bool => unreachable,
-                .str => |str| if (mem.eql(u8, str, "true"))
-                    true
-                else if (mem.eql(u8, str, "false"))
-                    false
-                else
-                    return vm.reportErr("cannot cast string to bool"),
+                .str => unreachable,
                 else => return vm.reportErr("invalid cast to bool"),
             };
 
             return if (bool_res) &Value.True else &Value.False;
+        } else if (type_id == .str) {
+            return String.from(val, vm);
         }
 
         const new_val = try vm.gc.alloc();
@@ -517,8 +492,7 @@ pub const Value = union(Type) {
                     .int => unreachable,
                     .num => |num| @floatToInt(i64, num),
                     .bool => |b| @boolToInt(b),
-                    .str => |str| util.parseInt(str) catch
-                        return vm.reportErr("invalid cast to int"),
+                    .str => unreachable,
                     else => return vm.reportErr("invalid cast to int"),
                 },
             },
@@ -527,12 +501,11 @@ pub const Value = union(Type) {
                     .num => unreachable,
                     .int => |int| @intToFloat(f64, int),
                     .bool => |b| @intToFloat(f64, @boolToInt(b)),
-                    .str => |str| util.parseNum(str) catch
-                        return vm.reportErr("invalid cast to num"),
+                    .str => unreachable,
                     else => return vm.reportErr("invalid cast to num"),
                 },
             },
-            .str,
+            .str, .bool, .none => unreachable,
             .tuple,
             .map,
             .list,
@@ -551,10 +524,7 @@ pub const Value = union(Type) {
     /// Returns whether `container` has `val` in it.
     pub fn in(val: *const Value, container: *const Value) bool {
         switch (container.*) {
-            .str => |str| {
-                if (val.* != .str) return false;
-                return mem.indexOf(u8, str, val.str) != null;
-            },
+            .str => |*str| return str.in(val),
             .tuple => |tuple| {
                 for (tuple) |v| {
                     if (v.eql(val)) return true;
@@ -613,15 +583,16 @@ pub const Value = union(Type) {
                 // assume val was allocated with vm.gc
                 const str = try vm.gc.alloc();
                 str.* = .{
-                    .str = val,
+                    .str = .{
+                        .data = val,
+                        .capacity = val.len,
+                    },
                 };
                 return str;
             },
             []const u8 => {
                 const str = try vm.gc.alloc();
-                str.* = .{
-                    .str = val,
-                };
+                str.* = Value.string(val);
                 return str;
             },
             type => switch (@typeInfo(val)) {
@@ -639,9 +610,7 @@ pub const Value = union(Type) {
                     inline for (info.decls) |decl| {
                         if (!decl.is_pub) continue;
                         const key = try vm.gc.alloc();
-                        key.* = .{
-                            .str = decl.name,
-                        };
+                        key.* = Value.string(decl.name);
                         const value = try zigToBog(vm, @field(val, decl.name));
                         map.putAssumeCapacityNoClobber(key, value);
                     }
@@ -687,13 +656,9 @@ pub const Value = union(Type) {
 
                     // wrap error string
                     const str = try vm.gc.alloc();
-                    str.* = .{
-                        .str = @errorName(e),
-                    };
+                    str.* = Value.string(@errorName(e));
                     const err = try vm.gc.alloc();
-                    err.* = .{
-                        .err = str,
-                    };
+                    err.* = .{ .err = str };
                     return err;
                 },
                 .Enum => {
@@ -726,8 +691,8 @@ pub const Value = union(Type) {
             },
             []const u8 => {
                 if (val.* != .str)
-                    return vm.reportErr("expected num");
-                return val.str;
+                    return vm.reportErr("expected string");
+                return val.str.data;
             },
             *Map, *const Map => {
                 if (val.* != .map)
@@ -737,6 +702,11 @@ pub const Value = union(Type) {
             *Vm => vm,
             *Value, *const Value => val,
             Value => return val.*,
+            String => {
+                if (val.* != .str)
+                    return vm.reportErr("expected string");
+                return val.str;
+            },
             else => switch (@typeInfo(T)) {
                 .Int => if (val.* == .int) blk: {
                     if (val.int < std.math.minInt(T) or val.int > std.math.maxInt(T))

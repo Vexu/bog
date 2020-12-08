@@ -81,9 +81,7 @@ fn run(gpa: *std.mem.Allocator, args: [][]const u8) !void {
 
             for (_args) |arg| {
                 const str = try _vm.gc.alloc();
-                str.* = .{
-                    .str = arg,
-                };
+                str.* = bog.Value.string(arg);
                 list.appendAssumeCapacity(str);
             }
             return ret;

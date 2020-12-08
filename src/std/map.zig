@@ -37,8 +37,8 @@ pub fn entries(vm: *Vm, map: *const Value.Map) !*Value {
     const items = ret.list.items;
     for (map.items()) |*e, i| {
         var entry = try vm.gc.alloc();
-        const val_str = Value{ .str = "value" };
-        const key_str = Value{ .str = "key" };
+        const val_str = Value.string("value");
+        const key_str = Value.string("key");
         entry.* = .{ .map = .{} };
         try entry.map.ensureCapacity(vm.gc.gpa, 2);
         entry.map.putAssumeCapacityNoClobber(try vm.gc.dupe(&key_str), try vm.gc.dupe(e.key));
