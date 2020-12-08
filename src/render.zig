@@ -3,34 +3,43 @@ const bog = @import("bog.zig");
 const Tree = bog.Tree;
 const Node = bog.Node;
 const TokenIndex = bog.Token.Index;
+const changeDetectionWriter = std.io.changeDetectionStream;
+const autoIndentingWriter = std.io.autoIndentingStream;
 
-pub fn render(tree: *Tree, writer: anytype) @TypeOf(writer).Error!void {
+const indent_delta = 4;
+
+pub fn render(tree: *Tree, writer: anytype) @TypeOf(writer).Error!bool {
     var renderer = Renderer{
         .source = tree.source,
         .tokens = tree.tokens,
     };
-    try renderer.renderComments(0, writer, 0, .newline);
+
+    var change_writer = changeDetectionWriter(tree.source, writer);
+    var indent_writer = autoIndentingWriter(indent_delta, change_writer.writer());
+
+    try renderer.renderComments(0, &indent_writer, .newline);
     for (tree.nodes) |node, i| {
-        try renderer.renderNode(node, writer, 0, .newline);
+        try renderer.renderNode(node, &indent_writer, .newline);
         if (Renderer.isBlock(node)) {
-            // render extra newline after blocks
-            try writer.writeAll("\n\n");
+            // render extra newlines after blocks
+            try indent_writer.insertNewline();
+            try indent_writer.insertNewline();
             continue;
         }
 
         if (i + 1 == tree.nodes.len) break;
         const last_token = node.lastToken();
         if (renderer.lineDist(last_token, renderer.nextToken(last_token)) > 1) {
-            try writer.writeByte('\n');
+            try indent_writer.writer().writeByte('\n');
         }
     }
+
+    return change_writer.changeDetected();
 }
 
 const Renderer = struct {
     source: []const u8,
     tokens: []const bog.Token,
-
-    const indent_delta = 4;
 
     fn prevToken(self: *Renderer, tok: TokenIndex) TokenIndex {
         var index = tok - 1;
@@ -67,106 +76,112 @@ const Renderer = struct {
         return count;
     }
 
-    fn renderNode(self: *Renderer, node: *Node, writer: anytype, indent: u32, space: Space) @TypeOf(writer).Error!void {
+    fn renderNode(self: *Renderer, node: *Node, writer: anytype, space: Space) @TypeOf(writer.*).Error!void {
         switch (node.id) {
             .Literal => {
                 const literal = @fieldParentPtr(Node.Literal, "base", node);
                 if (literal.kind == .none) {
-                    try self.renderToken(self.prevToken(literal.tok), writer, indent, .none);
+                    try self.renderToken(self.prevToken(literal.tok), writer, .none);
                 }
 
-                return self.renderToken(literal.tok, writer, indent, space);
+                return self.renderToken(literal.tok, writer, space);
             },
             .Infix => {
                 const infix = @fieldParentPtr(Node.Infix, "base", node);
 
-                try self.renderNode(infix.lhs, writer, indent, .space);
-                try self.renderToken(infix.tok, writer, indent, .space);
-                return self.renderNode(infix.rhs, writer, indent, space);
+                try self.renderNode(infix.lhs, writer, .space);
+                const after_op_space: Space = if (self.lineDist(infix.tok, self.nextToken(infix.tok)) == 0) .space else .newline;
+
+                writer.pushIndent();
+                try self.renderToken(infix.tok, writer, after_op_space);
+                writer.popIndent();
+
+                writer.pushIndentOneShot();
+                return self.renderNode(infix.rhs, writer, space);
             },
             .Range => {
                 const range = @fieldParentPtr(Node.Range, "base", node);
 
-                if (range.start) |some| try self.renderNode(some, writer, indent, .none);
-                try self.renderToken(range.colon_1, writer, indent, if (range.end == null and
+                if (range.start) |some| try self.renderNode(some, writer, .none);
+                try self.renderToken(range.colon_1, writer, if (range.end == null and
                     range.colon_2 == null and
                     range.step == null) space else .none);
                 if (range.end) |some|
-                    try self.renderNode(some, writer, indent, if (range.colon_2 == null and
+                    try self.renderNode(some, writer, if (range.colon_2 == null and
                         range.step == null) space else .none);
-                if (range.colon_2) |some| try self.renderToken(some, writer, indent, if (range.step == null) space else .none);
-                if (range.step) |some| try self.renderNode(some, writer, indent, space);
+                if (range.colon_2) |some| try self.renderToken(some, writer, if (range.step == null) space else .none);
+                if (range.step) |some| try self.renderNode(some, writer, space);
             },
             .Prefix => {
                 const prefix = @fieldParentPtr(Node.Prefix, "base", node);
 
                 switch (prefix.op) {
-                    .boolNot, .Try => try self.renderToken(prefix.tok, writer, indent, .space),
-                    .bitNot, .minus, .plus => try self.renderToken(prefix.tok, writer, indent, .none),
+                    .boolNot, .Try => try self.renderToken(prefix.tok, writer, .space),
+                    .bitNot, .minus, .plus => try self.renderToken(prefix.tok, writer, .none),
                 }
-                return self.renderNode(prefix.rhs, writer, indent, space);
+                return self.renderNode(prefix.rhs, writer, space);
             },
             .Grouped => {
                 const grouped = @fieldParentPtr(Node.Grouped, "base", node);
 
-                try self.renderToken(grouped.l_tok, writer, indent, getBlockIndent(grouped.expr, .none));
-                try self.renderNode(grouped.expr, writer, indent, .none);
-                return self.renderToken(grouped.r_tok, writer, indent, space);
+                try self.renderToken(grouped.l_tok, writer, getBlockIndent(grouped.expr, .none));
+                try self.renderNode(grouped.expr, writer, .none);
+                return self.renderToken(grouped.r_tok, writer, space);
             },
             .TypeInfix => {
                 const type_infix = @fieldParentPtr(Node.TypeInfix, "base", node);
 
-                try self.renderNode(type_infix.lhs, writer, indent, .space);
-                try self.renderToken(type_infix.tok, writer, indent, .space);
-                return self.renderToken(type_infix.type_tok, writer, indent, space);
+                try self.renderNode(type_infix.lhs, writer, .space);
+                try self.renderToken(type_infix.tok, writer, .space);
+                return self.renderToken(type_infix.type_tok, writer, space);
             },
             .Discard, .Identifier, .This => {
                 const single = @fieldParentPtr(Node.SingleToken, "base", node);
 
-                return self.renderToken(single.tok, writer, indent, space);
+                return self.renderToken(single.tok, writer, space);
             },
             .Suffix => {
                 const suffix = @fieldParentPtr(Node.Suffix, "base", node);
 
-                try self.renderNode(suffix.lhs, writer, indent, .none);
-                try self.renderToken(suffix.l_tok, writer, indent, .none);
+                try self.renderNode(suffix.lhs, writer, .none);
+                try self.renderToken(suffix.l_tok, writer, .none);
                 switch (suffix.op) {
-                    .call => |params| try self.renderCommaList(params, suffix.r_tok, writer, indent, .none),
-                    .subscript => |arr_node| try self.renderNode(arr_node, writer, indent, .none),
+                    .call => |params| try self.renderCommaList(params, suffix.r_tok, writer, .none),
+                    .subscript => |arr_node| try self.renderNode(arr_node, writer, .none),
                     .member => {},
                 }
-                return self.renderToken(suffix.r_tok, writer, indent, space);
+                return self.renderToken(suffix.r_tok, writer, space);
             },
             .Decl => {
                 const decl = @fieldParentPtr(Node.Decl, "base", node);
 
-                try self.renderToken(decl.let_const, writer, indent, .space);
-                try self.renderNode(decl.capture, writer, indent, .space);
-                try self.renderToken(decl.eq_tok, writer, indent, getBlockIndent(decl.value, .space));
-                return self.renderNode(decl.value, writer, indent, space);
+                try self.renderToken(decl.let_const, writer, .space);
+                try self.renderNode(decl.capture, writer, .space);
+                try self.renderToken(decl.eq_tok, writer, getBlockIndent(decl.value, .space));
+                return self.renderNode(decl.value, writer, space);
             },
             .Import => {
                 const import = @fieldParentPtr(Node.Import, "base", node);
 
-                try self.renderToken(import.tok, writer, indent, .none);
-                try self.renderToken(self.nextToken(import.tok), writer, indent, .none);
-                try self.renderToken(import.str_tok, writer, indent, .none);
-                return self.renderToken(import.r_paren, writer, indent, space);
+                try self.renderToken(import.tok, writer, .none);
+                try self.renderToken(self.nextToken(import.tok), writer, .none);
+                try self.renderToken(import.str_tok, writer, .none);
+                return self.renderToken(import.r_paren, writer, space);
             },
             .Error => {
                 const err = @fieldParentPtr(Node.Error, "base", node);
 
                 const after_tok_space = if (err.capture == null) space else .none;
-                try self.renderToken(err.tok, writer, indent, after_tok_space);
-                if (err.capture) |some| try self.renderNode(some, writer, indent, space);
+                try self.renderToken(err.tok, writer, after_tok_space);
+                if (err.capture) |some| try self.renderNode(some, writer, space);
             },
             .Tagged => {
                 const tag = @fieldParentPtr(Node.Tagged, "base", node);
 
-                try self.renderToken(tag.at, writer, indent, .none);
+                try self.renderToken(tag.at, writer, .none);
                 const after_tok_space = if (tag.capture == null) space else .none;
-                try self.renderToken(tag.name, writer, indent, after_tok_space);
-                if (tag.capture) |some| try self.renderNode(some, writer, indent, space);
+                try self.renderToken(tag.name, writer, after_tok_space);
+                if (tag.capture) |some| try self.renderNode(some, writer, space);
             },
             .Jump => {
                 const jump = @fieldParentPtr(Node.Jump, "base", node);
@@ -174,211 +189,204 @@ const Renderer = struct {
                 switch (jump.op) {
                     .Return => |expr| {
                         if (expr) |some| {
-                            try self.renderToken(jump.tok, writer, indent, getBlockIndent(some, .space));
-                            return self.renderNode(some, writer, indent, space);
+                            try self.renderToken(jump.tok, writer, getBlockIndent(some, .space));
+                            return self.renderNode(some, writer, space);
                         } else {
-                            try self.renderToken(jump.tok, writer, indent, space);
+                            try self.renderToken(jump.tok, writer, space);
                         }
                     },
-                    .Continue, .Break => try self.renderToken(jump.tok, writer, indent, space),
+                    .Continue, .Break => try self.renderToken(jump.tok, writer, space),
                 }
             },
             .While => {
                 const while_expr = @fieldParentPtr(Node.While, "base", node);
 
-                try self.renderToken(while_expr.while_tok, writer, indent, .space);
-                try self.renderToken(self.nextToken(while_expr.while_tok), writer, indent, .none);
+                try self.renderToken(while_expr.while_tok, writer, .space);
+                try self.renderToken(self.nextToken(while_expr.while_tok), writer, .none);
                 if (while_expr.capture) |some| {
-                    try self.renderToken(while_expr.let_const.?, writer, indent, .space);
-                    try self.renderNode(some, writer, indent, .space);
-                    try self.renderToken(while_expr.eq_tok.?, writer, indent, .space);
+                    try self.renderToken(while_expr.let_const.?, writer, .space);
+                    try self.renderNode(some, writer, .space);
+                    try self.renderToken(while_expr.eq_tok.?, writer, .space);
                 }
-                try self.renderNode(while_expr.cond, writer, indent, .none);
-                try self.renderToken(while_expr.r_paren, writer, indent, getBlockIndent(while_expr.body, .space));
-                return self.renderNode(while_expr.body, writer, indent, space);
+                try self.renderNode(while_expr.cond, writer, .none);
+                try self.renderToken(while_expr.r_paren, writer, getBlockIndent(while_expr.body, .space));
+                return self.renderNode(while_expr.body, writer, space);
             },
             .For => {
                 const for_expr = @fieldParentPtr(Node.For, "base", node);
 
-                try self.renderToken(for_expr.for_tok, writer, indent, .space);
-                try self.renderToken(self.nextToken(for_expr.for_tok), writer, indent, .none);
+                try self.renderToken(for_expr.for_tok, writer, .space);
+                try self.renderToken(self.nextToken(for_expr.for_tok), writer, .none);
                 if (for_expr.capture) |some| {
-                    try self.renderToken(for_expr.let_const.?, writer, indent, .space);
-                    try self.renderNode(some, writer, indent, .space);
-                    try self.renderToken(for_expr.in_tok.?, writer, indent, .space);
+                    try self.renderToken(for_expr.let_const.?, writer, .space);
+                    try self.renderNode(some, writer, .space);
+                    try self.renderToken(for_expr.in_tok.?, writer, .space);
                 }
-                try self.renderNode(for_expr.cond, writer, indent, .none);
+                try self.renderNode(for_expr.cond, writer, .none);
 
-                try self.renderToken(for_expr.r_paren, writer, indent, getBlockIndent(for_expr.body, .space));
-                return self.renderNode(for_expr.body, writer, indent, space);
+                try self.renderToken(for_expr.r_paren, writer, getBlockIndent(for_expr.body, .space));
+                return self.renderNode(for_expr.body, writer, space);
             },
             .Fn => {
                 const fn_expr = @fieldParentPtr(Node.Fn, "base", node);
 
-                try self.renderToken(fn_expr.fn_tok, writer, indent, .none);
-                try self.renderToken(self.nextToken(fn_expr.fn_tok), writer, indent, .none);
+                try self.renderToken(fn_expr.fn_tok, writer, .none);
+                try self.renderToken(self.nextToken(fn_expr.fn_tok), writer, .none);
 
-                try self.renderCommaList(fn_expr.params, fn_expr.r_paren, writer, indent, .none);
+                try self.renderCommaList(fn_expr.params, fn_expr.r_paren, writer, .none);
 
-                try self.renderToken(fn_expr.r_paren, writer, indent, getBlockIndent(fn_expr.body, .space));
-                return self.renderNode(fn_expr.body, writer, indent, space);
+                try self.renderToken(fn_expr.r_paren, writer, getBlockIndent(fn_expr.body, .space));
+                return self.renderNode(fn_expr.body, writer, space);
             },
             .List, .Tuple, .Map => {
                 const ltm = @fieldParentPtr(Node.ListTupleMap, "base", node);
 
-                try self.renderToken(ltm.l_tok, writer, indent, .none);
-                try self.renderCommaList(ltm.values, ltm.r_tok, writer, indent, .none);
+                try self.renderToken(ltm.l_tok, writer, .none);
+                try self.renderCommaList(ltm.values, ltm.r_tok, writer, .none);
 
-                return self.renderToken(ltm.r_tok, writer, indent, space);
+                return self.renderToken(ltm.r_tok, writer, space);
             },
             .Block => {
                 const blk = @fieldParentPtr(Node.Block, "base", node);
 
-                const new_indent = indent + indent_delta;
+                writer.pushIndent();
                 for (blk.stmts) |stmt, i| {
-                    try writer.writeByteNTimes(' ', new_indent);
-                    try self.renderNode(stmt, writer, new_indent, .newline);
+                    try self.renderNode(stmt, writer, .newline);
 
                     if (isBlock(stmt)) {
-                        // render extra newline after blocks
-                        try writer.writeAll("\n\n");
+                        // render extra newlines after blocks
+                        try writer.insertNewline();
+                        try writer.insertNewline();
                         continue;
                     }
 
                     if (i + 1 == blk.stmts.len) break;
                     const last_token = stmt.lastToken();
                     if (self.lineDist(last_token, self.nextToken(last_token)) > 1) {
-                        try writer.writeByte('\n');
+                        try writer.insertNewline();
                     }
                 }
+                writer.popIndent();
             },
             .MapItem => {
                 const item = @fieldParentPtr(Node.MapItem, "base", node);
 
                 if (item.key) |some| {
-                    try self.renderNode(some, writer, indent, .none);
-                    try self.renderToken(item.colon.?, writer, indent, .space);
+                    try self.renderNode(some, writer, .none);
+                    try self.renderToken(item.colon.?, writer, .space);
                 }
 
-                return self.renderNode(item.value, writer, indent, space);
+                return self.renderNode(item.value, writer, space);
             },
             .Catch => {
                 const catch_expr = @fieldParentPtr(Node.Catch, "base", node);
 
-                try self.renderNode(catch_expr.lhs, writer, indent, .space);
-                try self.renderToken(catch_expr.tok, writer, indent, .space);
+                try self.renderNode(catch_expr.lhs, writer, .space);
+                try self.renderToken(catch_expr.tok, writer, .space);
 
                 if (catch_expr.capture) |some| {
-                    try self.renderToken(self.nextToken(catch_expr.tok), writer, indent, .none);
-                    try self.renderToken(catch_expr.let_const.?, writer, indent, .space);
-                    try self.renderNode(some, writer, indent, .none);
+                    try self.renderToken(self.nextToken(catch_expr.tok), writer, .none);
+                    try self.renderToken(catch_expr.let_const.?, writer, .space);
+                    try self.renderNode(some, writer, .none);
 
-                    try self.renderToken(self.nextToken(some.lastToken()), writer, indent, getBlockIndent(catch_expr.rhs, .space));
+                    try self.renderToken(self.nextToken(some.lastToken()), writer, getBlockIndent(catch_expr.rhs, .space));
                 }
-                return self.renderNode(catch_expr.rhs, writer, indent, space);
+                return self.renderNode(catch_expr.rhs, writer, space);
             },
             .If => {
                 const if_expr = @fieldParentPtr(Node.If, "base", node);
 
-                try self.renderToken(if_expr.if_tok, writer, indent, .space);
-                try self.renderToken(self.nextToken(if_expr.if_tok), writer, indent, .none);
+                try self.renderToken(if_expr.if_tok, writer, .space);
+                try self.renderToken(self.nextToken(if_expr.if_tok), writer, .none);
                 if (if_expr.capture) |some| {
-                    try self.renderToken(if_expr.let_const.?, writer, indent, .space);
-                    try self.renderNode(some, writer, indent, .space);
-                    try self.renderToken(if_expr.eq_tok.?, writer, indent, .space);
+                    try self.renderToken(if_expr.let_const.?, writer, .space);
+                    try self.renderNode(some, writer, .space);
+                    try self.renderToken(if_expr.eq_tok.?, writer, .space);
                 }
 
-                try self.renderNode(if_expr.cond, writer, indent, .none);
-                try self.renderToken(if_expr.r_paren, writer, indent, getBlockIndent(if_expr.if_body, .space));
+                try self.renderNode(if_expr.cond, writer, .none);
+                try self.renderToken(if_expr.r_paren, writer, getBlockIndent(if_expr.if_body, .space));
 
                 if (if_expr.else_body) |some| {
-                    try self.renderNode(if_expr.if_body, writer, indent, .space);
-                    switch (if_expr.if_body.id) {
-                        .Block, .Match => try writer.writeByteNTimes(' ', indent),
-                        else => {},
-                    }
+                    try self.renderNode(if_expr.if_body, writer, .space);
 
-                    try self.renderToken(if_expr.else_tok.?, writer, indent, getBlockIndent(some, .space));
-                    return self.renderNode(some, writer, indent, space);
+                    try self.renderToken(if_expr.else_tok.?, writer, getBlockIndent(some, .space));
+                    return self.renderNode(some, writer, space);
                 } else {
-                    return self.renderNode(if_expr.if_body, writer, indent, space);
+                    return self.renderNode(if_expr.if_body, writer, space);
                 }
             },
             .Match => {
                 const match_expr = @fieldParentPtr(Node.Match, "base", node);
 
-                try self.renderToken(match_expr.match_tok, writer, indent, .space);
-                try self.renderToken(self.nextToken(match_expr.match_tok), writer, indent, .none);
-                try self.renderNode(match_expr.expr, writer, indent, .none);
-                try self.renderToken(match_expr.r_paren, writer, indent, .newline);
+                try self.renderToken(match_expr.match_tok, writer, .space);
+                try self.renderToken(self.nextToken(match_expr.match_tok), writer, .none);
+                try self.renderNode(match_expr.expr, writer, .none);
+                try self.renderToken(match_expr.r_paren, writer, .newline);
 
-                const new_indent = indent + indent_delta;
+                writer.pushIndent();
                 for (match_expr.cases) |case| {
-                    try writer.writeByteNTimes(' ', new_indent);
-                    try self.renderNode(case, writer, new_indent, .newline);
+                    try self.renderNode(case, writer, .newline);
                 }
+                writer.popIndent();
             },
             .MatchCatchAll => {
                 const case = @fieldParentPtr(Node.MatchCatchAll, "base", node);
 
                 if (self.tokens[case.tok].id != .Underscore) {
-                    try self.renderToken(case.tok, writer, indent, .space);
-                    try self.renderToken(self.nextToken(case.tok), writer, indent, .space);
+                    try self.renderToken(case.tok, writer, .space);
+                    try self.renderToken(self.nextToken(case.tok), writer, .space);
                 } else {
-                    try self.renderToken(case.tok, writer, indent, .space);
+                    try self.renderToken(case.tok, writer, .space);
                 }
 
-                try self.renderToken(case.eq_arr, writer, indent, getBlockIndent(case.expr, .space));
-                return self.renderNode(case.expr, writer, indent, space);
+                try self.renderToken(case.eq_arr, writer, getBlockIndent(case.expr, .space));
+                return self.renderNode(case.expr, writer, space);
             },
             .MatchLet => {
                 const case = @fieldParentPtr(Node.MatchLet, "base", node);
 
-                try self.renderToken(case.let_const, writer, indent, .space);
-                try self.renderNode(case.capture, writer, indent, .space);
+                try self.renderToken(case.let_const, writer, .space);
+                try self.renderNode(case.capture, writer, .space);
 
-                try self.renderToken(case.eq_arr, writer, indent, getBlockIndent(case.expr, .space));
-                return self.renderNode(case.expr, writer, indent, space);
+                try self.renderToken(case.eq_arr, writer, getBlockIndent(case.expr, .space));
+                return self.renderNode(case.expr, writer, space);
             },
             .MatchCase => {
                 const case = @fieldParentPtr(Node.MatchCase, "base", node);
 
-                try self.renderCommaList(case.lhs, case.eq_arr, writer, indent, .space);
+                try self.renderCommaList(case.lhs, case.eq_arr, writer, .space);
 
-                try self.renderToken(case.eq_arr, writer, indent, getBlockIndent(case.expr, .space));
-                return self.renderNode(case.expr, writer, indent, space);
+                try self.renderToken(case.eq_arr, writer, getBlockIndent(case.expr, .space));
+                return self.renderNode(case.expr, writer, space);
             },
         }
     }
 
-    fn renderCommaList(self: *Renderer, nodes: []const *Node, last_token: TokenIndex, writer: anytype, indent: u32, space: Space) !void {
+    fn renderCommaList(self: *Renderer, nodes: []const *Node, last_token: TokenIndex, writer: anytype, space: Space) !void {
+        if (nodes.len == 0) return;
+
         const prev = self.tokens[last_token - 1].id;
-        if (prev == .Comma or prev == .Nl or prev == .Comment) {
-            try writer.writeByte('\n');
-            const new_indent = indent + indent_delta;
+        if (prev == .Comma or prev == .Nl or prev == .Comment or self.lineDist(nodes[0].firstToken(), last_token) > 0) {
+            try writer.insertNewline();
+            writer.pushIndent();
             for (nodes) |node, i| {
-                try writer.writeByteNTimes(' ', new_indent);
-                try self.renderNode(node, writer, new_indent, .none);
-                const comma = self.nextToken(node.lastToken());
-                if (self.tokens[comma].id == .Comma)
-                    try self.renderToken(comma, writer, indent, .newline)
-                else
-                    try writer.writeAll(",\n");
+                try self.renderNode(node, writer, .comma);
             }
-            try writer.writeByteNTimes(' ', indent);
+            writer.popIndent();
         } else {
             for (nodes) |node, i| {
                 if (i + 1 == nodes.len) {
-                    try self.renderNode(node, writer, indent, space);
+                    try self.renderNode(node, writer, space);
                     break;
                 }
-                try self.renderNode(node, writer, indent, .none);
-                try self.renderToken(self.nextToken(node.lastToken()), writer, indent, .space);
+                try self.renderNode(node, writer, .none);
+                try self.renderToken(self.nextToken(node.lastToken()), writer, .space);
             }
         }
     }
 
-    fn renderComments(self: *Renderer, token: TokenIndex, writer: anytype, indent: u32, space: Space) !void {
+    fn renderComments(self: *Renderer, token: TokenIndex, writer: anytype, space: Space) !void {
         var i = token;
         while (true) : (i += 1) {
             switch (self.tokens[i].id) {
@@ -392,12 +400,8 @@ const Renderer = struct {
             const trimmed = std.mem.trimRight(u8, slice, " \t\r");
             if (trimmed.len == 1) continue;
 
-            try writer.writeAll(trimmed);
-            try writer.writeByte('\n');
-            try writer.writeByteNTimes(' ', indent);
-
-            if (space != .newline)
-                try writer.writeByteNTimes(' ', indent_delta);
+            try writer.writer().writeAll(trimmed);
+            try writer.insertNewline();
         }
     }
 
@@ -452,16 +456,34 @@ const Renderer = struct {
         none,
         newline,
         space,
+        comma,
     };
 
-    fn renderToken(self: *Renderer, token: TokenIndex, writer: anytype, indent: u32, space: Space) !void {
+    fn renderToken(self: *Renderer, token: TokenIndex, writer: anytype, space: Space) !void {
         var tok = self.tokens[token];
-        try writer.writeAll(self.source[tok.start..tok.end]);
+        try writer.writer().writeAll(self.source[tok.start..tok.end]);
         switch (space) {
             .none => {},
-            .newline => try writer.writeByte('\n'),
-            .space => try writer.writeByte(' '),
+            .newline => try writer.insertNewline(),
+            .space => try writer.writer().writeByte(' '),
+            .comma => {
+                try writer.writer().writeByte(',');
+                var comments = token + 1;
+                var i = comments;
+                while (true) : (i += 1) {
+                    switch (self.tokens[i].id) {
+                        .Nl, .Indent => continue,
+                        .Comma => comments += 1,
+                        .Comment => {
+                            try writer.writer().writeByte(' ');
+                            break;
+                        },
+                        else => return writer.insertNewline(),
+                    }
+                }
+                return self.renderComments(comments, writer, space);
+            },
         }
-        try self.renderComments(token + 1, writer, indent, space);
+        try self.renderComments(token + 1, writer, space);
     }
 };

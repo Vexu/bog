@@ -125,7 +125,10 @@ export fn bog_Tree_deinit(tree: *bog.Tree) void {
     tree.deinit();
 }
 
-export fn bog_Tree_render(tree: *bog.Tree, out: *std.c.FILE) Error {
-    tree.render(std.io.cOutStream(out)) catch return .IoError;
+export fn bog_Tree_render(tree: *bog.Tree, out: *std.c.FILE, changed: ?*bool) Error {
+    const c = tree.render(std.io.cOutStream(out)) catch return .IoError;
+    if (changed) |some| {
+        some.* = c;
+    }
     return .None;
 }

@@ -59,6 +59,6 @@ bog_Error bog_parse(bog_Tree **tree, const char *source, bog_Errors *errors);
 void bog_Tree_deinit(bog_Tree *tree);
 
 // possible errors: BOG_ERROR_IO
-bog_Error bog_Tree_render(bog_Tree *tree, FILE *out);
+bog_Error bog_Tree_render(bog_Tree *tree, FILE *out, bool* changed);
 
 #endif  // BOG_H

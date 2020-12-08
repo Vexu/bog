@@ -57,8 +57,7 @@ const usage =
 ;
 
 fn help() !void {
-    const stdout = &std.io.getStdOut().outStream();
-    try stdout.writeAll(usage);
+    try std.io.getStdOut().writer().writeAll(usage);
     process.exit(0);
 }
 
@@ -93,7 +92,7 @@ fn run(gpa: *std.mem.Allocator, args: [][]const u8) !void {
     const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => |err| {
-            printAndExit("unable to open '{}': {}", .{ file_name, err });
+            fatal("unable to open '{}': {}", .{ file_name, err });
         },
     };
     defer gpa.free(source);
@@ -101,7 +100,7 @@ fn run(gpa: *std.mem.Allocator, args: [][]const u8) !void {
     var module = bog.Module.read(source) catch |e| switch (e) {
         // not a bog bytecode file
         error.InvalidMagic => null,
-        else => |err| printAndExit("cannot execute file '{}': {}", .{ file_name, err }),
+        else => |err| fatal("cannot execute file '{}': {}", .{ file_name, err }),
     };
 
     // TODO this doesn't cast nicely for some reason
@@ -112,10 +111,10 @@ fn run(gpa: *std.mem.Allocator, args: [][]const u8) !void {
         vm.run(source));
     const res = res_with_err catch |e| switch (e) {
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
-            vm.errors.render(source, std.io.getStdErr().outStream()) catch {};
+            vm.errors.render(source, std.io.getStdErr().writer()) catch {};
             process.exit(1);
         },
-        error.MalformedByteCode => if (is_debug) @panic("malformed") else printAndExit("attempted to execute invalid bytecode", .{}),
+        error.MalformedByteCode => if (is_debug) @panic("malformed") else fatal("attempted to execute invalid bytecode", .{}),
         error.OutOfMemory => return error.OutOfMemory,
     };
 
@@ -124,18 +123,18 @@ fn run(gpa: *std.mem.Allocator, args: [][]const u8) !void {
             if (int >= 0 and int < std.math.maxInt(u8)) {
                 process.exit(@intCast(u8, int));
             } else {
-                printAndExit("invalid exit code: {}", .{int});
+                fatal("invalid exit code: {}", .{int});
             }
         },
         .err => |err| {
-            const stderr = std.io.getStdErr().outStream();
+            const stderr = std.io.getStdErr().writer();
             try stderr.writeAll("script exited with error: ");
             try err.dump(stderr, 4);
             try stderr.writeAll("\n");
             process.exit(1);
         },
         .none => {},
-        else => printAndExit("invalid return type '{}'", .{@tagName(res.*)}),
+        else => fatal("invalid return type '{}'", .{@tagName(res.*)}),
     }
 }
 
@@ -147,7 +146,7 @@ const usage_fmt =
 ;
 
 fn fmt(gpa: *std.mem.Allocator, args: [][]const u8) !void {
-    if (args.len == 0) printAndExit("expected at least one file", .{});
+    if (args.len == 0) fatal("expected at least one file", .{});
 
     var any_err = false;
     for (args) |arg| {
@@ -190,7 +189,7 @@ fn fmtFile(gpa: *std.mem.Allocator, name: []const u8) FmtError!bool {
 
     var tree = bog.parse(gpa, source, &errors) catch |e| switch (e) {
         error.TokenizeError, error.ParseError => {
-            try errors.render(source, std.io.getStdErr().outStream());
+            try errors.render(source, std.io.getStdErr().writer());
             return true;
         },
         error.OutOfMemory => return error.OutOfMemory,
@@ -200,18 +199,19 @@ fn fmtFile(gpa: *std.mem.Allocator, name: []const u8) FmtError!bool {
     const file = try std.fs.cwd().createFile(name, .{});
     defer file.close();
 
-    try tree.render(file.writer());
+    // TODO add check mode
+    _ = try tree.render(file.writer());
     return false;
 }
 
-fn printAndExit(comptime msg: []const u8, args: anytype) noreturn {
+fn fatal(comptime msg: []const u8, args: anytype) noreturn {
     std.io.getStdErr().writer().print(msg ++ "\n", args) catch {};
     process.exit(1);
 }
 
 fn getFileName(usage_arg: []const u8, args: [][]const u8) []const u8 {
     if (args.len != 1) {
-        printAndExit("{}", .{usage_arg});
+        fatal("{}", .{usage_arg});
     }
     return args[0];
 }
@@ -227,7 +227,7 @@ fn debugDump(gpa: *std.mem.Allocator, args: [][]const u8) !void {
     const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => |err| {
-            printAndExit("unable to open '{}': {}", .{ file_name, err });
+            fatal("unable to open '{}': {}", .{ file_name, err });
         },
     };
     defer gpa.free(source);
@@ -253,7 +253,7 @@ fn debugTokens(gpa: *std.mem.Allocator, args: [][]const u8) !void {
     const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => |err| {
-            printAndExit("unable to open '{}': {}", .{ file_name, err });
+            fatal("unable to open '{}': {}", .{ file_name, err });
         },
     };
     defer gpa.free(source);
@@ -287,14 +287,14 @@ const usage_debug_write =
 
 fn debugWrite(gpa: *std.mem.Allocator, args: [][]const u8) !void {
     if (args.len != 2) {
-        printAndExit("{}", .{usage_debug_write});
+        fatal("{}", .{usage_debug_write});
     }
     const file_name = args[0];
 
     const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => |err| {
-            printAndExit("unable to open '{}': {}", .{ file_name, err });
+            fatal("unable to open '{}': {}", .{ file_name, err });
         },
     };
     defer gpa.free(source);
@@ -323,7 +323,7 @@ fn debugRead(gpa: *std.mem.Allocator, args: [][]const u8) !void {
     const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         else => |err| {
-            printAndExit("unable to open '{}': {}", .{ file_name, err });
+            fatal("unable to open '{}': {}", .{ file_name, err });
         },
     };
     defer gpa.free(source);
