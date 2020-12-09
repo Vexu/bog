@@ -571,12 +571,12 @@ pub const Compiler = struct {
             .This => return self.genThis(@fieldParentPtr(Node.SingleToken, "base", node), res),
             .Tagged => return self.genTagged(@fieldParentPtr(Node.Tagged, "base", node), res),
             .Range => return self.genRange(@fieldParentPtr(Node.Range, "base", node), res),
+            .FormatString => return self.genFormatString(@fieldParentPtr(Node.FormatString, "base", node), res),
 
             .Match => return self.reportErr("TODO: Match", node.firstToken()),
             .MatchCatchAll => return self.reportErr("TODO: MatchCatchAll", node.firstToken()),
             .MatchLet => return self.reportErr("TODO: MatchLet", node.firstToken()),
             .MatchCase => return self.reportErr("TODO: MatchCase", node.firstToken()),
-            .FormatString => return self.reportErr("TODO: FormatString", node.firstToken()),
         }
     }
 
@@ -2133,6 +2133,62 @@ pub const Compiler = struct {
         return res;
     }
 
+    fn genFormatString(self: *Compiler, node: *Node.FormatString, res: Result) Error!Value {
+        // transform f"foo{255:X}bar" into "foo{X}bar".format((255,))
+        var buf = std.ArrayList(u8).init(self.errors.list.allocator);
+        defer buf.deinit();
+
+        var i: usize = 0;
+        for (node.format) |str| {
+            var slice = self.tokenSlice(str);
+            if (slice[0] == 'f') slice = slice[2..];
+            if (slice[0] == ':') slice = slice[1..];
+            if (self.tokens[str].id == .FormatEnd) slice = slice[0 .. slice.len - 1];
+
+            try buf.ensureCapacity(buf.capacity + slice.len);
+            buf.expandToCapacity();
+            i += try self.parseStrExtra(str, slice, buf.items[i..]);
+        }
+        const format_string = try self.arena.dupe(u8, buf.items[0..i]);
+
+        // format_reg = "formatstring".format
+        const sub_res = res.toRt(self);
+        const format_reg = try (Value{ .str = format_string }).toRt(self);
+        const format_member_str = try (Value{ .str = "format" }).toRt(self);
+        try self.emitTriple(.get_triple, format_reg, format_reg, format_member_str);
+        defer self.registerFree(format_member_str);
+
+        // arg_reg = (args...)
+        const arg_reg = format_member_str;
+        try self.emitOff(.build_tuple_off, arg_reg, @intCast(u32, node.args.len));
+
+        // prepare registers
+        const index_reg = self.registerAlloc();
+        defer self.registerFree(index_reg);
+        const result_reg = self.registerAlloc();
+        defer self.registerFree(result_reg);
+
+        var index = Value{ .int = 0 };
+        for (node.args) |arg| {
+            _ = try self.genNode(arg, .{ .rt = result_reg });
+
+            try self.makeRuntime(index_reg, index);
+            try self.emitTriple(.set_triple, arg_reg, index_reg, result_reg);
+            index.int += 1;
+        }
+
+        // sub_res.rt = format_reg(arg_reg)
+        try self.code.append(.{
+            .call = .{
+                .res = sub_res.rt,
+                .func = format_reg,
+                .first = arg_reg,
+            },
+        });
+        try self.code.append(.{ .bare = 1 });
+        return sub_res.toVal();
+    }
+
     fn addLineInfo(self: *Compiler, node: *Node) !void {
         const tok = self.tokens[node.firstToken()];
 
@@ -2162,8 +2218,11 @@ pub const Compiler = struct {
     fn parseStr(self: *Compiler, tok: TokenIndex) ![]u8 {
         var slice = self.tokenSlice(tok);
         slice = slice[1 .. slice.len - 1];
-
         var buf = try self.arena.alloc(u8, slice.len);
+        return buf[0..try self.parseStrExtra(tok, slice, buf)];
+    }
+
+    fn parseStrExtra(self: *Compiler, tok: TokenIndex, slice: []const u8, buf: []u8) !usize {
         var slice_i: u32 = 0;
         var i: u32 = 0;
         while (slice_i < slice.len) : (slice_i += 1) {
@@ -2186,7 +2245,7 @@ pub const Compiler = struct {
             }
             i += 1;
         }
-        return buf[0..i];
+        return i;
     }
 
     fn reportErr(self: *Compiler, msg: []const u8, tok: TokenIndex) Error {

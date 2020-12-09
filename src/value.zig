@@ -707,6 +707,13 @@ pub const Value = union(Type) {
                     return vm.reportErr("expected string");
                 return val.str;
             },
+            []*Value, []const *Value, []*const Value, []const *const Value => {
+                switch (val.*) {
+                    .tuple => |t| return t,
+                    .list => |*l| return l.items,
+                    else => return vm.reportErr("expected a list or a tuple"),
+                }
+            },
             else => switch (@typeInfo(T)) {
                 .Int => if (val.* == .int) blk: {
                     if (val.int < std.math.minInt(T) or val.int > std.math.maxInt(T))

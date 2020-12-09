@@ -1,3 +1,18 @@
+test "format string" {
+    // TODO proper formatting
+    //\\"fooFFbar"
+    expectOutput(
+        \\return f"foo{255:X}bar"
+    ,
+        \\"foo{X}bar255"
+    );
+    expectOutput(
+        \\return "foo{X}bar".format((255,))
+    , 
+        \\"foo{X}bar255"
+    );
+}
+
 test "concatting" {
     expectOutput(
         \\let x = "foo"

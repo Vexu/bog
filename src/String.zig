@@ -100,6 +100,15 @@ pub fn get(str: *const String, vm: *Vm, index: *const Value, res: *?*Value) Vm.E
                         try _vm.last_get.str.append(_vm.gc.gpa, val.data);
                     }
                 }.append);
+            } else if (mem.eql(u8, s.data, "format")) {
+                res.* = try Value.zigToBog(vm, struct {
+                    fn format(_vm: *Vm, args: []const *Value) !*Value {
+                        if (_vm.last_get.* != .str)
+                            return _vm.reportErr("expected string");
+
+                        return _vm.last_get.str.format(_vm, args);
+                    }
+                }.format);
             } else {
                 return vm.reportErr("no such property");
             }
@@ -172,4 +181,16 @@ pub fn append(str: *String, allocator: *Allocator, data: []const u8) !void {
     var b = try str.toBuilder(allocator);
     try b.append(data);
     str.* = b.finish();
+}
+
+pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
+    var b = builder(vm.gc.gpa);
+    // TODO proper formatting
+    try b.append(str.data);
+    for (args) |arg| {
+        try arg.dump(b.writer(), default_dump_depth);
+    }
+    const ret = try vm.gc.alloc();
+    ret.* = Value{ .str = b.finish()};
+    return ret;
 }
