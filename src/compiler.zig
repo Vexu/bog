@@ -576,6 +576,7 @@ pub const Compiler = struct {
             .MatchCatchAll => return self.reportErr("TODO: MatchCatchAll", node.firstToken()),
             .MatchLet => return self.reportErr("TODO: MatchLet", node.firstToken()),
             .MatchCase => return self.reportErr("TODO: MatchCase", node.firstToken()),
+            .FormatString => return self.reportErr("TODO: FormatString", node.firstToken()),
         }
     }
 

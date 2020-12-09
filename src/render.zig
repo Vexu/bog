@@ -360,6 +360,17 @@ const Renderer = struct {
                 try self.renderToken(case.eq_arr, writer, getBlockIndent(case.expr, .space));
                 return self.renderNode(case.expr, writer, space);
             },
+            .FormatString => {
+                const fmt_str = @fieldParentPtr(Node.FormatString, "base", node);
+
+                for (fmt_str.format) |str, i| {
+                    if (self.tokens[str].id == .FormatEnd) {
+                        return self.renderToken(str, writer, space);
+                    }
+                    try self.renderToken(str, writer, .none);
+                    try self.renderNode(fmt_str.args[i], writer, .none);
+                }
+            },
         }
     }
 

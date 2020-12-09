@@ -59,6 +59,7 @@ primary_expr
     : IDENTIFIER
     | "_"
     | STRING
+    | format_string
     | NUMBER
     | "true"
     | "false"
@@ -72,6 +73,8 @@ primary_expr
     | while
     | for
     | match
+
+format_string : FORMAT_START expr (FORMAT expr)* FORMAT_END
 
 initializer
     : "(" block_or_expr ")"

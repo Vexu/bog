@@ -169,6 +169,9 @@ pub const Token = struct {
         Colon,
         Underscore,
         At,
+        FormatStart,
+        Format,
+        FormatEnd,
 
         /// keywords
         Keyword_not,
@@ -349,6 +352,7 @@ pub fn tokenizeRepl(repl: *@import("repl.zig").Repl) Tokenizer.Error!bool {
             else if (self.paren_level != 0 or
                 self.string or
                 self.expect_indent or
+                self.format_string != 0 or
                 self.indent_level != 0)
                 false
             else
@@ -366,11 +370,17 @@ pub const Tokenizer = struct {
     indent_char: ?u32 = null,
 
     /// level of parentheses
-    paren_level: u32 = 0,
+    paren_level: u16 = 0,
+
+    /// level of parentheses at the start of the format string
+    format_paren_level: u16 = 0,
 
     /// how many of `indent_char` are in one indentation level
     chars_per_indent: ?u8 = null,
     indent_level: u16 = 0,
+
+    /// format string delimiter, 0 if not in a format string
+    format_string: u8 = 0,
 
     /// saw a nl, need to check for indentation
     expect_indent: bool = false,
@@ -522,11 +532,15 @@ pub const Tokenizer = struct {
             FloatFraction,
             FloatExponent,
             FloatExponentDigits,
+            f,
+            FormatString,
+            FormatBrace,
         } = .Start;
         var res: Token.Id = .Eof;
         var str_delimit: u32 = undefined;
         var counter: u32 = 0;
         var dot_index: ?usize = null;
+        var escape_end_state: @TypeOf(state) = .String;
 
         while (self.it.nextCodepoint()) |c| {
             switch (state) {
@@ -611,6 +625,12 @@ pub const Tokenizer = struct {
                         break;
                     },
                     '}' => {
+                        if (self.format_string != 0 and self.format_paren_level == self.paren_level) {
+                            escape_end_state = .FormatString;
+                            state = .FormatString;
+                            res = .Format;
+                            continue;
+                        }
                         if (self.paren_level == 0) {
                             return self.reportErr("unmatched '}'", c);
                         }
@@ -623,6 +643,12 @@ pub const Tokenizer = struct {
                         break;
                     },
                     ':' => {
+                        if (self.format_string != 0 and self.format_paren_level == self.paren_level) {
+                            escape_end_state = .FormatString;
+                            state = .FormatString;
+                            res = .Format;
+                            continue;
+                        }
                         res = .Colon;
                         break;
                     },
@@ -644,6 +670,11 @@ pub const Tokenizer = struct {
                     },
                     '1'...'9' => {
                         state = .Number;
+                    },
+                    'f' => if (self.format_string != 0) {
+                        state = .Identifier;
+                    } else {
+                        state = .f;
                     },
                     else => {
                         if (isWhiteSpace(c)) {
@@ -674,7 +705,7 @@ pub const Tokenizer = struct {
                 },
                 .EscapeSequence => switch (c) {
                     '\'', '"', '\\', 'r', 't', 'n' => {
-                        state = .String;
+                        state = escape_end_state;
                     },
                     'x' => {
                         counter = 0;
@@ -691,7 +722,7 @@ pub const Tokenizer = struct {
                     '0'...'9', 'a'...'f', 'A'...'F' => {
                         counter += 1;
                         if (counter > 2) {
-                            state = .String;
+                            state = escape_end_state;
                         }
                     },
                     else => {
@@ -699,7 +730,7 @@ pub const Tokenizer = struct {
                             return self.reportErr("\\x pattern must be followed by 2 hex digits", c);
                         }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        state = .String;
+                        state = escape_end_state;
                     },
                 },
                 .UnicodeStart => if (c == '{') {
@@ -716,16 +747,63 @@ pub const Tokenizer = struct {
                         }
                     },
                     '}' => {
-                        state = .String;
+                        state = escape_end_state;
                     },
                     else => {
                         return self.reportErr("expected hex digits or '}'", c);
                     },
                 },
                 .UnicodeEnd => if (c == '}') {
-                    state = .String;
+                    state = escape_end_state;
                 } else {
                     return self.reportErr("expected '}'", c);
+                },
+                .f => switch (c) {
+                    '\'' => {
+                        self.format_string = '\'';
+                        self.format_paren_level = self.paren_level;
+                        res = .FormatStart;
+                        state = .FormatString;
+                        escape_end_state = .FormatString;
+                    },
+                    '"' => {
+                        self.format_string = '"';
+                        self.format_paren_level = self.paren_level;
+                        res = .FormatStart;
+                        state = .FormatString;
+                        escape_end_state = .FormatString;
+                    },
+                    else => {
+                        self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        state = .Identifier;
+                    },
+                },
+                .FormatString => {
+                    if (c == self.format_string) {
+                        if (res == .FormatStart) {
+                            res = .String;
+                        } else {
+                            res = .FormatEnd;
+                        }
+                        self.format_string = 0;
+                        break;
+                    } else if (c == '\\') {
+                        state = .EscapeSequence;
+                    } else if (c == '\n' or c == '\r') {
+                        if (self.format_string == '\'') {
+                            return self.reportErr("invalid newline, use'\"' for multiline strings", c);
+                        }
+                    } else if (c == '{') {
+                        state = .FormatBrace;
+                    }
+                },
+                .FormatBrace => {
+                    if (c == '{') {
+                        state = .FormatString;
+                    } else {
+                        self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
+                        break;
+                    }
                 },
                 .Identifier => {
                     if (!isIdentifier(c)) {
@@ -1116,8 +1194,9 @@ pub const Tokenizer = struct {
                 .Number,
                 .Zero,
                 => res = .Integer,
+                .FormatBrace => {},
 
-                .String => {
+                .String, .FormatString => {
                     if (self.repl) {
                         // if running in repl this might be a multiline string
                         self.it.i = start_index;
@@ -1160,21 +1239,28 @@ pub const Tokenizer = struct {
 };
 
 fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
+    var errors = Errors.init(std.testing.allocator);
+    defer errors.deinit();
     var tokenizer = Tokenizer{
         .tokens = undefined,
-        .errors = &Errors.init(std.testing.failing_allocator),
+        .errors = &errors,
         .repl = false,
         .it = .{
             .i = 0,
             .bytes = source,
         },
     };
-    for (expected_tokens) |expected_token| {
-        const token = tokenizer.next() catch unreachable;
-        std.testing.expectEqual(expected_token, token.id);
+    blk: {
+        for (expected_tokens) |expected_token| {
+            const token = tokenizer.next() catch break :blk;
+            std.testing.expectEqual(expected_token, token.id);
+        }
+        const last_token = tokenizer.next() catch break :blk;
+        std.testing.expect(last_token.id == .Eof);
+        return;
     }
-    const last_token = tokenizer.next() catch unreachable;
-    std.testing.expect(last_token.id == .Eof);
+    errors.render(source, std.io.getStdErr().writer()) catch {};
+    @panic("test failed");
 }
 
 test "operators" {
@@ -1380,5 +1466,28 @@ test "numbers" {
         .Number,
         .Comma,
         .Integer,
+    });
+}
+
+test "format string" {
+    expectTokens(
+        \\f f"\u{12}{12:12} foo \t\n {f"foo bar" ++ {1:2} as str:3} \x12 " :
+    , &[_]Token.Id{
+        .Identifier,
+        .FormatStart,
+        .Integer,
+        .Format,
+        .Identifier,
+        .String,
+        .PlusPlus,
+        .LBrace,
+        .Integer,
+        .Colon,
+        .Integer,
+        .RBrace,
+        .Keyword_as,
+        .Identifier,
+        .FormatEnd,
+        .Colon,
     });
 }

@@ -1,3 +1,17 @@
+test "format string" {
+    testTransform(
+        \\f"foo {{1:2}:32} bar { 2
+        \\*
+        \\3:4} baz \t"
+        \\ 
+        \\
+    ,
+        \\f"foo {{1:2}:32} bar {2 *
+        \\    3:4} baz \t"
+        \\
+    );
+}
+
 test "numbers" {
     testTransform(
         \\[0,0]

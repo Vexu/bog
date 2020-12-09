@@ -56,6 +56,7 @@ pub const Node = struct {
         MatchLet,
         MatchCase,
         Jump,
+        FormatString,
     };
 
     pub fn firstToken(node: *Node) TokenIndex {
@@ -97,6 +98,7 @@ pub const Node = struct {
             .MatchLet => @fieldParentPtr(Node.MatchLet, "base", node).let_const,
             .MatchCase => @fieldParentPtr(Node.MatchCase, "base", node).lhs[0].firstToken(),
             .Jump => @fieldParentPtr(Node.Jump, "base", node).tok,
+            .FormatString => @fieldParentPtr(Node.FormatString, "base", node).format[0],
         };
     }
 
@@ -156,6 +158,10 @@ pub const Node = struct {
                     .Return => |n| return if (n) |some| some.lastToken() else jump.tok,
                     .Break, .Continue => return jump.tok,
                 }
+            },
+            .FormatString => {
+                const fmt_str = @fieldParentPtr(Node.FormatString, "base", node);
+                return fmt_str.format[fmt_str.format.len - 1];
             },
         };
     }
@@ -415,5 +421,11 @@ pub const Node = struct {
             Continue,
             Return: ?*Node,
         },
+    };
+
+    pub const FormatString = struct {
+        base: Node = .{ .id = .FormatString },
+        format: []TokenIndex,
+        args: []*Node,
     };
 };

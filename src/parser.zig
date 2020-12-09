@@ -647,6 +647,7 @@ pub const Parser = struct {
     ///     : IDENTIFIER
     ///     | "_"
     ///     | STRING
+    ///     | format_string
     ///     | NUMBER
     ///     | "true"
     ///     | "false"
@@ -752,12 +753,41 @@ pub const Parser = struct {
                 parser.tok_index = tok;
             },
         }
+        if (try parser.formatString(skip_nl, level)) |res| return res;
         if (try parser.initializer(skip_nl, level)) |res| return res;
         if (try parser.ifExpr(skip_nl, allow_range, level)) |res| return res;
         if (try parser.whileExpr(skip_nl, allow_range, level)) |res| return res;
         if (try parser.forExpr(skip_nl, allow_range, level)) |res| return res;
         if (try parser.matchExpr(skip_nl, level)) |res| return res;
         return parser.reportErr("expected Identifier, String, Number, true, false, '(', '{{', '[', error, import, if, while, for or match", parser.tokens[parser.tok_index]);
+    }
+
+    /// format_string : FORMAT_START expr (FORMAT expr)* FORMAT_END
+    fn formatString(parser: *Parser, skip_nl: bool, level: u16) Error!?*Node {
+        const first = parser.eatToken(.FormatStart, true) orelse return null;
+
+        var toks = std.ArrayList(TokenIndex).init(parser.gpa);
+        defer toks.deinit();
+        try toks.append(first);
+
+        var args = NodeList.init(parser.gpa);
+        defer args.deinit();
+
+        while (true) {
+            try args.append(try parser.expr(true, true, level));
+
+            if (parser.eatToken(.Format, true)) |tok| {
+                try toks.append(tok);
+            } else break;
+        }
+        try toks.append(try parser.expectToken(.FormatEnd, skip_nl));
+
+        const node = try parser.arena.create(Node.FormatString);
+        node.* = .{
+            .format = try parser.arena.dupe(TokenIndex, toks.items),
+            .args = try parser.arena.dupe(*Node, args.items),
+        };
+        return &node.base;
     }
 
     /// initializer
