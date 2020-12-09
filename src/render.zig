@@ -116,8 +116,8 @@ const Renderer = struct {
                 const prefix = @fieldParentPtr(Node.Prefix, "base", node);
 
                 switch (prefix.op) {
-                    .boolNot, .Try => try self.renderToken(prefix.tok, writer, .space),
-                    .bitNot, .minus, .plus => try self.renderToken(prefix.tok, writer, .none),
+                    .bool_not, .Try => try self.renderToken(prefix.tok, writer, .space),
+                    .bit_not, .minus, .plus => try self.renderToken(prefix.tok, writer, .none),
                 }
                 return self.renderNode(prefix.rhs, writer, space);
             },

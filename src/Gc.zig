@@ -149,6 +149,18 @@ pub fn dupe(gc: *Gc, val: *const Value) !*Value {
         .map => |*m| {
             new.* = .{ .map = try m.clone(gc.gpa) };
         },
+        .str => |*s| {
+            if (s.capacity != 0) {
+                new.* = .{
+                    .str = .{
+                        .data = try gc.gpa.dupe(u8, s.data),
+                        .capacity = s.data.len,
+                    },
+                };
+            } else {
+                new.* = val.*;
+            }
+        },
         else => new.* = val.*,
     }
     return new;

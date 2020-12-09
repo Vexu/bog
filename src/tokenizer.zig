@@ -143,6 +143,7 @@ pub const Token = struct {
         CaretEqual,
         Plus,
         PlusEqual,
+        PlusPlus,
         Minus,
         MinusEqual,
         Asterisk,
@@ -253,6 +254,7 @@ pub const Token = struct {
             .CaretEqual => "^=",
             .Plus => "+",
             .PlusEqual => "+=",
+            .PlusPlus => "++",
             .Minus => "-",
             .MinusEqual => "-=",
             .Asterisk => "*",
@@ -809,6 +811,10 @@ pub const Tokenizer = struct {
                         res = .PlusEqual;
                         break;
                     },
+                    '+' => {
+                        res = .PlusPlus;
+                        break;
+                    },
                     else => {
                         self.it.i = start_index + 1;
                         res = .Plus;
@@ -1175,7 +1181,7 @@ test "operators" {
     expectTokens(
         \\!= | |= = ==
         \\( ) { } [ ] . @ =>
-        \\^ ^= + += - -=
+        \\^ ^= + += ++ - -=
         \\* *= ** **= % %= / /= // //=
         \\, & &= < <= <<
         \\<<= > >= >> >>= ~ _
@@ -1201,6 +1207,7 @@ test "operators" {
         .CaretEqual,
         .Plus,
         .PlusEqual,
+        .PlusPlus,
         .Minus,
         .MinusEqual,
         .Nl,

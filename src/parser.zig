@@ -174,7 +174,7 @@ pub const Parser = struct {
             parser.skipNl();
             const node = try parser.arena.create(Node.Prefix);
             node.* = .{
-                .op = .boolNot,
+                .op = .bool_not,
                 .rhs = try parser.comparisonExpr(skip_nl, allow_range, level),
                 .tok = tok,
             };
@@ -190,7 +190,7 @@ pub const Parser = struct {
                 node.* = .{
                     .lhs = lhs,
                     .tok = tok,
-                    .op = .BoolOr,
+                    .op = .bool_or,
                     .rhs = try parser.comparisonExpr(skip_nl, allow_range, level),
                 };
                 lhs = &node.base;
@@ -203,7 +203,7 @@ pub const Parser = struct {
                 node.* = .{
                     .lhs = lhs,
                     .tok = tok,
-                    .op = .BoolAnd,
+                    .op = .bool_and,
                     .rhs = try parser.comparisonExpr(skip_nl, allow_range, level),
                 };
                 lhs = &node.base;
@@ -231,13 +231,13 @@ pub const Parser = struct {
                     .lhs = lhs,
                     .tok = tok,
                     .op = switch (id) {
-                        .LArr => .LessThan,
-                        .LArrEqual => .LessThanEqual,
-                        .RArr => .GreaterThan,
-                        .RArrEqual => .GreaterThanEqual,
-                        .EqualEqual => .Equal,
-                        .BangEqual => .NotEqual,
-                        .Keyword_in => .In,
+                        .LArr => .less_than,
+                        .LArrEqual => .less_than_equal,
+                        .RArr => .greater_than,
+                        .RArrEqual => .greater_than_equal,
+                        .EqualEqual => .equal,
+                        .BangEqual => .not_equal,
+                        .Keyword_in => .in,
                         else => unreachable,
                     },
                     .rhs = try parser.rangeExpr(skip_nl, allow_range, level),
@@ -328,7 +328,7 @@ pub const Parser = struct {
                 node.* = .{
                     .lhs = lhs,
                     .tok = tok,
-                    .op = .BitAnd,
+                    .op = .bit_and,
                     .rhs = try parser.shiftExpr(skip_nl, allow_range, level),
                 };
                 lhs = &node.base;
@@ -343,7 +343,7 @@ pub const Parser = struct {
                 node.* = .{
                     .lhs = lhs,
                     .tok = tok,
-                    .op = .BitOr,
+                    .op = .bit_or,
                     .rhs = try parser.shiftExpr(skip_nl, allow_range, level),
                 };
                 lhs = &node.base;
@@ -358,7 +358,7 @@ pub const Parser = struct {
                 node.* = .{
                     .lhs = lhs,
                     .tok = tok,
-                    .op = .BitXor,
+                    .op = .bit_xor,
                     .rhs = try parser.shiftExpr(skip_nl, allow_range, level),
                 };
                 lhs = &node.base;
@@ -403,7 +403,7 @@ pub const Parser = struct {
                 node.* = .{
                     .lhs = lhs,
                     .tok = tok,
-                    .op = if (id == .LArrArr) .LShift else .RShift,
+                    .op = if (id == .LArrArr) .l_shift else .r_shift,
                     .rhs = try parser.addExpr(skip_nl, allow_range, level),
                 };
                 return &node.base;
@@ -415,7 +415,7 @@ pub const Parser = struct {
         }
     }
 
-    /// add_expr : mul_expr (("-" | "+") mul_expr)*
+    /// add_expr : mul_expr (("-" | "+" | "++") mul_expr)*
     fn addExpr(parser: *Parser, skip_nl: bool, allow_range: bool, level: u16) Error!*Node {
         var lhs = try parser.mulExpr(skip_nl, allow_range, level);
 
@@ -423,13 +423,18 @@ pub const Parser = struct {
             const tok = parser.nextToken(skip_nl);
             const id = parser.tokens[tok].id;
             switch (id) {
-                .Minus, .Plus => {
+                .Minus, .Plus, .PlusPlus => {
                     parser.skipNl();
                     const node = try parser.arena.create(Node.Infix);
                     node.* = .{
                         .lhs = lhs,
                         .tok = tok,
-                        .op = if (id == .Minus) .Sub else .Add,
+                        .op = switch (id) {
+                            .Minus => .sub,
+                            .Plus => .add,
+                            .PlusPlus => .append,
+                            else => unreachable,
+                        },
                         .rhs = try parser.mulExpr(skip_nl, allow_range, level),
                     };
                     lhs = &node.base;
@@ -460,10 +465,10 @@ pub const Parser = struct {
                         .lhs = lhs,
                         .tok = tok,
                         .op = switch (id) {
-                            .Asterisk => .Mul,
-                            .Slash => .Div,
-                            .SlashSlash => .DivFloor,
-                            .Percent => .Mod,
+                            .Asterisk => .mul,
+                            .Slash => .div,
+                            .SlashSlash => .div_floor,
+                            .Percent => .mod,
                             else => unreachable,
                         },
                         .rhs = try parser.castExpr(skip_nl, allow_range, level),
@@ -512,7 +517,7 @@ pub const Parser = struct {
                         .Keyword_try => .Try,
                         .Minus => .minus,
                         .Plus => .plus,
-                        .Tilde => .bitNot,
+                        .Tilde => .bit_not,
                         else => unreachable,
                     },
                     .tok = tok,
@@ -537,7 +542,7 @@ pub const Parser = struct {
             node.* = .{
                 .lhs = primary,
                 .tok = tok,
-                .op = .Pow,
+                .op = .pow,
                 .rhs = try parser.powerExpr(skip_nl, allow_range, level),
             };
             return &node.base;
@@ -612,19 +617,19 @@ pub const Parser = struct {
                     .lhs = lhs,
                     .tok = tok,
                     .op = switch (id) {
-                        .Equal => .Assign,
-                        .PlusEqual => .AddAssign,
-                        .MinusEqual => .SubAssign,
-                        .AsteriskEqual => .MulAssign,
-                        .AsteriskAsteriskEqual => .PowAssign,
-                        .SlashEqual => .DivAssign,
-                        .SlashSlashEqual => .DivFloorAssign,
-                        .PercentEqual => .ModAssign,
-                        .LArrArrEqual => .LShiftAssign,
-                        .RArrArrEqual => .RShiftAssign,
-                        .AmpersandEqual => .BitAndAssign,
-                        .PipeEqual => .BitOrAssign,
-                        .CaretEqual => .BitXOrAssign,
+                        .Equal => .assign,
+                        .PlusEqual => .add_assign,
+                        .MinusEqual => .sub_assign,
+                        .AsteriskEqual => .mul_assign,
+                        .AsteriskAsteriskEqual => .pow_assign,
+                        .SlashEqual => .div_assign,
+                        .SlashSlashEqual => .div_floor_assign,
+                        .PercentEqual => .mod_assign,
+                        .LArrArrEqual => .l_shift_assign,
+                        .RArrArrEqual => .r_shift_assign,
+                        .AmpersandEqual => .bit_and_assign,
+                        .PipeEqual => .bit_or_assign,
+                        .CaretEqual => .bit_x_or_assign,
                         else => unreachable,
                     },
                     .rhs = try parser.blockOrExpr(skip_nl, allow_range, level),

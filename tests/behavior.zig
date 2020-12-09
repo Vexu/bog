@@ -1,3 +1,30 @@
+test "concatting" {
+    expectOutput(
+        \\let x = "foo"
+        \\return x ++ "bar" ++ "baz"
+    ,
+        \\"foobarbaz"
+    );
+    expectOutput(
+        \\let x = []
+        \\return x ++ 1 ++ "bar" ++ 2
+    ,
+        \\[1, "bar", 2]
+    );
+    expectOutput(
+        \\return [[1] as str]
+    ,
+        \\["[1]"]
+    );
+    expectOutput(
+        \\let x = "foo"
+        \\x ++ "bar" ++ "baz"
+        \\return x
+    ,
+        \\"foobarbaz"
+    );
+}
+
 test "comma decimals" {
     expectOutput(
         \\return 0,5 + 0,2;

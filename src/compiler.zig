@@ -813,9 +813,9 @@ pub const Compiler = struct {
         const should_discard = switch (last.id) {
             .Block => true,
             .Infix => switch (@fieldParentPtr(Node.Infix, "base", last).op) {
-                .Assign, .AddAssign, .SubAssign, .MulAssign, .PowAssign, // -
-                .DivAssign, .DivFloorAssign, .ModAssign, .LShiftAssign, // -
-                .RShiftAssign, .BitAndAssign, .BitOrAssign, .BitXOrAssign => true,
+                .assign, .add_assign, .sub_assign, .mul_assign, .pow_assign, // -
+                .div_assign, .div_floor_assign, .mod_assign, .l_shift_assign, // -
+                .r_shift_assign, .bit_and_assign, .bit_or_assign, .bit_x_or_assign => true,
                 else => false,
             },
             else => false,
@@ -1240,8 +1240,8 @@ pub const Compiler = struct {
 
         if (r_val.isRt()) {
             const op_id: bog.Op = switch (node.op) {
-                .boolNot => .bool_not_double,
-                .bitNot => .bit_not_double,
+                .bool_not => .bool_not_double,
+                .bit_not => .bit_not_double,
                 .minus => .negate_double,
                 // TODO should unary + be a no-op
                 .plus => return r_val,
@@ -1255,8 +1255,8 @@ pub const Compiler = struct {
             return sub_res.toVal();
         }
         const ret_val: Value = switch (node.op) {
-            .boolNot => .{ .Bool = !try r_val.getBool(self, node.rhs.firstToken()) },
-            .bitNot => .{ .int = ~try r_val.getInt(self, node.rhs.firstToken()) },
+            .bool_not => .{ .Bool = !try r_val.getBool(self, node.rhs.firstToken()) },
+            .bit_not => .{ .int = ~try r_val.getInt(self, node.rhs.firstToken()) },
             .minus => blk: {
                 try r_val.checkNum(self, node.rhs.firstToken());
                 if (r_val == .int) {
@@ -1457,49 +1457,82 @@ pub const Compiler = struct {
     fn genInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
         try res.notLval(self, node.tok);
         switch (node.op) {
-            .BoolOr,
-            .BoolAnd,
+            .bool_or,
+            .bool_and,
             => return self.genBoolInfix(node, res),
 
-            .LessThan,
-            .LessThanEqual,
-            .GreaterThan,
-            .GreaterThanEqual,
-            .Equal,
-            .NotEqual,
-            .In,
+            .less_than,
+            .less_than_equal,
+            .greater_than,
+            .greater_than_equal,
+            .equal,
+            .not_equal,
+            .in,
             => return self.genComparisonInfix(node, res),
 
-            .BitAnd,
-            .BitOr,
-            .BitXor,
-            .LShift,
-            .RShift,
+            .bit_and,
+            .bit_or,
+            .bit_xor,
+            .l_shift,
+            .r_shift,
             => return self.genIntInfix(node, res),
 
-            .Add,
-            .Sub,
-            .Mul,
-            .Div,
-            .DivFloor,
-            .Mod,
-            .Pow,
+            .add,
+            .sub,
+            .mul,
+            .div,
+            .div_floor,
+            .mod,
+            .pow,
             => return self.genNumericInfix(node, res),
 
-            .Assign,
-            .AddAssign,
-            .SubAssign,
-            .MulAssign,
-            .PowAssign,
-            .DivAssign,
-            .DivFloorAssign,
-            .ModAssign,
-            .LShiftAssign,
-            .RShiftAssign,
-            .BitAndAssign,
-            .BitOrAssign,
-            .BitXOrAssign,
+            .assign,
+            .add_assign,
+            .sub_assign,
+            .mul_assign,
+            .pow_assign,
+            .div_assign,
+            .div_floor_assign,
+            .mod_assign,
+            .l_shift_assign,
+            .r_shift_assign,
+            .bit_and_assign,
+            .bit_or_assign,
+            .bit_x_or_assign,
             => return self.genAssignInfix(node, res),
+
+            .append => {
+                var l_val = try self.genNodeNonEmpty(node.lhs, .value);
+                var r_val = try self.genNodeNonEmpty(node.rhs, .value);
+
+                if (l_val.isRt() or r_val.isRt()) {
+                    const l_reg = try l_val.toRt(self);
+                    const r_reg = try r_val.toRt(self);
+                    defer r_val.free(self, r_reg);
+
+                    try self.emitDouble(.append_double, l_reg, r_reg);
+                    if (res == .discard) {
+                        return Value{ .none = {} };
+                    } else if (res == .rt) {
+                        try self.emitDouble(.move_double, res.rt, l_reg);
+                        return Value{ .rt = res.rt };
+                    } else {
+                        return Value{ .rt = l_reg };
+                    }
+                }
+
+                if (res == .discard) {
+                    return Value{ .none = {} };
+                }
+
+                const l_str = try l_val.getStr(self, node.lhs.firstToken());
+                const r_str = try r_val.getStr(self, node.rhs.firstToken());
+
+                const concatted = Value{
+                    .str = try mem.concat(self.arena, u8, &[_][]const u8{ l_str, r_str }),
+                };
+                return concatted.maybeRt(self, res);
+            },
         }
     }
 
@@ -1509,7 +1542,7 @@ pub const Compiler = struct {
         }
         const r_val = try self.genNodeNonEmpty(node.rhs, .value);
 
-        if (node.op == .Assign) {
+        if (node.op == .assign) {
             const l_val = try self.genNode(node.lhs, .{ .lval = .{ .assign = &r_val } });
             std.debug.assert(l_val == .empty);
             return l_val;
@@ -1517,20 +1550,20 @@ pub const Compiler = struct {
 
         const l_val = try self.genNode(node.lhs, .{ .lval = .aug_assign });
         if (!r_val.isRt()) switch (node.op) {
-            .AddAssign,
-            .SubAssign,
-            .MulAssign,
-            .PowAssign,
-            .DivAssign,
-            .DivFloorAssign,
-            .ModAssign,
+            .add_assign,
+            .sub_assign,
+            .mul_assign,
+            .pow_assign,
+            .div_assign,
+            .div_floor_assign,
+            .mod_assign,
             => try r_val.checkNum(self, node.rhs.firstToken()),
 
-            .LShiftAssign,
-            .RShiftAssign,
-            .BitAndAssign,
-            .BitOrAssign,
-            .BitXOrAssign,
+            .l_shift_assign,
+            .r_shift_assign,
+            .bit_and_assign,
+            .bit_or_assign,
+            .bit_x_or_assign,
             => _ = try r_val.getInt(self, node.rhs.firstToken()),
             else => unreachable,
         };
@@ -1539,18 +1572,18 @@ pub const Compiler = struct {
         defer r_val.free(self, reg);
 
         try self.emitTriple(switch (node.op) {
-            .AddAssign => .add_triple,
-            .SubAssign => .sub_triple,
-            .MulAssign => .mul_triple,
-            .PowAssign => .pow_triple,
-            .DivAssign => .div_triple,
-            .DivFloorAssign => .div_floor_triple,
-            .ModAssign => .mod_triple,
-            .LShiftAssign => .l_shift_triple,
-            .RShiftAssign => .r_shift_triple,
-            .BitAndAssign => .bit_and_triple,
-            .BitOrAssign => .bit_or_triple,
-            .BitXOrAssign => .bit_xor_triple,
+            .add_assign => .add_triple,
+            .sub_assign => .sub_triple,
+            .mul_assign => .mul_triple,
+            .pow_assign => .pow_triple,
+            .div_assign => .div_triple,
+            .div_floor_assign => .div_floor_triple,
+            .mod_assign => .mod_triple,
+            .l_shift_assign => .l_shift_triple,
+            .r_shift_assign => .r_shift_triple,
+            .bit_and_assign => .bit_and_triple,
+            .bit_or_assign => .bit_or_triple,
+            .bit_x_or_assign => .bit_xor_triple,
             else => unreachable,
         }, l_val.getRt(), l_val.getRt(), reg);
         return Value.empty;
@@ -1575,13 +1608,13 @@ pub const Compiler = struct {
             }
 
             try self.emitTriple(switch (node.op) {
-                .Add => .add_triple,
-                .Sub => .sub_triple,
-                .Mul => .mul_triple,
-                .Div => .div_triple,
-                .DivFloor => .div_floor_triple,
-                .Mod => .mod_triple,
-                .Pow => .pow_triple,
+                .add => .add_triple,
+                .sub => .sub_triple,
+                .mul => .mul_triple,
+                .div => .div_triple,
+                .div_floor => .div_floor_triple,
+                .mod => .mod_triple,
+                .pow => .pow_triple,
                 else => unreachable,
             }, sub_res.rt, l_reg, r_reg);
             return sub_res.toVal();
@@ -1591,38 +1624,38 @@ pub const Compiler = struct {
 
         // TODO makeRuntime if overflow
         const ret_val = switch (node.op) {
-            .Add => blk: {
+            .add => blk: {
                 if (needNum(l_val, r_val)) {
                     break :blk Value{ .num = l_val.getNum() + r_val.getNum() };
                 }
                 break :blk Value{ .int = l_val.int + r_val.int };
             },
-            .Sub => blk: {
+            .sub => blk: {
                 if (needNum(l_val, r_val)) {
                     break :blk Value{ .num = l_val.getNum() - r_val.getNum() };
                 }
                 break :blk Value{ .int = l_val.int - r_val.int };
             },
-            .Mul => blk: {
+            .mul => blk: {
                 if (needNum(l_val, r_val)) {
                     break :blk Value{ .num = l_val.getNum() * r_val.getNum() };
                 }
                 break :blk Value{ .int = l_val.int * r_val.int };
             },
-            .Div => Value{ .num = l_val.getNum() / r_val.getNum() },
-            .DivFloor => blk: {
+            .div => Value{ .num = l_val.getNum() / r_val.getNum() },
+            .div_floor => blk: {
                 if (needNum(l_val, r_val)) {
                     break :blk Value{ .int = @floatToInt(i64, @divFloor(l_val.getNum(), r_val.getNum())) };
                 }
                 break :blk Value{ .int = @divFloor(l_val.int, r_val.int) };
             },
-            .Mod => blk: {
+            .mod => blk: {
                 if (needNum(l_val, r_val)) {
                     break :blk Value{ .num = @rem(l_val.getNum(), r_val.getNum()) };
                 }
                 break :blk Value{ .int = std.math.rem(i64, l_val.int, r_val.int) catch @panic("TODO") };
             },
-            .Pow => blk: {
+            .pow => blk: {
                 if (needNum(l_val, r_val)) {
                     break :blk Value{ .num = std.math.pow(f64, l_val.getNum(), r_val.getNum()) };
                 }
@@ -1652,13 +1685,13 @@ pub const Compiler = struct {
             }
 
             try self.emitTriple(switch (node.op) {
-                .LessThan => .less_than_triple,
-                .LessThanEqual => .less_than_equal_triple,
-                .GreaterThan => .greater_than_triple,
-                .GreaterThanEqual => .greater_than_equal_triple,
-                .Equal => .equal_triple,
-                .NotEqual => .not_equal_triple,
-                .In => .in_triple,
+                .less_than => .less_than_triple,
+                .less_than_equal => .less_than_equal_triple,
+                .greater_than => .greater_than_triple,
+                .greater_than_equal => .greater_than_equal_triple,
+                .equal => .equal_triple,
+                .not_equal => .not_equal_triple,
+                .in => .in_triple,
                 else => unreachable,
             }, sub_res.rt, l_reg, r_reg);
             return sub_res.toVal();
@@ -1666,7 +1699,7 @@ pub const Compiler = struct {
 
         // order comparisons are only allowed on numbers
         switch (node.op) {
-            .In, .Equal, .NotEqual => {},
+            .in, .equal, .not_equal => {},
             else => {
                 try l_val.checkNum(self, node.lhs.firstToken());
                 try r_val.checkNum(self, node.rhs.firstToken());
@@ -1674,31 +1707,31 @@ pub const Compiler = struct {
         }
 
         const ret_val: Value = switch (node.op) {
-            .LessThan => .{
+            .less_than => .{
                 .Bool = if (needNum(l_val, r_val))
                     l_val.getNum() < r_val.getNum()
                 else
                     l_val.int < r_val.int,
             },
-            .LessThanEqual => .{
+            .less_than_equal => .{
                 .Bool = if (needNum(l_val, r_val))
                     l_val.getNum() <= r_val.getNum()
                 else
                     l_val.int <= r_val.int,
             },
-            .GreaterThan => .{
+            .greater_than => .{
                 .Bool = if (needNum(l_val, r_val))
                     l_val.getNum() > r_val.getNum()
                 else
                     l_val.int > r_val.int,
             },
-            .GreaterThanEqual => .{
+            .greater_than_equal => .{
                 .Bool = if (needNum(l_val, r_val))
                     l_val.getNum() >= r_val.getNum()
                 else
                     l_val.int >= r_val.int,
             },
-            .Equal, .NotEqual => blk: {
+            .equal, .not_equal => blk: {
                 const eql = switch (l_val) {
                     .none => |a_val| switch (r_val) {
                         .none => true,
@@ -1726,10 +1759,10 @@ pub const Compiler = struct {
                 };
                 // broken LLVM module found: Terminator found in the middle of a basic block!
                 // break :blk Value{ .Bool = if (node.op == .Equal) eql else !eql };
-                const copy = if (node.op == .Equal) eql else !eql;
+                const copy = if (node.op == .equal) eql else !eql;
                 break :blk Value{ .Bool = copy };
             },
-            .In => .{
+            .in => .{
                 .Bool = switch (l_val) {
                     .str => mem.indexOf(
                         u8,
@@ -1763,7 +1796,7 @@ pub const Compiler = struct {
             }
 
             try self.emitTriple(
-                if (node.op == .BoolAnd) .bool_and_triple else .bool_or_triple,
+                if (node.op == .bool_and) .bool_and_triple else .bool_or_triple,
                 sub_res.rt,
                 l_reg,
                 r_reg,
@@ -1774,7 +1807,7 @@ pub const Compiler = struct {
         const r_bool = try r_val.getBool(self, node.rhs.firstToken());
 
         const ret_val = Value{
-            .Bool = if (node.op == .BoolAnd)
+            .Bool = if (node.op == .bool_and)
                 l_bool and r_bool
             else
                 l_bool or r_bool,
@@ -1798,11 +1831,11 @@ pub const Compiler = struct {
             }
 
             try self.emitTriple(switch (node.op) {
-                .BitAnd => .bit_and_triple,
-                .BitOr => .bit_or_triple,
-                .BitXor => .bit_xor_triple,
-                .LShift => .l_shift_triple,
-                .RShift => .r_shift_triple,
+                .bit_and => .bit_and_triple,
+                .bit_or => .bit_or_triple,
+                .bit_xor => .bit_xor_triple,
+                .l_shift => .l_shift_triple,
+                .r_shift => .r_shift_triple,
                 else => unreachable,
             }, sub_res.rt, l_reg, r_reg);
             return sub_res.toVal();
@@ -1811,16 +1844,16 @@ pub const Compiler = struct {
         const r_int = try r_val.getInt(self, node.rhs.firstToken());
 
         const ret_val: Value = switch (node.op) {
-            .BitAnd => .{ .int = l_int & r_int },
-            .BitOr => .{ .int = l_int | r_int },
-            .BitXor => .{ .int = l_int ^ r_int },
-            .LShift => blk: {
+            .bit_and => .{ .int = l_int & r_int },
+            .bit_or => .{ .int = l_int | r_int },
+            .bit_xor => .{ .int = l_int ^ r_int },
+            .l_shift => blk: {
                 if (r_int < 0)
                     return self.reportErr("shift by negative amount", node.rhs.firstToken());
                 const val = if (r_int > std.math.maxInt(u6)) 0 else l_int << @intCast(u6, r_int);
                 break :blk Value{ .int = val };
             },
-            .RShift => blk: {
+            .r_shift => blk: {
                 if (r_int < 0)
                     return self.reportErr("shift by negative amount", node.rhs.firstToken());
                 const val = if (r_int > std.math.maxInt(u6)) 0 else l_int >> @intCast(u6, r_int);
