@@ -1,3 +1,20 @@
+test "boolean short-circuit" {
+    expectOutput(
+        \\const foo = fn() true
+        \\const bar = fn() error("should not be evaluated")
+        \\return foo() or bar()
+    ,
+        \\true
+    );
+    expectOutput(
+        \\const foo = fn() false
+        \\const bar = fn() error("should not be evaluated")
+        \\return foo() and bar()
+    ,
+        \\false
+    );
+}
+
 test "match" {
     expectOutput(
         \\const getNum = fn (arg)

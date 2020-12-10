@@ -1756,41 +1756,30 @@ pub const Compiler = struct {
 
     fn genBoolInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
         var l_val = try self.genNodeNonEmpty(node.lhs, .value);
-        var r_val = try self.genNodeNonEmpty(node.rhs, .value);
 
-        if (l_val.isRt() or r_val.isRt()) {
-            const sub_res = res.toRt(self);
-
-            // TODO short-circuit evaluation
-            // const jump_op = if (node.op == .BoolAnd) .JumpFalse else bog.Op.JumpTrue;
-            // try self.emitInstruction(jump_op, .{l_val.getRt(), @as(u32, 0)});
-            // const addr = self.code.len;
-            const l_reg = try l_val.toRt(self);
-            const r_reg = try r_val.toRt(self);
-            defer {
-                r_val.free(self, r_reg);
-                l_val.free(self, l_reg);
+        if (!l_val.isRt()) {
+            const l_bool = try l_val.getBool(self, node.lhs.firstToken());
+            if (node.op == .bool_and) {
+                if (!l_bool) return l_val;
+            } else {
+                if (l_bool) return l_val;
             }
-
-            try self.emitTriple(
-                if (node.op == .bool_and) .bool_and_triple else .bool_or_triple,
-                sub_res.rt,
-                l_reg,
-                r_reg,
-            );
-            return sub_res.toVal();
+            return self.genNodeNonEmpty(node.rhs, res);
         }
-        const l_bool = try l_val.getBool(self, node.lhs.firstToken());
-        const r_bool = try r_val.getBool(self, node.rhs.firstToken());
 
-        const ret_val = Value{
-            .Bool = if (node.op == .bool_and)
-                l_bool and r_bool
-            else
-                l_bool or r_bool,
-        };
+        const sub_res = res.toRt(self);
+        const l_reg = l_val.getRt();
+        try self.emitDouble(.move_double, sub_res.rt, l_reg);
 
-        return ret_val.maybeRt(self, res);
+        const rhs_skip = if (node.op == .bool_and)
+            try self.emitJump(.jump_false, l_reg)
+        else
+            try self.emitJump(.jump_true, l_reg);
+
+        _ = try self.genNodeNonEmpty(node.rhs, sub_res);
+        self.finishJump(rhs_skip);
+
+        return sub_res.toVal();
     }
 
     fn genIntInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
