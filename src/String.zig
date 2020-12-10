@@ -81,8 +81,8 @@ pub fn dump(str: String, writer: anytype) !void {
 
 pub fn get(str: *const String, vm: *Vm, index: *const Value, res: *?*Value) Vm.Error!void {
     switch (index.*) {
-        .int => return vm.reportErr("TODO get str"),
-        .range => return vm.reportErr("TODO get with ranges"),
+        .int => return vm.fatal("TODO get str"),
+        .range => return vm.fatal("TODO get with ranges"),
         .str => |*s| {
             if (res.* == null) {
                 res.* = try vm.gc.alloc();
@@ -94,7 +94,7 @@ pub fn get(str: *const String, vm: *Vm, index: *const Value, res: *?*Value) Vm.E
                 res.* = try Value.zigToBog(vm, struct {
                     fn append(_vm: *Vm, val: String) !void {
                         if (_vm.last_get.* != .str)
-                            return _vm.reportErr("expected string");
+                            return _vm.fatal("expected string");
 
                         try _vm.last_get.str.append(_vm.gc.gpa, val.data);
                     }
@@ -103,7 +103,7 @@ pub fn get(str: *const String, vm: *Vm, index: *const Value, res: *?*Value) Vm.E
                 res.* = try Value.zigToBog(vm, struct {
                     fn format(_vm: *Vm, args: []const *Value) !*Value {
                         if (_vm.last_get.* != .str)
-                            return _vm.reportErr("expected string");
+                            return _vm.fatal("expected string");
 
                         return _vm.last_get.str.format(_vm, args);
                     }
@@ -112,21 +112,21 @@ pub fn get(str: *const String, vm: *Vm, index: *const Value, res: *?*Value) Vm.E
                 res.* = try Value.zigToBog(vm, struct {
                     fn join(_vm: *Vm, args: []const *Value) !*Value {
                         if (_vm.last_get.* != .str)
-                            return _vm.reportErr("expected string");
+                            return _vm.fatal("expected string");
 
                         return _vm.last_get.str.join(_vm, args);
                     }
                 }.join);
             } else {
-                return vm.reportErr("no such property");
+                return vm.fatal("no such property");
             }
         },
-        else => return vm.reportErr("invalid index type"),
+        else => return vm.fatal("invalid index type"),
     }
 }
 
 pub fn set(str: *String, vm: *Vm, index: *const Value, new_val: *const Value) Vm.Error!void {
-    return vm.reportErr("TODO set string");
+    return vm.fatal("TODO set string");
 }
 
 pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {
@@ -138,25 +138,25 @@ pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {
         else if (mem.eql(u8, str.data, "false"))
             return &Value.False
         else
-            return vm.reportErr("cannot cast string to bool");
+            return vm.errorVal(Value.string("cannot cast string to bool"));
     }
 
     const new_val = try vm.gc.alloc();
     new_val.* = switch (type_id) {
         .int => .{
             .int = @import("util.zig").parseInt(str.data) catch
-                return vm.reportErr("invalid cast to int"),
+                return vm.errorVal(Value.string("cannot cast string to int")),
         },
         .num => .{
             .num = @import("util.zig").parseNum(str.data) catch
-                return vm.reportErr("invalid cast to num"),
+                return vm.errorVal(Value.string("cannot cast string to num")),
         },
         .bool => unreachable,
         .str => unreachable, // already string
         .tuple,
         .map,
         .list,
-        => return vm.reportErr("TODO more casts from string"),
+        => return vm.fatal("TODO more casts from string"),
         else => unreachable,
     };
     return new_val;
@@ -224,7 +224,7 @@ pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
                 try w.writeByte(c);
             } else {
                 if (arg_i >= args.len) {
-                    return vm.reportErr("too few arguments");
+                    return vm.errorVal(Value.string("too few arguments"));
                 }
                 format_start = i;
                 state = .format;
@@ -244,7 +244,7 @@ pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
                 switch (fmt_type) {
                     'x', 'X' => {
                         if (args[arg_i].* != .int) {
-                            return vm.reportErr("expected int");
+                            return vm.typeError(.int, args[arg_i].*);
                         }
                         try std.fmt.formatInt(args[arg_i].int, 16, fmt[0] == 'X', options, w);
                     },
@@ -254,7 +254,7 @@ pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
                         try args[arg_i].dump(w, default_dump_depth);
                     },
                     else => {
-                        return vm.reportErr("unknown format specifier");
+                        return vm.errorVal(Value.string("unknown format specifier"));
                     },
                 }
 
@@ -264,7 +264,7 @@ pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
         }
     }
     if (arg_i != args.len) {
-        return vm.reportErr("unused arguments");
+        return vm.errorVal(Value.string("unused arguments"));
     }
 
     const ret = try vm.gc.alloc();
@@ -282,7 +282,7 @@ pub fn join(str: String, vm: *Vm, args: []const *Value) !*Value {
             try b.append(str.data);
         }
         if (arg.* != .str) {
-            return vm.reportErr("expected string");
+            return vm.typeError(.str, arg.*);
         }
         try b.append(arg.str.data);
     }
