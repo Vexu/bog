@@ -65,7 +65,7 @@ pub fn eql(a: String, b: String) bool {
     return mem.eql(u8, a.data, b.data);
 }
 
-pub fn print(str: String, writer: anytype) !void {
+pub fn dump(str: String, writer: anytype) !void {
     try writer.writeByte('"');
     try std.fmt.formatZigEscapes(str.data, .{}, writer);
     try writer.writeByte('"');
@@ -100,6 +100,15 @@ pub fn get(str: *const String, vm: *Vm, index: *const Value, res: *?*Value) Vm.E
                         return _vm.last_get.str.format(_vm, args);
                     }
                 }.format);
+            } else if (mem.eql(u8, s.data, "join")) {
+                res.* = try Value.zigToBog(vm, struct {
+                    fn join(_vm: *Vm, args: []const *Value) !*Value {
+                        if (_vm.last_get.* != .str)
+                            return _vm.reportErr("expected string");
+
+                        return _vm.last_get.str.join(_vm, args);
+                    }
+                }.join);
             } else {
                 return vm.reportErr("no such property");
             }
@@ -194,7 +203,9 @@ pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
     var format_start: usize = 0;
     var options = std.fmt.FormatOptions{};
 
-    for (str.data) |c, i| {
+    var i: usize = 0;
+    while (i < str.data.len) : (i += 1) {
+        const c = str.data[i];
         switch (state) {
             .start => if (c == '{') {
                 state = .brace;
@@ -210,6 +221,7 @@ pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
                 format_start = i;
                 state = .format;
                 options = .{};
+                i -= 1;
             },
             .format => if (c == '}') {
                 const fmt = str.data[format_start..i];
@@ -228,7 +240,9 @@ pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
                         }
                         try std.fmt.formatInt(args[arg_i].int, 16, fmt[0] == 'X', options, w);
                     },
-                    0 => {
+                    0 => if (args[arg_i].* == .str) {
+                        try b.append(args[arg_i].str.data);
+                    } else {
                         try args[arg_i].dump(w, default_dump_depth);
                     },
                     else => {
@@ -243,6 +257,26 @@ pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
     }
     if (arg_i != args.len) {
         return vm.reportErr("unused arguments");
+    }
+
+    const ret = try vm.gc.alloc();
+    ret.* = Value{ .str = b.finish() };
+    return ret;
+}
+
+pub fn join(str: String, vm: *Vm, args: []const *Value) !*Value {
+    var b = builder(vm.gc.gpa);
+    errdefer b.cancel();
+    try b.inner.ensureCapacity(args.len * str.data.len);
+
+    for (args) |arg, i| {
+        if (i != 0) {
+            try b.append(str.data);
+        }
+        if (arg.* != .str) {
+            return vm.reportErr("expected string");
+        }
+        try b.append(arg.str.data);
     }
 
     const ret = try vm.gc.alloc();

@@ -399,6 +399,7 @@ const Renderer = struct {
 
     fn renderComments(self: *Renderer, token: TokenIndex, writer: anytype, space: Space) !void {
         var i = token;
+        var last_token = i;
         while (true) : (i += 1) {
             switch (self.tokens[i].id) {
                 .Nl, .Indent => continue,
@@ -410,6 +411,12 @@ const Renderer = struct {
             const slice = self.source[tok.start..tok.end];
             const trimmed = std.mem.trimRight(u8, slice, " \t\r");
             if (trimmed.len == 1) continue;
+
+            if (self.lineDist(last_token, i) > 1) {
+                // insert extra new line between separate comments
+                try writer.insertNewline();
+            }
+            last_token = i;
 
             try writer.writer().writeAll(trimmed);
             try writer.insertNewline();

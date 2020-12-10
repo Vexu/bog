@@ -4,13 +4,17 @@ const Value = bog.Value;
 const Vm = bog.Vm;
 
 pub fn print(val: *Value) !void {
-    const stream = std.io.getStdOut().outStream();
-    try val.dump(stream, 4);
-    try stream.writeByte('\n');
+    const writer = std.io.getStdOut().writer();
+    if (val.* == .str) {
+        try writer.writeAll(val.str.data);
+    } else {
+        try val.dump(writer, 4);
+    }
+    try writer.writeByte('\n');
 }
 
 pub fn input(vm: *Vm, prompt: Value.String) ![]u8 {
-    try prompt.print(std.io.getStdOut().writer());
+    try std.io.getStdOut().writer().writeAll(prompt.data);
 
-    return try std.io.getStdIn().inStream().readUntilDelimiterAlloc(vm.gc.gpa, '\n', 1024 * 1024);
+    return try std.io.getStdIn().reader().readUntilDelimiterAlloc(vm.gc.gpa, '\n', 1024 * 1024);
 }

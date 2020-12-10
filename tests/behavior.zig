@@ -1,3 +1,11 @@
+test "string join" {
+    expectOutput(
+        \\return ",".join([1 as str, "bar", [2] as str])
+    ,
+        \\"1,bar,[2]"
+    );
+}
+
 test "format string" {
     expectOutput(
         \\return f"foo{255:X}bar"

@@ -337,7 +337,7 @@ pub const Value = union(Type) {
                     try writer.writeByte(')');
                 }
             },
-            .str => |s| try s.print(writer),
+            .str => |s| try s.dump(writer),
             .func => |*f| {
                 try writer.print("fn({})@0x{X}[{}]", .{ f.arg_count, f.offset, f.captures.len });
             },
