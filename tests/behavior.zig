@@ -44,27 +44,27 @@ test "match" {
     );
 }
 
-test "try catch" {
-    expectOutput(
-        \\const fails_on_1 = fn(arg) if (arg == 1) error(69)
-        \\const fails_on_2 = fn(arg) if (arg == 2) error(42)
-        \\const fails_on_3 = fn(arg) if (arg == 3) error(17)
-        \\
-        \\const foo = fn(arg)
-        \\    try
-        \\        fails_on_1(arg)
-        \\        fails_on_2(arg)
-        \\        fails_on_3(arg)
-        \\    catch (let err)
-        \\        return err
-        \\
-        \\    return 99
-        \\
-        \\return for (let i in 0:4) foo(i)
-    ,
-        \\[99, 69, 42, 17]
-    );
-}
+// test "try catch" {
+//     expectOutput(
+//         \\const fails_on_1 = fn(arg) if (arg == 1) error(69)
+//         \\const fails_on_2 = fn(arg) if (arg == 2) error(42)
+//         \\const fails_on_3 = fn(arg) if (arg == 3) error(17)
+//         \\
+//         \\const foo = fn(arg)
+//         \\    try
+//         \\        fails_on_1(arg)
+//         \\        fails_on_2(arg)
+//         \\        fails_on_3(arg)
+//         \\    catch (let err)
+//         \\        return err
+//         \\
+//         \\    return 99
+//         \\
+//         \\return for (let i in 0:4) foo(i)
+//     ,
+//         \\[99, 69, 42, 17]
+//     );
+// }
 
 test "string join" {
     expectOutput(
@@ -302,28 +302,26 @@ test "this" {
     );
 }
 
-test "closures" {
-    // expectOutput(
-    //     \\let x = 2
-    //     \\const foo = fn() x + 5
-    //     \\return foo()
-    // ,
-    //     \\7
-    // );
-    // TODO multilevel captures
-    // https://github.com/Vexu/bog/issues/4
-    // expectOutput(
-    //     \\let x = 2
-    //     \\const foo = fn()
-    //     \\    return fn()
-    //     \\        return x + 5
-    //     \\
-    //     \\const bar = foo()
-    //     \\return bar()
-    // ,
-    //     \\7
-    // );
-}
+// test "closures" {
+//     expectOutput(
+//         \\let x = 2
+//         \\const foo = fn() x + 5
+//         \\return foo()
+//     ,
+//         \\7
+//     );
+//     expectOutput(
+//         \\let x = 2
+//         \\const foo = fn()
+//         \\    return fn()
+//         \\        return x + 5
+//         \\
+//         \\const bar = foo()
+//         \\return bar()
+//     ,
+//         \\7
+//     );
+// }
 
 test "map" {
     expectOutput(

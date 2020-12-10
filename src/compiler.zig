@@ -130,7 +130,7 @@ pub const Compiler = struct {
             while (i < 256) : (i += 1) {
                 if (self.regs.get(i) == 0) {
                     self.regs.set(i, 1);
-                    self.free_index = @truncate(u8, i);
+                    self.free_index = @truncate(u8, i + 1);
                     return @truncate(u8, i);
                 }
             }
@@ -144,18 +144,33 @@ pub const Compiler = struct {
         }
 
         fn regAllocN(self: *Fn, n: usize) !RegRef {
-            if (self.free_index + n >= 256) {
-                @panic("TODO RanOutOfRegisters");
+            var i = self.free_index;
+            outer: while (i + n < 256) : (i += 1) {
+                var j: usize = 0;
+                while (j < n) : (j += 1) {
+                    if (self.regs.get(i + j) == 1) continue :outer;
+                }
+                j = 0;
+                while (j < n) : (j += 1) {
+                    self.regs.set(i + j, 1);
+                }
+                return i;
             }
-            // TODO there may be used regs after self.free_index
-            return self.free_index;
+            @panic("TODO RanOutOfRegisters");
+        }
+
+        fn regFreeN(self: *Fn, start: usize, n: usize) void {
+            var i: usize = 0;
+            while (i < n) : (i += 1) {
+                self.regs.set(start + i, 0);
+            }
         }
     };
 
     const Symbol = struct {
         name: []const u8,
         // val: Value,
-        reg: u8,
+        reg: RegRef,
     };
 
     const Loop = struct {
@@ -290,6 +305,21 @@ pub const Compiler = struct {
                 else => {},
             }
         }
+    }
+
+    fn clearScopes(self: *Compiler, scope_count: usize) void {
+        var i = self.scopes.items.len;
+        while (i != scope_count) {
+            i -= 1;
+            const scope = self.scopes.items[i];
+            switch (scope) {
+                .constant => |sym| self.func.regFree(sym.reg),
+                .mut => |sym| self.func.regFree(sym.reg),
+                .try_catch, .loop => {},
+                else => unreachable,
+            }
+        }
+        self.scopes.items.len = scope_count;
     }
 
     fn emitSingle(self: *Compiler, op: bog.Op, arg: RegRef) !void {
@@ -638,7 +668,7 @@ pub const Compiler = struct {
         // destructure parameters
         for (node.params) |param| {
             // we checked that there are less than max_params params
-            const reg = func.regAlloc() catch unreachable;
+            const reg = try func.regAlloc();
             try self.genLval(param, .{
                 .mut = &Value{ .rt = reg },
             });
@@ -688,8 +718,8 @@ pub const Compiler = struct {
     }
 
     fn genBlock(self: *Compiler, node: *Node.Block, res: Result) Error!Value {
-        const scopes = self.scopes.items.len;
-        defer self.scopes.items.len = scopes;
+        const scope_count = self.scopes.items.len;
+        defer self.clearScopes(scope_count);
 
         for (node.stmts) |stmt, i| {
             try self.addLineInfo(stmt);
@@ -712,7 +742,7 @@ pub const Compiler = struct {
     }
 
     fn genIf(self: *Compiler, node: *Node.If, res: Result) Error!Value {
-        const scopes = self.scopes.items.len;
+        const scope_count = self.scopes.items.len;
         var if_skip: usize = undefined;
 
         const cond_val = try self.genNodeNonEmpty(node.cond, .value);
@@ -762,7 +792,7 @@ pub const Compiler = struct {
 
         self.finishJump(if_skip);
         // end capture scope
-        self.scopes.items.len = scopes;
+        self.clearScopes(scope_count);
 
         if (node.else_body) |some| {
             const else_val = try self.genNode(some, sub_res);
@@ -839,8 +869,8 @@ pub const Compiler = struct {
             .rt => |reg| try self.createListComprehension(reg),
         };
 
-        const scopes = self.scopes.items.len;
-        defer self.scopes.items.len = scopes;
+        const scope_count = self.scopes.items.len;
+        defer self.clearScopes(scope_count);
 
         var loop = Loop{
             .breaks = Loop.BreakList.init(self.strings.allocator),
@@ -915,8 +945,8 @@ pub const Compiler = struct {
             .rt => |reg| try self.createListComprehension(reg),
         };
 
-        const scopes = self.scopes.items.len;
-        defer self.scopes.items.len = scopes;
+        const scope_count = self.scopes.items.len;
+        defer self.clearScopes(scope_count);
 
         var loop = Loop{
             .breaks = Loop.BreakList.init(self.strings.allocator),
@@ -1147,7 +1177,10 @@ pub const Compiler = struct {
             return self.reportErr("invalid left hand side to suffix op", node.lhs.firstToken());
         }
         const l_reg = try lhs_val.toRt(self);
-        defer lhs_val.free(self, l_reg);
+        defer if (node.op == .call) {
+            // member access and subscript will set `this` so we can't free l_reg
+            lhs_val.free(self, l_reg);
+        };
 
         const index_val = switch (node.op) {
             .call => |args| {
@@ -1155,7 +1188,6 @@ pub const Compiler = struct {
                     return self.reportErr("too many arguments", node.l_tok);
                 }
 
-                const sub_res = try res.toRt(self);
                 var start = try self.func.regAllocN(args.len);
 
                 var i = start;
@@ -1163,7 +1195,9 @@ pub const Compiler = struct {
                     _ = try self.genNode(arg, .{ .rt = i });
                     i += 1;
                 }
+                self.func.regFreeN(start, args.len);
 
+                const sub_res = try res.toRt(self);
                 try self.func.code.append(.{
                     .call = .{
                         .res = sub_res.rt,
@@ -1186,13 +1220,9 @@ pub const Compiler = struct {
         const index_reg = try index_val.toRt(self);
         defer index_val.free(self, index_reg);
 
-        const res_reg = switch (res) {
-            .rt => |r| r,
-            .discard, .value => try self.func.regAlloc(),
-        };
-
-        try self.emitTriple(.get_triple, res_reg, l_reg, index_reg);
-        return Value{ .rt = res_reg };
+        const sub_res = try res.toRt(self);
+        try self.emitTriple(.get_triple, sub_res.rt, l_reg, index_reg);
+        return sub_res.toVal();
     }
 
     fn genInfix(self: *Compiler, node: *Node.Infix, res: Result) Error!Value {
@@ -1831,7 +1861,7 @@ pub const Compiler = struct {
         try self.emitDouble(.unwrap_error_double, try_scope.err_reg, try_scope.err_reg);
 
         const scope_count = self.scopes.items.len;
-        defer self.scopes.items.len = scope_count;
+        defer self.clearScopes(scope_count);
 
         const capture_reg = try self.func.regAlloc();
         defer self.func.regFree(capture_reg);
@@ -1914,7 +1944,7 @@ pub const Compiler = struct {
             }
 
             const scope_count = self.scopes.items.len;
-            defer self.scopes.items.len = scope_count;
+            defer self.clearScopes(scope_count);
 
             var expr: *Node = undefined;
             var case_skip: ?usize = null;
@@ -1927,9 +1957,9 @@ pub const Compiler = struct {
                 expr = case.expr;
 
                 try self.genLval(case.capture, if (self.tokens[case.let_const].id == .Keyword_let)
-                     .{ .mut = &Value{ .rt = cond_reg } }
+                    .{ .mut = &Value{ .rt = cond_reg } }
                 else
-                     .{ .constant = &Value{ .rt = cond_reg } });
+                    .{ .constant = &Value{ .rt = cond_reg } });
             } else if (uncasted_case.cast(.MatchCase)) |case| {
                 expr = case.expr;
 
