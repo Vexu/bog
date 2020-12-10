@@ -797,38 +797,36 @@ fn wrapZigFunc(func: anytype) Value.Native {
 
 var buffer: [1024]u8 = undefined;
 
-fn testDump(val: Value, expected: []const u8) !void {
-    var buf_alloc = std.heap.FixedBufferAllocator.init(buffer[0..]);
+fn testDump(val: Value, expected: []const u8) void {
+    var fbs = std.io.fixedBufferStream(&buffer);
 
-    var buf = std.ArrayList(u8).init(&buf_alloc.allocator);
-    try val.dump(buf.writer.writer(), 4);
-    const result = out_buf.items;
-
-    if (!std.mem.eql(u8, result, expected)) {
-        std.debug.warn("\n---expected----\n{}\n-----found-----\n{}\n---------------\n", .{ expected, result });
-        return error.TestFailed;
-    }
+    val.dump(fbs.writer(), 4) catch @panic("test failed");
+    std.testing.expectEqualStrings(expected, fbs.getWritten());
 }
 
-// TODO these cause a false dependency loop
-// https://github.com/ziglang/zig/issues/4562
-// test "dump int/num" {
-//     var int = Value{
-//         .int = 2,
-//     };
-//     try testDump(int, "2");
-//     var num = Value{
-//         .num = 2.5,
-//     };
-//     try testDump(num, "2.5");
-// }
+comptime {
+    // TODO workaround false dependency loop
+    // https://github.com/ziglang/zig/issues/4562
+    _ = @import("main.zig").main;
+}
 
-// test "dump error" {
-//     var int = Value{
-//         .int = 2,
-//     };
-//     var err = Value{
-//         .err = &int,
-//     };
-//     try testDump(err, "error(2)");
-// }
+test "dump int/num" {
+    var int = Value{
+        .int = 2,
+    };
+    testDump(int, "2");
+    var num = Value{
+        .num = 2.5,
+    };
+    testDump(num, "2.5");
+}
+
+test "dump error" {
+    var int = Value{
+        .int = 2,
+    };
+    var err = Value{
+        .err = &int,
+    };
+    testDump(err, "error(2)");
+}
