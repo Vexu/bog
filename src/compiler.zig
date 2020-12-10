@@ -171,6 +171,10 @@ pub const Compiler = struct {
         name: []const u8,
         // val: Value,
         reg: RegRef,
+
+        /// if this is a capture, this tells where the closure stored it
+        capture_reg: RegRef = 0,
+        mut: bool,
     };
 
     const Loop = struct {
@@ -184,8 +188,7 @@ pub const Compiler = struct {
         module: *Fn,
         func: *Fn,
         loop: *Loop,
-        constant: Symbol,
-        mut: Symbol,
+        symbol: Symbol,
         forward_decl: Symbol,
         try_catch: *Try,
     };
@@ -313,8 +316,7 @@ pub const Compiler = struct {
             i -= 1;
             const scope = self.scopes.items[i];
             switch (scope) {
-                .constant => |sym| self.func.regFree(sym.reg),
-                .mut => |sym| self.func.regFree(sym.reg),
+                .symbol => |sym| self.func.regFree(sym.reg),
                 .try_catch, .loop => {},
                 else => unreachable,
             }
@@ -398,7 +400,7 @@ pub const Compiler = struct {
                     .func = .{
                         .res = res,
                         .arg_count = v.params,
-                        .capture_count = @intCast(u8, v.captures.len),
+                        .capture_count = @truncate(u8, v.captures.len),
                     },
                 });
                 try self.func.code.append(.{ .bare = v.offset });
@@ -408,7 +410,7 @@ pub const Compiler = struct {
                         .store_capture_triple,
                         res,
                         capture.reg,
-                        @intCast(u8, i),
+                        @truncate(RegRef, i),
                     );
                 }
             },
@@ -442,6 +444,7 @@ pub const Compiler = struct {
                 // .val = undefined,
                 .name = self.tokenSlice(ident.tok),
                 .reg = reg,
+                .mut = false,
             },
         });
     }
@@ -452,22 +455,63 @@ pub const Compiler = struct {
     };
 
     fn findSymbol(self: *Compiler, tok: TokenIndex) !RegAndMut {
+        return self.findSymbolExtra(tok, self.scopes.items.len, null);
+    }
+
+    fn findSymbolExtra(self: *Compiler, tok: TokenIndex, start_index: usize, parent_fn: ?*Fn) Error!RegAndMut {
         const name = self.tokenSlice(tok);
-        var i = self.scopes.items.len;
+        var i = start_index;
 
         while (true) {
             i -= 1;
             const item = self.scopes.items[i];
             switch (item) {
                 .module => break,
-                .func => {
-                    @panic("TODO captures");
+                .func => |f| {
+                    for (f.captures.items) |capture| {
+                        if (mem.eql(u8, capture.name, name)) {
+                            return RegAndMut{
+                                .reg = capture.capture_reg,
+                                .mut = capture.mut,
+                            };
+                        }
+                    }
+
+                    const sym = try self.findSymbolExtra(tok, i, f);
+                    const capture_reg = try f.regAlloc();
+                    f.captures.items[f.captures.items.len - 1].capture_reg = capture_reg;
+
+                    try f.code.append(.{
+                        .double = .{
+                            .op = .load_capture_double,
+                            .res = capture_reg,
+                            .arg = @truncate(u8, f.captures.items.len - 1),
+                        },
+                    });
+                    if (parent_fn) |some| {
+                        try some.captures.append(.{
+                            .name = name,
+                            .reg = capture_reg,
+                            .mut = sym.mut,
+                        });
+                    }
+                    return RegAndMut{
+                        .reg = capture_reg,
+                        .mut = sym.mut,
+                    };
                 },
                 .loop, .try_catch => {},
-                .constant, .mut, .forward_decl => |sym| if (mem.eql(u8, sym.name, name)) {
+                .symbol, .forward_decl => |sym| if (mem.eql(u8, sym.name, name)) {
+                    if (parent_fn) |some| {
+                        try some.captures.append(.{
+                            .name = name,
+                            .reg = sym.reg,
+                            .mut = sym.mut,
+                        });
+                    }
                     return RegAndMut{
                         .reg = sym.reg,
-                        .mut = item == .mut,
+                        .mut = sym.mut,
                     };
                 },
             }
@@ -487,7 +531,7 @@ pub const Compiler = struct {
                 .module => break,
                 .func => in_fn_scope = true,
                 .loop, .try_catch => {},
-                .constant, .mut => return null,
+                .symbol => return null,
                 .forward_decl => |sym| if (mem.eql(u8, sym.name, name)) {
                     assert(!in_fn_scope);
                     return sym.reg;
@@ -1609,13 +1653,13 @@ pub const Compiler = struct {
             .l_shift => blk: {
                 if (r_int < 0)
                     return self.reportErr("shift by negative amount", node.rhs.firstToken());
-                const val = if (r_int > std.math.maxInt(u6)) 0 else l_int << @intCast(u6, r_int);
+                const val = if (r_int > std.math.maxInt(u6)) 0 else l_int << @truncate(u6, @bitCast(u64, r_int));
                 break :blk Value{ .int = val };
             },
             .r_shift => blk: {
                 if (r_int < 0)
                     return self.reportErr("shift by negative amount", node.rhs.firstToken());
-                const val = if (r_int > std.math.maxInt(u6)) 0 else l_int >> @intCast(u6, r_int);
+                const val = if (r_int > std.math.maxInt(u6)) 0 else l_int >> @truncate(u6, @bitCast(u64, r_int));
                 break :blk Value{ .int = val };
             },
             else => unreachable,
@@ -1752,7 +1796,7 @@ pub const Compiler = struct {
         switch (int) {
             0...std.math.maxInt(RegRef) => {
                 res.kind = .value;
-                res.val = @intCast(RegRef, int);
+                res.val = @truncate(RegRef, @bitCast(u64, int));
             },
             else => {
                 res.kind = .reg;
@@ -2220,11 +2264,9 @@ pub const Compiler = struct {
                 const sym = Symbol{
                     .name = self.tokenSlice(node.tok),
                     .reg = reg,
+                    .mut = lval == .mut,
                 };
-                try self.scopes.append(if (lval == .mut)
-                    .{ .mut = sym }
-                else
-                    .{ .constant = sym });
+                try self.scopes.append(.{ .symbol = sym });
             },
             .assign => |val| {
                 const sym = try self.findSymbol(node.tok);

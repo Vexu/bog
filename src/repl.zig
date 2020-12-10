@@ -58,9 +58,10 @@ pub const Repl = struct {
 
         try scopes.append(.{ .module = mod });
         try scopes.append(.{
-            .constant = .{
+            .symbol = .{
                 .name = "ans",
                 .reg = mod.regAlloc() catch unreachable,
+                .mut = false,
             },
         });
 
