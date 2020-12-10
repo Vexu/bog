@@ -12,17 +12,20 @@ print(f"hello {world}!")
 ```julia
 const {input, print} = import("std.io")
 
-const val1 = input("first argument: ") as num
-const op = input("operation: ")
-const val2 = input("second argument: ") as num
+try
+    const val1 = input("first argument: ") as num
+    const op = input("operation: ")
+    const val2 = input("second argument: ") as num
 
-match (op)
-    "*" => print(val1 * val2)
-    "+" => print(val1 + val2)
-    "-" => print(val1 - val2)
-    "/" => print(val1 / val2)
-    "**" => print(val1 ** val2)
-    _ => print(f"unknown op: {op}")
+    match (op)
+        "*" => print(val1 * val2)
+        "+" => print(val1 + val2)
+        "-" => print(val1 - val2)
+        "/" => print(val1 / val2)
+        "**" => print(val1 ** val2)
+        _ => print(f"unknown op: {op}")
+catch
+    print("that's not a number")
 ```
 
 ### Use command line arguments

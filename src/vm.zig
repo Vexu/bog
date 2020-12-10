@@ -99,11 +99,9 @@ pub const Vm = struct {
     }
 
     pub fn addStd(vm: *Vm) Allocator.Error!void {
+        try vm.addStdNoIo();
         try vm.addPackage("std.io", bog.std.io);
-        try vm.addPackage("std.math", bog.std.math);
         try vm.addPackage("std.os", bog.std.os);
-        try vm.addPackage("std.map", bog.std.map);
-        try vm.addPackage("std.debug", bog.std.debug);
     }
 
     pub fn addStdNoIo(vm: *Vm) Allocator.Error!void {
@@ -371,7 +369,7 @@ pub const Vm = struct {
 
                     switch (rhs.*) {
                         .str, .tuple, .list, .map, .range => {},
-                        else => return vm.reportErr("invalid type for 'in'"),
+                        else => return vm.fatal("invalid type for 'in'"),
                     }
 
                     res.* = if (lhs.in(rhs)) &Value.True else &Value.False;
@@ -382,7 +380,7 @@ pub const Vm = struct {
                     const rhs = try vm.getInt(module, inst.triple.rhs);
 
                     if (rhs < 0)
-                        return vm.reportErr("shift by negative amount");
+                        return vm.fatal("shift by negative amount");
                     const val = if (rhs > std.math.maxInt(u6)) 0 else lhs << @intCast(u6, rhs);
                     res.* = .{
                         .int = val,
@@ -394,7 +392,7 @@ pub const Vm = struct {
                     const rhs = try vm.getInt(module, inst.triple.rhs);
 
                     if (rhs < 0)
-                        return vm.reportErr("shift by negative amount");
+                        return vm.fatal("shift by negative amount");
                     const val = if (rhs > std.math.maxInt(u6)) 0 else lhs >> @intCast(u6, rhs);
                     res.* = .{
                         .int = val,
@@ -514,7 +512,7 @@ pub const Vm = struct {
                     const arg = try vm.getVal(module, inst.double.arg);
 
                     if (arg.* != .err)
-                        return vm.reportErr("expected an error");
+                        return vm.fatal("expected an error");
                     res.* = try vm.gc.dupe(arg.err);
                 },
                 .unwrap_tagged => {
@@ -525,9 +523,9 @@ pub const Vm = struct {
                     const name = module.strings[offset + @sizeOf(u32) ..][0..len];
 
                     if (arg.* != .tagged)
-                        return vm.reportErr("expected a tagged value");
+                        return vm.fatal("expected a tagged value");
                     if (!mem.eql(u8, arg.tagged.name, name))
-                        return vm.reportErr("invalid tag");
+                        return vm.fatal("invalid tag");
                     res.* = arg.tagged.value;
                 },
                 .import_off => {
@@ -540,7 +538,7 @@ pub const Vm = struct {
                     const arg = try vm.getVal(module, inst.single.arg);
 
                     if (arg.* == .err) {
-                        return vm.reportErr("error discarded");
+                        return vm.fatal("error discarded");
                     }
                     if (vm.options.repl and vm.call_stack.items.len == 0) {
                         return arg;
@@ -698,7 +696,7 @@ pub const Vm = struct {
                     if (func.* == .native) {
                         if (func.native.arg_count != arg_count) {
                             // TODO improve this error message to tell the expected and given counts
-                            return vm.reportErr("unexpected arg count");
+                            return vm.fatal("unexpected arg count");
                         }
                         const args = vm.gc.stack.items[vm.sp + first ..][0..arg_count];
                         for (args) |arg| {
@@ -713,16 +711,18 @@ pub const Vm = struct {
                     }
 
                     if (func.* != .func) {
-                        return vm.reportErr("attempt to call non function type");
+                        const ret_ref = try vm.gc.stackRef(vm.sp + res);
+                        ret_ref.* = try vm.typeError(.func, func.*);
+                        continue;
                     }
 
                     if (func.func.arg_count != arg_count) {
                         // TODO improve this error message to tell the expected and given counts
-                        return vm.reportErr("unexpected arg count");
+                        return vm.fatal("unexpected arg count");
                     }
 
                     if (vm.call_stack.items.len > max_depth) {
-                        return vm.reportErr("maximum depth exceeded");
+                        return vm.fatal("maximum depth exceeded");
                     }
 
                     try vm.call_stack.append(vm.gc.gpa, .{
@@ -802,7 +802,7 @@ pub const Vm = struct {
 
                     const frame = vm.call_stack.items[vm.call_stack.items.len - 1];
                     res.* = frame.this orelse
-                        return vm.reportErr("this has not been set");
+                        return vm.fatal("this has not been set");
                 },
                 .append_double => {
                     const lhs = try vm.getVal(module, inst.double.res);
@@ -812,11 +812,11 @@ pub const Vm = struct {
                         .list => |*list| try list.append(vm.gc.gpa, try vm.gc.dupe(rhs)),
                         .str => |*str| {
                             if (rhs.* != .str) {
-                                return vm.reportErr("expected a string");
+                                return vm.fatal("expected a string");
                             }
                             try str.append(vm.gc.gpa, rhs.str.data);
                         },
-                        else => return vm.reportErr("expected a string or a list"),
+                        else => return vm.fatal("expected a string or a list"),
                     }
                 },
                 .line_info => {
@@ -833,29 +833,29 @@ pub const Vm = struct {
     fn import(vm: *Vm, id: []const u8) !*Value {
         var mod = vm.imported_modules.get(id) orelse if (mem.endsWith(u8, id, bog.extension)) blk: {
             if (!vm.options.import_files) {
-                return vm.reportErr("import failed");
+                return vm.fatal("import failed");
             }
             const source = std.fs.cwd().readFileAlloc(vm.gc.gpa, id, vm.options.max_import_size) catch |e| switch (e) {
                 error.OutOfMemory => return error.OutOfMemory,
-                else => return vm.reportErr("import failed"),
+                else => return vm.fatal("import failed"),
             };
             defer vm.gc.gpa.free(source);
             const mod = bog.compile(vm.gc.gpa, source, &vm.errors) catch
-                return vm.reportErr("import failed");
+                return vm.fatal("import failed");
             mod.name = try mem.dupe(vm.gc.gpa, u8, id);
             _ = try vm.imported_modules.put(vm.gc.gpa, id, mod);
             break :blk mod;
         } else if (mem.endsWith(u8, id, bog.bytecode_extension)) blk: {
             if (!vm.options.import_files) {
-                return vm.reportErr("import failed");
+                return vm.fatal("import failed");
             }
             const source = std.fs.cwd().readFileAlloc(vm.gc.gpa, id, vm.options.max_import_size) catch |e| switch (e) {
                 error.OutOfMemory => return error.OutOfMemory,
-                else => return vm.reportErr("import failed"),
+                else => return vm.fatal("import failed"),
             };
             defer vm.gc.gpa.free(source);
             const read_module = Module.read(source) catch
-                return vm.reportErr("import failed");
+                return vm.fatal("import failed");
 
             const mod = try vm.gc.gpa.create(Module);
             mod.* = .{
@@ -870,7 +870,7 @@ pub const Vm = struct {
             if (vm.imports.get(id)) |some| {
                 return some(vm);
             }
-            return vm.reportErr("no such package");
+            return vm.fatal("no such package");
         };
 
         const saved_sp = vm.sp;
@@ -936,7 +936,7 @@ pub const Vm = struct {
         const val = try vm.getVal(module, reg);
 
         if (val.* != .bool) {
-            return vm.reportErr("expected a boolean");
+            return vm.fatal("expected a boolean");
         }
         return val.bool;
     }
@@ -945,7 +945,7 @@ pub const Vm = struct {
         const val = try vm.getVal(module, reg);
 
         if (val.* != .int) {
-            return vm.reportErr("expected an integer");
+            return vm.fatal("expected an integer");
         }
         return val.int;
     }
@@ -954,7 +954,7 @@ pub const Vm = struct {
         const val = try vm.getVal(module, reg);
 
         if (val.* != .int) {
-            return vm.reportErr("expected an integer");
+            return vm.fatal("expected an integer");
         }
         return val;
     }
@@ -963,7 +963,7 @@ pub const Vm = struct {
         const val = try vm.getVal(module, reg);
 
         if (val.* != .int and val.* != .num) {
-            return vm.reportErr("expected a number");
+            return vm.fatal("expected a number");
         }
         return val;
     }
@@ -980,7 +980,30 @@ pub const Vm = struct {
         };
     }
 
-    pub fn reportErr(vm: *Vm, msg: []const u8) Error {
+    pub fn errorFmt(vm: *Vm, comptime fmt: []const u8, args: anytype) !*Value {
+        const msg = try std.fmt.allocPrint(vm.gc.gpa, fmt, args);
+        errdefer vm.gc.gpa.free(msg);
+
+        return vm.errorVal(Value.string(msg));
+    }
+
+    pub fn typeError(vm: *Vm, expected: bog.Type, got: bog.Type) Vm.Error!*Value {
+        const msg = try std.fmt.allocPrint(vm.gc.gpa, "expected {}, got {}", .{ @tagName(expected), @tagName(got) });
+        errdefer vm.gc.gpa.free(msg);
+
+        return vm.errorVal(Value.string(msg));
+    }
+
+    pub fn errorVal(vm: *Vm, msg: Value) !*Value {
+        const str = try vm.gc.alloc();
+        str.* = msg;
+
+        const err = try vm.gc.alloc();
+        err.* = .{ .err = str };
+        return err;
+    }
+
+    pub fn fatal(vm: *Vm, msg: []const u8) Error {
         @setCold(true);
         try vm.errors.add(msg, vm.line_loc, .err);
         var i: u8 = 0;

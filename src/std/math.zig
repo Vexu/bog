@@ -8,28 +8,34 @@ pub const e = std.math.e;
 pub const sqrt2 = std.math.sqrt2;
 pub const ln2 = std.math.ln2;
 
-pub fn ln(vm: *Vm, val: Value) !Value {
+pub fn ln(vm: *Vm, val: Value) !*Value {
     return switch (val) {
         // TODO fix zig std
         // .int => |i| Value{
         //     .int = std.math.ln(i),
         // },
-        .num => |n| Value{
-            .num = std.math.ln(n),
+        .num => |n| {
+            const res = try vm.gc.alloc();
+            res.* = Value{ .num = std.math.ln(n) };
+            return res;
         },
-        else => vm.reportErr("expected a number"),
+        else => vm.typeError(.num, val),
     };
 }
 
-pub fn sqrt(vm: *Vm, val: Value) !Value {
+pub fn sqrt(vm: *Vm, val: Value) !*Value {
     return switch (val) {
-        .int => |i| Value{
-            .int = std.math.sqrt(i),
+        .int => |i| {
+            const res = try vm.gc.alloc();
+            res.* = Value{ .int = std.math.sqrt(i) };
+            return res;
         },
-        .num => |n| Value{
-            .num = std.math.sqrt(n),
+        .num => |n| {
+            const res = try vm.gc.alloc();
+            res.* = Value{ .num = std.math.sqrt(n) };
+            return res;
         },
-        else => vm.reportErr("expected a number"),
+        else => vm.typeError(.num, val),
     };
 }
 

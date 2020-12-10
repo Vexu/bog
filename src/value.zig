@@ -92,7 +92,7 @@ pub const Value = union(Type) {
                         res.* = try vm.gc.alloc();
 
                     const cp_len = std.unicode.utf8ByteSequenceLength(str.data[iter.i.u]) catch
-                        return vm.reportErr("invalid utf-8 sequence");
+                        return vm.fatal("invalid utf-8 sequence");
                     iter.i.u += cp_len;
 
                     res.*.?.* = .{
@@ -153,10 +153,18 @@ pub const Value = union(Type) {
     pub var True = Value{ .bool = true };
     pub var False = Value{ .bool = false };
 
-    pub fn string(data: []const u8) Value {
-        return .{
-            .str = .{
-                .data = data,
+    pub fn string(data: anytype) Value {
+        return switch (@TypeOf(data)) {
+            []u8 => .{
+                .str = .{
+                    .data = data,
+                    .capacity = data.len
+                },
+            },
+            else => .{
+                .str = .{
+                    .data = data,
+                },
             },
         };
     }
@@ -364,11 +372,11 @@ pub const Value = union(Type) {
                     if (i < 0)
                         i += @intCast(i64, tuple.len);
                     if (i < 0 or i >= tuple.len)
-                        return vm.reportErr("index out of bounds");
+                        return vm.fatal("index out of bounds");
 
                     res.* = tuple[@intCast(u32, i)];
                 },
-                .range => return vm.reportErr("TODO get with ranges"),
+                .range => return vm.fatal("TODO get with ranges"),
                 .str => |*s| {
                     if (res.* == null) {
                         res.* = try vm.gc.alloc();
@@ -377,10 +385,10 @@ pub const Value = union(Type) {
                     if (mem.eql(u8, s.data, "len")) {
                         res.*.?.* = .{ .int = @intCast(i64, tuple.len) };
                     } else {
-                        return vm.reportErr("no such property");
+                        return vm.fatal("no such property");
                     }
                 },
-                else => return vm.reportErr("invalid index type"),
+                else => return vm.fatal("invalid index type"),
             },
             .list => |*list| switch (index.*) {
                 .int => {
@@ -388,11 +396,11 @@ pub const Value = union(Type) {
                     if (i < 0)
                         i += @intCast(i64, list.items.len);
                     if (i < 0 or i >= list.items.len)
-                        return vm.reportErr("index out of bounds");
+                        return vm.fatal("index out of bounds");
 
                     res.* = list.items[@intCast(u32, i)];
                 },
-                .range => return vm.reportErr("TODO get with ranges"),
+                .range => return vm.fatal("TODO get with ranges"),
                 .str => |*s| {
                     if (res.* == null) {
                         res.* = try vm.gc.alloc();
@@ -404,23 +412,23 @@ pub const Value = union(Type) {
                         res.* = try zigToBog(vm, struct {
                             fn append(_vm: *Vm, val: *Value) !void {
                                 if (_vm.last_get.* != .list)
-                                    return _vm.reportErr("expected list");
+                                    return _vm.fatal("expected list");
                                 try _vm.last_get.list.append(_vm.gc.gpa, try _vm.gc.dupe(val));
                             }
                         }.append);
                     } else {
-                        return vm.reportErr("no such property");
+                        return vm.fatal("no such property");
                     }
                 },
-                else => return vm.reportErr("invalid index type"),
+                else => return vm.fatal("invalid index type"),
             },
             .map => |*map| {
                 res.* = map.get(index) orelse
-                    return vm.reportErr("TODO better handling undefined key");
+                    return vm.fatal("TODO better handling undefined key");
             },
             .str => |*str| return str.get(vm, index, res),
             .iterator => unreachable,
-            else => return vm.reportErr("invalid subscript type"),
+            else => return vm.fatal("invalid subscript type"),
         }
     }
 
@@ -432,11 +440,11 @@ pub const Value = union(Type) {
                 if (i < 0)
                     i += @intCast(i64, tuple.len);
                 if (i < 0 or i >= tuple.len)
-                    return vm.reportErr("index out of bounds");
+                    return vm.fatal("index out of bounds");
 
                 tuple[@intCast(u32, i)] = try vm.gc.dupe(new_val);
             } else {
-                return vm.reportErr("TODO set with ranges");
+                return vm.fatal("TODO set with ranges");
             },
             .map => |*map| {
                 _ = try map.put(vm.gc.gpa, try vm.gc.dupe(index), try vm.gc.dupe(new_val));
@@ -446,15 +454,15 @@ pub const Value = union(Type) {
                 if (i < 0)
                     i += @intCast(i64, list.items.len);
                 if (i < 0 or i >= list.items.len)
-                    return vm.reportErr("index out of bounds");
+                    return vm.fatal("index out of bounds");
 
                 list.items[@intCast(u32, i)] = try vm.gc.dupe(new_val);
             } else {
-                return vm.reportErr("TODO set with ranges");
+                return vm.fatal("TODO set with ranges");
             },
             .str => |*str| try str.set(vm, index, new_val),
             .iterator => unreachable,
-            else => return vm.reportErr("invalid subscript type"),
+            else => return vm.fatal("invalid subscript type"),
         }
     }
 
@@ -477,7 +485,7 @@ pub const Value = union(Type) {
                 .num => |num| num != 0,
                 .bool => unreachable,
                 .str => unreachable,
-                else => return vm.reportErr("invalid cast to bool"),
+                else => return vm.errorFmt("cannot cast {} to bool", .{@tagName(val.*)}),
             };
 
             return if (bool_res) &Value.True else &Value.False;
@@ -493,7 +501,7 @@ pub const Value = union(Type) {
                     .num => |num| @floatToInt(i64, num),
                     .bool => |b| @boolToInt(b),
                     .str => unreachable,
-                    else => return vm.reportErr("invalid cast to int"),
+                    else => return vm.errorFmt("cannot cast {} to int", .{@tagName(val.*)}),
                 },
             },
             .num => .{
@@ -502,14 +510,14 @@ pub const Value = union(Type) {
                     .int => |int| @intToFloat(f64, int),
                     .bool => |b| @intToFloat(f64, @boolToInt(b)),
                     .str => unreachable,
-                    else => return vm.reportErr("invalid cast to num"),
+                    else => return vm.errorFmt("cannot cast {} to num", .{@tagName(val.*)}),
                 },
             },
             .str, .bool, .none => unreachable,
             .tuple,
             .map,
             .list,
-            => return vm.reportErr("TODO more casts"),
+            => return vm.fatal("TODO more casts"),
             else => unreachable,
         };
         return new_val;
@@ -556,7 +564,7 @@ pub const Value = union(Type) {
             .range => |*r| start = r.start,
             .str, .tuple, .list, .map => {},
             .iterator => unreachable,
-            else => return vm.reportErr("invalid type for iteration"),
+            else => return vm.errorFmt("cannot iterate {}", .{@tagName(val.*)}),
         }
         const iter = try vm.gc.alloc();
         iter.* = .{
@@ -579,18 +587,8 @@ pub const Value = union(Type) {
                 ret.* = val;
                 return ret;
             },
-            []u8 => {
+            []const u8, []u8 => {
                 // assume val was allocated with vm.gc
-                const str = try vm.gc.alloc();
-                str.* = .{
-                    .str = .{
-                        .data = val,
-                        .capacity = val.len,
-                    },
-                };
-                return str;
-            },
-            []const u8 => {
                 const str = try vm.gc.alloc();
                 str.* = Value.string(val);
                 return str;
@@ -682,21 +680,21 @@ pub const Value = union(Type) {
         return switch (T) {
             void => {
                 if (val.* != .none)
-                    return vm.reportErr("expected none");
+                    return vm.fatal("expected none");
             },
             bool => {
                 if (val.* != .bool)
-                    return vm.reportErr("expected bool");
+                    return vm.fatal("expected bool");
                 return val.bool;
             },
             []const u8 => {
                 if (val.* != .str)
-                    return vm.reportErr("expected string");
+                    return vm.fatal("expected string");
                 return val.str.data;
             },
             *Map, *const Map => {
                 if (val.* != .map)
-                    return vm.reportErr("expected map");
+                    return vm.fatal("expected map");
                 return &val.map;
             },
             *Vm => vm,
@@ -704,47 +702,47 @@ pub const Value = union(Type) {
             Value => return val.*,
             String => {
                 if (val.* != .str)
-                    return vm.reportErr("expected string");
+                    return vm.fatal("expected string");
                 return val.str;
             },
             []*Value, []const *Value, []*const Value, []const *const Value => {
                 switch (val.*) {
                     .tuple => |t| return t,
                     .list => |*l| return l.items,
-                    else => return vm.reportErr("expected a list or a tuple"),
+                    else => return vm.fatal("expected a list or a tuple"),
                 }
             },
             else => switch (@typeInfo(T)) {
                 .Int => if (val.* == .int) blk: {
                     if (val.int < std.math.minInt(T) or val.int > std.math.maxInt(T))
-                        return vm.reportErr("cannot fit int in desired type");
+                        return vm.fatal("cannot fit int in desired type");
                     break :blk @intCast(T, val.int);
                 } else if (val.* == .num)
                     @floatToInt(T, val.num)
                 else
-                    return vm.reportErr("expected int"),
+                    return vm.fatal("expected int"),
                 .Float => |info| switch (info.bits) {
                     32 => if (val.* == .num)
                         @floatCast(f32, val.num)
                     else if (val.* == .int)
                         @intToFloat(f32, val.int)
                     else
-                        return vm.reportErr("expected num"),
+                        return vm.fatal("expected num"),
                     64 => if (val.* == .num)
                         val.num
                     else if (val.* == .int)
                         @intToFloat(f64, val.int)
                     else
-                        return vm.reportErr("expected num"),
+                        return vm.fatal("expected num"),
                     else => @compileError("unsupported float"),
                 },
                 .Enum => {
                     if (val.* != .tagged)
-                        return vm.reportErr("expected tag");
+                        return vm.fatal("expected tag");
                     const e = std.meta.stringToEnum(T, val.tagged.name) orelse
-                        return vm.reportErr("no value by such name");
+                        return vm.fatal("no value by such name");
                     if (val.tagged.value.* != .none)
-                        return vm.reportErr("expected no value");
+                        return vm.fatal("expected no value");
                     return e;
                 },
                 else => @compileError("TODO unsupported type"),

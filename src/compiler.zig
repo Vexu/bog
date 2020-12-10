@@ -1157,6 +1157,10 @@ pub const Compiler = struct {
 
         // initialize the iterator
         try self.emitDouble(.iter_init_double, iter_reg, cond_reg);
+        if (self.cur_scope.getTry()) |try_scope| {
+            try self.emitDouble(.move_double, try_scope.err_reg, iter_reg);
+            try try_scope.jumps.append(try self.emitJump(.jump_error, iter_reg));
+        }
 
         const iter_val_reg = self.registerAlloc();
         defer self.registerFree(iter_val_reg);
@@ -1293,6 +1297,14 @@ pub const Compiler = struct {
                     .type_id = type_id,
                 },
             });
+
+            // `as` can result in a type error
+            if (node.op == .as) {
+                if (self.cur_scope.getTry()) |try_scope| {
+                    try self.emitDouble(.move_double, try_scope.err_reg, sub_res.rt);
+                    try try_scope.jumps.append(try self.emitJump(.jump_error, sub_res.rt));
+                }
+            }
             return sub_res.toVal();
         }
 
