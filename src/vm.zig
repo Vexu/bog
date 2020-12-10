@@ -102,6 +102,7 @@ pub const Vm = struct {
         try vm.addStdNoIo();
         try vm.addPackage("std.io", bog.std.io);
         try vm.addPackage("std.os", bog.std.os);
+        try vm.addPackage("std.fs", bog.std.fs);
     }
 
     pub fn addStdNoIo(vm: *Vm) Allocator.Error!void {
