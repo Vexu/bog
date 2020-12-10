@@ -245,12 +245,13 @@ pub const Parser = struct {
                 return &node.base;
             },
             .Keyword_is => {
+                parser.skipNl();
                 const node = try parser.arena.create(Node.TypeInfix);
                 node.* = .{
                     .lhs = lhs,
                     .op = .is,
                     .tok = tok,
-                    .type_tok = try parser.typeName(),
+                    .type_tok = try parser.typeName(skip_nl),
                 };
                 return &node.base;
             },
@@ -262,10 +263,10 @@ pub const Parser = struct {
     }
 
     /// type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
-    fn typeName(parser: *Parser) Error!TokenIndex {
-        return parser.eatToken(.Keyword_error, true) orelse
-            parser.eatToken(.Keyword_fn, true) orelse
-            parser.eatToken(.Identifier, true) orelse
+    fn typeName(parser: *Parser, skip_nl: bool) Error!TokenIndex {
+        return parser.eatToken(.Keyword_error, skip_nl) orelse
+            parser.eatToken(.Keyword_fn, skip_nl) orelse
+            parser.eatToken(.Identifier, skip_nl) orelse
             parser.reportErr("expected type name", parser.tokens[parser.tok_index]);
     }
 
@@ -477,7 +478,7 @@ pub const Parser = struct {
                 .lhs = lhs,
                 .op = .as,
                 .tok = tok,
-                .type_tok = try parser.typeName(),
+                .type_tok = try parser.typeName(skip_nl),
             };
             lhs = &node.base;
         }
@@ -1022,20 +1023,10 @@ pub const Parser = struct {
         if (parser.eatToken(.Keyword_let, true) orelse
             parser.eatToken(.Keyword_const, true)) |let_const|
         {
-            if (parser.eatToken(.Identifier, true)) |_| {
-                const node = try parser.arena.create(Node.MatchCatchAll);
-                node.* = .{
-                    .tok = let_const,
-                    .eq_arr = try parser.expectToken(.EqualRarr, false),
-                    .expr = try parser.blockOrExpr(false, true, level),
-                };
-                return &node.base;
-            }
-            const capture = try parser.primaryExpr(true, true, level);
             const node = try parser.arena.create(Node.MatchLet);
             node.* = .{
                 .let_const = let_const,
-                .capture = capture,
+                .capture = try parser.primaryExpr(true, true, level),
                 .eq_arr = try parser.expectToken(.EqualRarr, false),
                 .expr = try parser.blockOrExpr(false, true, level),
             };
@@ -1052,7 +1043,7 @@ pub const Parser = struct {
             const items = try parser.listParser(true, level, expr, .EqualRarr, null);
             const node = try parser.arena.create(Node.MatchCase);
             node.* = .{
-                .lhs = items.nodes,
+                .items = items.nodes,
                 .eq_arr = items.term,
                 .expr = try parser.blockOrExpr(false, true, level),
             };

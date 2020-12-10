@@ -348,13 +348,7 @@ const Renderer = struct {
             },
             .MatchCatchAll => {
                 const case = @fieldParentPtr(Node.MatchCatchAll, "base", node);
-
-                if (self.tokens[case.tok].id != .Underscore) {
-                    try self.renderToken(case.tok, writer, .space);
-                    try self.renderToken(self.nextToken(case.tok), writer, .space);
-                } else {
-                    try self.renderToken(case.tok, writer, .space);
-                }
+                try self.renderToken(case.tok, writer, .space);
 
                 try self.renderToken(case.eq_arr, writer, getBlockIndent(case.expr, .space));
                 return self.renderNode(case.expr, writer, space);
@@ -371,7 +365,7 @@ const Renderer = struct {
             .MatchCase => {
                 const case = @fieldParentPtr(Node.MatchCase, "base", node);
 
-                try self.renderCommaList(case.lhs, case.eq_arr, writer, .space);
+                try self.renderCommaList(case.items, case.eq_arr, writer, .space);
 
                 try self.renderToken(case.eq_arr, writer, getBlockIndent(case.expr, .space));
                 return self.renderNode(case.expr, writer, space);

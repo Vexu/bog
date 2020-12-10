@@ -16,18 +16,13 @@ const val1 = input("first argument: ") as num
 const op = input("operation: ")
 const val2 = input("second argument: ") as num
 
-if (op == "*")
-    print(val1 * val2)
-else if (op == "+")
-    print(val1 + val2)
-else if (op == "-")
-    print(val1 - val2)
-else if (op == "/")
-    print(val1 / val2)
-else if (op == "**")
-    print(val1 ** val2)
-else 
-    print("unknown op")
+match (op)
+    "*" => print(val1 * val2)
+    "+" => print(val1 + val2)
+    "-" => print(val1 - val2)
+    "/" => print(val1 / val2)
+    "**" => print(val1 ** val2)
+    _ => print(f"unknown op: {op}")
 ```
 
 ### Use command line arguments

@@ -1,3 +1,28 @@
+test "extra cases after catch-all" {
+    expectError(
+        \\match (1)
+        \\    let val => ()
+        \\    1 => ()
+        \\
+    ,
+        \\additional cases after catch-all case
+    );
+}
+test "extra handlers after catch-all" {
+    expectError(
+        \\const foo = fn() ()
+        \\try
+        \\    foo()
+        \\catch
+        \\    2
+        \\catch (1)
+        \\    3
+        \\
+    ,
+        \\additional handlers after catch-all handler
+    );
+}
+
 test "invalid tag unwrap" {
     expectError(
         \\let foo = @bar[2]

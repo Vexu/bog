@@ -1,3 +1,32 @@
+test "match" {
+    expectOutput(
+        \\const getNum = fn (arg)
+        \\    return match (arg)
+        \\        1 => 69
+        \\        12 => 42
+        \\        10004 => 17
+        \\        _ => 0
+        \\
+        \\let arr = []
+        \\arr ++ getNum(1)
+        \\arr ++ getNum(12)
+        \\arr ++ getNum(10004)
+        \\arr ++ getNum(9)
+        \\return arr
+    ,
+        \\[69, 42, 17, 0]
+    );
+    expectOutput(
+        \\const getNum = fn() 42
+        \\
+        \\match (getNum())
+        \\    1 => error
+        \\    let val => return val
+    ,
+        \\42
+    );
+}
+
 test "try catch" {
     expectOutput(
         \\const fails_on_1 = fn(arg) if (arg == 1) error(69)
@@ -555,6 +584,13 @@ test "type casting" {
     expectOutput(
         \\let y = 2.5
         \\return y as int
+    ,
+        \\2
+    );
+    expectOutput(
+        \\let x = 2.5 as int
+        \\let y = x as num
+        \\return y
     ,
         \\2
     );

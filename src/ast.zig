@@ -58,6 +58,38 @@ pub const Node = struct {
         MatchCase,
         Jump,
         FormatString,
+
+        pub fn Type(tag: Id) type {
+            return switch (tag) {
+                .Decl => Decl,
+                .Fn => Fn,
+                .Discard, .Identifier, .This => SingleToken,
+                .Prefix => Prefix,
+                .Infix => Infix,
+                .TypeInfix => TypeInfix,
+                .Range => Range,
+                .Suffix => Suffix,
+                .Literal => Literal,
+                .Import => Import,
+                .Error => Error,
+                .Tagged => Tagged,
+                .List, .Tuple, .Map => ListTupleMap,
+                .Block => Block,
+                .Grouped => Grouped,
+                .MapItem => MapItem,
+                .Try => Try,
+                .Catch => Catch,
+                .If => If,
+                .For => For,
+                .While => While,
+                .Match => Match,
+                .MatchCatchAll => MatchCatchAll,
+                .MatchLet => MatchLet,
+                .MatchCase => MatchCase,
+                .Jump => Jump,
+                .FormatString => FormatString,
+            };
+        }
     };
 
     pub fn firstToken(node: *Node) TokenIndex {
@@ -98,7 +130,7 @@ pub const Node = struct {
             .Match => @fieldParentPtr(Node.Match, "base", node).match_tok,
             .MatchCatchAll => @fieldParentPtr(Node.Jump, "base", node).tok,
             .MatchLet => @fieldParentPtr(Node.MatchLet, "base", node).let_const,
-            .MatchCase => @fieldParentPtr(Node.MatchCase, "base", node).lhs[0].firstToken(),
+            .MatchCase => @fieldParentPtr(Node.MatchCase, "base", node).items[0].firstToken(),
             .Jump => @fieldParentPtr(Node.Jump, "base", node).tok,
             .FormatString => @fieldParentPtr(Node.FormatString, "base", node).format[0],
         };
@@ -170,6 +202,13 @@ pub const Node = struct {
                 return fmt_str.format[fmt_str.format.len - 1];
             },
         };
+    }
+
+    pub fn cast(base: *Node, comptime id: Id) ?*id.Type() {
+        if (base.id == id) {
+            return @fieldParentPtr(id.Type(), "base", base);
+        }
+        return null;
     }
 
     pub const Decl = struct {
@@ -404,7 +443,7 @@ pub const Node = struct {
 
     pub const MatchCase = struct {
         base: Node = .{ .id = .MatchCase },
-        lhs: []*Node,
+        items: []*Node,
         expr: *Node,
         eq_arr: TokenIndex,
     };

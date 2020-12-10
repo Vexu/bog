@@ -595,11 +595,10 @@ pub const Compiler = struct {
             .FormatString => return self.genFormatString(@fieldParentPtr(Node.FormatString, "base", node), res),
             .Try => return self.genTry(@fieldParentPtr(Node.Try, "base", node), res),
             .Catch => unreachable, // hanlded in genTry
-
-            .Match => return self.reportErr("TODO: Match", node.firstToken()),
-            .MatchCatchAll => return self.reportErr("TODO: MatchCatchAll", node.firstToken()),
-            .MatchLet => return self.reportErr("TODO: MatchLet", node.firstToken()),
-            .MatchCase => return self.reportErr("TODO: MatchCase", node.firstToken()),
+            .Match => return self.genMatch(@fieldParentPtr(Node.Match, "base", node), res),
+            .MatchCatchAll => unreachable, // hanlded in genMatch
+            .MatchLet => unreachable, // hanlded in genMatch
+            .MatchCase => unreachable, // hanlded in genMatch
         }
     }
 
@@ -2276,6 +2275,99 @@ pub const Compiler = struct {
 
         // exit try-catch
         for (try_scope.jumps.items) |jump| {
+            self.finishJump(jump);
+        }
+        return sub_res.toVal();
+    }
+
+    fn genMatch(self: *Compiler, node: *Node.Match, res: Result) Error!Value {
+        const sub_res = switch (res) {
+            .rt, .discard => res,
+            .value => Result{
+                // value is only known at runtime
+                .rt = self.registerAlloc(),
+            },
+            .lval => unreachable,
+        };
+
+        const cond_val = try self.genNodeNonEmpty(node.expr, .value);
+        const cond_reg = try cond_val.toRt(self);
+
+        var capture_scope = Scope{
+            .id = .capture,
+            .parent = self.cur_scope,
+            .syms = Symbol.List.init(self.errors.list.allocator),
+        };
+        self.cur_scope = &capture_scope;
+        defer {
+            capture_scope.syms.deinit();
+            self.cur_scope = capture_scope.parent.?;
+        }
+
+        var jumps = Scope.Loop.BreakList.init(self.errors.list.allocator);
+        defer jumps.deinit();
+
+        var case_reg = self.registerAlloc();
+        var seen_catch_all = false;
+        for (node.cases) |uncasted_case, case_i| {
+            if (seen_catch_all) {
+                return self.reportErr("additional cases after catch-all case", uncasted_case.firstToken());
+            }
+
+            var expr: *Node = undefined;
+            var case_skip: ?usize = null;
+
+            if (uncasted_case.cast(.MatchCatchAll)) |case| {
+                seen_catch_all = true;
+                expr = case.expr;
+            } else if (uncasted_case.cast(.MatchLet)) |case| {
+                seen_catch_all = true;
+                expr = case.expr;
+
+                const lval_res = if (self.tokens[case.let_const].id == .Keyword_let)
+                    Result{ .lval = .{ .let = &Value{ .rt = cond_reg } } }
+                else
+                    Result{ .lval = .{ .Const = &Value{ .rt = cond_reg } } };
+
+                assert((try self.genNode(case.capture, lval_res)) == .empty);
+            } else if (uncasted_case.cast(.MatchCase)) |case| {
+                expr = case.expr;
+
+                if (case.items.len != 1) {
+                    return self.reportErr("TODO multi item cases", uncasted_case.firstToken());
+                }
+
+                _ = try self.genNodeNonEmpty(case.items[0], .{ .rt = case_reg });
+                // if not equal to the error value jump over this handler
+                try self.emitTriple(.equal_triple, case_reg, case_reg, cond_reg);
+                case_skip = try self.emitJump(.jump_false, case_reg);
+            } else unreachable;
+
+            const case_res = try self.genNode(expr, sub_res);
+            if (sub_res != .rt and case_res.isRt()) {
+                try self.emitSingle(.discard_single, case_res.getRt());
+            }
+
+            // exit match (unless it's this is the last case)
+            if (case_i + 1 != node.cases.len) {
+                try jumps.append(try self.emitJump(.jump, null));
+            }
+
+            // jump over this case if the value doesn't match
+            if (case_skip) |some| {
+                self.finishJump(some);
+            }
+        }
+
+        // result in none if no matches
+        if (!seen_catch_all and sub_res == .rt) {
+            try self.code.append(.{
+                .primitive = .{ .res = sub_res.rt, .kind = .none },
+            });
+        }
+
+        // exit match
+        for (jumps.items) |jump| {
             self.finishJump(jump);
         }
         return sub_res.toVal();
