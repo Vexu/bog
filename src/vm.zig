@@ -461,6 +461,15 @@ pub const Vm = struct {
                         vm.ip = base + offset;
                     }
                 },
+                .jump_error => {
+                    const base = vm.ip;
+                    const arg = try vm.getVal(module, inst.jump.arg);
+                    const offset = try vm.getSingle(module);
+
+                    if (arg.* == .err) {
+                        vm.ip = base + offset;
+                    }
+                },
                 .jump_not_error => {
                     const base = vm.ip;
                     const arg = try vm.getVal(module, inst.jump.arg);

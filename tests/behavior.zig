@@ -1,3 +1,25 @@
+test "try catch" {
+    expectOutput(
+        \\const fails_on_1 = fn(arg) if (arg == 1) error(69)
+        \\const fails_on_2 = fn(arg) if (arg == 2) error(42)
+        \\const fails_on_3 = fn(arg) if (arg == 3) error(17)
+        \\
+        \\const foo = fn(arg)
+        \\    try
+        \\        fails_on_1(arg)
+        \\        fails_on_2(arg)
+        \\        fails_on_3(arg)
+        \\    catch (let err)
+        \\        return err
+        \\
+        \\    return 99
+        \\
+        \\return for (let i in 0:4) foo(i)
+    ,
+        \\[99, 69, 42, 17]
+    );
+}
+
 test "string join" {
     expectOutput(
         \\return ",".join([1 as str, "bar", [2] as str])

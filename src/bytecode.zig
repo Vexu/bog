@@ -92,6 +92,8 @@ pub const Op = enum(u8) {
     iter_init_double = 0xA5,
     /// This is fused with a jump_none as an optimization
     iter_next_double = 0xA6,
+    // if (A is error) ip = arg1
+    jump_error = 0xA7,
 
     call = 0x90,
     /// RETURN(arg)
@@ -250,7 +252,7 @@ pub const Module = struct {
     pub const magic = "\x7fbog";
 
     /// Current bytecode version.
-    pub const bytecode_version = 5;
+    pub const bytecode_version = 6;
     pub const last_compatible = 5;
 
     /// The header of a Bog bytecode file.
@@ -409,7 +411,7 @@ pub const Module = struct {
                         try writer.print("{} <- @{}({})\n", .{ inst.off.res, slice, inst.tagged.arg });
                 },
 
-                .jump, .jump_false, .jump_true, .jump_none, .jump_not_error => {
+                .jump, .jump_false, .jump_true, .jump_none, .jump_error, .jump_not_error => {
                     const jump_target = if (inst.jump.op == .jump)
                         @intCast(usize, @intCast(isize, ip) + module.code[ip].bare_signed)
                     else
@@ -540,7 +542,7 @@ pub const Module = struct {
             const inst = module.code[ip];
             ip += 1;
             switch (inst.op.op) {
-                .jump, .jump_false, .jump_true, .jump_none, .jump_not_error, .iter_next_double => {
+                .jump, .jump_false, .jump_true, .jump_none, .jump_error, .jump_not_error, .iter_next_double => {
                     const jump_target = if (inst.jump.op == .jump)
                         @intCast(usize, @intCast(isize, ip) + module.code[ip].bare_signed)
                     else

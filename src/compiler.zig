@@ -203,6 +203,7 @@ pub const Compiler = struct {
             loop,
             block,
             capture,
+            try_catch,
         };
 
         const Fn = struct {
@@ -222,6 +223,14 @@ pub const Compiler = struct {
             cond_begin: u32,
 
             const BreakList = std.ArrayList(u32);
+        };
+
+        const Try = struct {
+            base: Scope,
+            jumps: JumpList,
+            err_reg: RegRef,
+
+            const JumpList = std.ArrayList(u32);
         };
 
         fn declSymbol(self: *Scope, sym: Symbol) !void {
@@ -318,6 +327,19 @@ pub const Compiler = struct {
                 cur = some.parent;
             }
             return self.reportErr("use of undeclared identifier", tok);
+        }
+
+        fn getTry(scope: *Scope) ?*Scope.Try {
+            var cur: ?*Scope = scope;
+            while (cur) |some| {
+                switch (some.id) {
+                    .try_catch => return @fieldParentPtr(Try, "base", some),
+                    .func, .module => return null,
+                    else => {},
+                }
+                cur = some.parent;
+            }
+            unreachable;
         }
 
         const RegAndMut = struct {
@@ -571,13 +593,13 @@ pub const Compiler = struct {
             .Tagged => return self.genTagged(@fieldParentPtr(Node.Tagged, "base", node), res),
             .Range => return self.genRange(@fieldParentPtr(Node.Range, "base", node), res),
             .FormatString => return self.genFormatString(@fieldParentPtr(Node.FormatString, "base", node), res),
+            .Try => return self.genTry(@fieldParentPtr(Node.Try, "base", node), res),
+            .Catch => unreachable, // hanlded in genTry
 
             .Match => return self.reportErr("TODO: Match", node.firstToken()),
             .MatchCatchAll => return self.reportErr("TODO: MatchCatchAll", node.firstToken()),
             .MatchLet => return self.reportErr("TODO: MatchLet", node.firstToken()),
             .MatchCase => return self.reportErr("TODO: MatchCase", node.firstToken()),
-            .Try => return self.reportErr("TODO: Try", node.firstToken()),
-            .Catch => return self.reportErr("TODO: Catch", node.firstToken()),
         }
     }
 
@@ -1091,8 +1113,8 @@ pub const Compiler = struct {
         if (cond_jump) |some| {
             self.finishJump(some);
         }
-        while (loop_scope.breaks.popOrNull()) |some| {
-            self.finishJump(some);
+        for (loop_scope.breaks.items) |jump| {
+            self.finishJump(jump);
         }
 
         return sub_res.toVal();
@@ -1181,58 +1203,10 @@ pub const Compiler = struct {
 
         // exit loop when IterNext results in None
         self.finishJump(exit_jump);
-
-        while (loop_scope.breaks.popOrNull()) |some| {
-            self.finishJump(some);
+        for (loop_scope.breaks.items) |jump| {
+            self.finishJump(jump);
         }
 
-        return sub_res.toVal();
-    }
-
-    fn genCatch(self: *Compiler, node: *Node.Catch, res: Result) Error!Value {
-        try res.notLval(self, node.tok);
-
-        var sub_res = switch (res) {
-            .rt => res,
-            .value, .discard => .value,
-            .lval => unreachable,
-        };
-        const l_val = try self.genNodeNonEmpty(node.lhs, sub_res);
-        if (!l_val.isRt()) {
-            // not an error return as is
-            return l_val.maybeRt(self, res);
-        }
-        sub_res = .{
-            .rt = l_val.getRt(),
-        };
-
-        const catch_skip = try self.emitJump(.jump_not_error, sub_res.rt);
-
-        var capture_scope = Scope{
-            .id = .capture,
-            .parent = self.cur_scope,
-            .syms = Symbol.List.init(self.errors.list.allocator),
-        };
-        defer capture_scope.syms.deinit();
-
-        if (node.capture) |some| {
-            const unwrap_reg = self.registerAlloc();
-            try self.emitDouble(.unwrap_error_double, unwrap_reg, sub_res.rt);
-
-            self.cur_scope = &capture_scope;
-            const lval_res = if (self.tokens[node.let_const.?].id == .Keyword_let)
-                Result{ .lval = .{ .let = &Value{ .rt = unwrap_reg } } }
-            else
-                Result{ .lval = .{ .Const = &Value{ .rt = unwrap_reg } } };
-
-            assert((try self.genNode(node.capture.?, lval_res)) == .empty);
-        }
-
-        const r_val = try self.genNode(node.rhs, sub_res);
-
-        // end capture scope
-        self.cur_scope = capture_scope.parent.?;
-        self.finishJump(catch_skip);
         return sub_res.toVal();
     }
 
@@ -1425,6 +1399,12 @@ pub const Compiler = struct {
                     },
                 });
                 try self.code.append(.{ .bare = @truncate(u8, args.len) });
+
+                if (self.cur_scope.getTry()) |try_scope| {
+                    try self.emitDouble(.move_double, try_scope.err_reg, sub_res.rt);
+                    try try_scope.jumps.append(try self.emitJump(.jump_error, sub_res.rt));
+                }
+
                 return sub_res.toVal();
             },
             .member => Value{ .str = self.tokenSlice(node.r_tok) },
@@ -2183,6 +2163,121 @@ pub const Compiler = struct {
             },
         });
         try self.code.append(.{ .bare = 1 });
+        return sub_res.toVal();
+    }
+
+    fn genTry(self: *Compiler, node: *Node.Try, res: Result) Error!Value {
+        const sub_res = switch (res) {
+            .rt, .discard => res,
+            .value => Result{
+                // value is only known at runtime
+                .rt = self.registerAlloc(),
+            },
+            .lval => unreachable,
+        };
+
+        var try_scope = Scope.Try{
+            .base = .{
+                .id = .try_catch,
+                .parent = self.cur_scope,
+                .syms = Symbol.List.init(self.errors.list.allocator),
+            },
+            .jumps = Scope.Loop.BreakList.init(self.errors.list.allocator),
+            .err_reg = self.registerAlloc(),
+        };
+        self.cur_scope = &try_scope.base;
+        defer {
+            try_scope.base.syms.deinit();
+            try_scope.jumps.deinit();
+        }
+
+        const expr_val = try self.genNode(node.expr, sub_res);
+        if (sub_res != .rt and expr_val.isRt()) {
+            try self.emitSingle(.discard_single, expr_val.getRt());
+        }
+        // no longer in try scope
+        self.cur_scope = try_scope.base.parent.?;
+
+        if (try_scope.jumps.items.len == 0) {
+            // no possible error to be handled
+            return sub_res.toVal();
+        }
+
+        for (try_scope.jumps.items) |jump| {
+            self.finishJump(jump);
+        }
+        try_scope.jumps.items.len = 0;
+
+        // if no error jump over all catchers
+        try try_scope.jumps.append(try self.emitJump(.jump_not_error, try_scope.err_reg));
+        // otherwise unwrap the error
+        try self.emitDouble(.unwrap_error_double, try_scope.err_reg, try_scope.err_reg);
+
+        var capture_scope = Scope{
+            .id = .capture,
+            .parent = self.cur_scope,
+            .syms = Symbol.List.init(self.errors.list.allocator),
+        };
+        self.cur_scope = &capture_scope;
+        defer {
+            capture_scope.syms.deinit();
+            self.cur_scope = capture_scope.parent.?;
+        }
+
+        const capture_reg = self.registerAlloc();
+        var seen_catch_all = false;
+        for (node.catches) |catcher, catcher_i| {
+            if (seen_catch_all) {
+                return self.reportErr("additional handlers after catch-all handler", catcher.firstToken());
+            }
+            const catch_node = @fieldParentPtr(Node.Catch, "base", catcher);
+
+            var catch_skip: ?usize = null;
+            if (catch_node.capture) |some| {
+                if (catch_node.let_const) |tok| {
+                    seen_catch_all = true;
+
+                    const lval_res = if (self.tokens[tok].id == .Keyword_let)
+                        Result{ .lval = .{ .let = &Value{ .rt = try_scope.err_reg } } }
+                    else
+                        Result{ .lval = .{ .Const = &Value{ .rt = try_scope.err_reg } } };
+
+                    assert((try self.genNode(some, lval_res)) == .empty);
+                } else {
+                    _ = try self.genNodeNonEmpty(some, .{ .rt = capture_reg });
+                    // if not equal to the error value jump over this handler
+                    try self.emitTriple(.equal_triple, capture_reg, capture_reg, try_scope.err_reg);
+                    catch_skip = try self.emitJump(.jump_false, capture_reg);
+                }
+            } else {
+                seen_catch_all = true;
+            }
+
+            const catch_res = try self.genNode(catch_node.expr, sub_res);
+            if (sub_res != .rt and catch_res.isRt()) {
+                try self.emitSingle(.discard_single, catch_res.getRt());
+            }
+
+            // exit this hanler (unless it's the last one)
+            if (catcher_i + 1 != node.catches.len) {
+                try try_scope.jumps.append(try self.emitJump(.jump, null));
+            }
+
+            // jump over this handler if the value doesn't match
+            if (catch_skip) |some| {
+                self.finishJump(some);
+            }
+        }
+
+        // return uncaught errors
+        if (!seen_catch_all) {
+            try self.emitSingle(.return_single, try_scope.err_reg);
+        }
+
+        // exit try-catch
+        for (try_scope.jumps.items) |jump| {
+            self.finishJump(jump);
+        }
         return sub_res.toVal();
     }
 
