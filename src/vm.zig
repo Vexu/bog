@@ -110,6 +110,7 @@ pub const Vm = struct {
         try vm.addPackage("std.math", bog.std.math);
         try vm.addPackage("std.map", bog.std.map);
         try vm.addPackage("std.debug", bog.std.debug);
+        try vm.addPackage("std.json", bog.std.json);
     }
 
     /// Compiles and executes `source`.

@@ -40,7 +40,7 @@ bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)*
 
 shift_expr : add_expr (("<<" | ">>") add_expr)?
 
-add_expr : mul_expr (("-" | "+") mul_expr)*
+add_expr : mul_expr (("-" | "+" | "++") mul_expr)*
 
 mul_expr : cast_expr (("*" | "/" | "//" | "%") cast_expr)*
 

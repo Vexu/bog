@@ -1,3 +1,18 @@
+test "std.json" {
+    expectOutput(
+        \\const json = import("std.json")
+        \\return json.parse("{\"a\":[2,\"foo\",null]}")
+    ,
+        \\{"a": [2, "foo", ()]}
+    );
+    expectOutput(
+        \\const json = import("std.json")
+        \\return json.stringify({"a": [2, "foo", ()]})
+    ,
+        \\"{\"a\":[2,\"foo\",null]}"
+    );
+}
+
 test "boolean short-circuit" {
     expectOutput(
         \\const foo = fn() true

@@ -158,7 +158,7 @@ pub const Value = union(Type) {
             []u8 => .{
                 .str = .{
                     .data = data,
-                    .capacity = data.len
+                    .capacity = data.len,
                 },
             },
             else => .{
@@ -578,6 +578,10 @@ pub const Value = union(Type) {
 
     /// Converts Zig value to Bog value. Allocates copy in the gc.
     pub fn zigToBog(vm: *Vm, val: anytype) Vm.Error!*Value {
+        if (comptime std.meta.trait.hasFn("intoBog")(@TypeOf(val))) {
+            return try val.intoBog(vm);
+        }
+
         switch (@TypeOf(val)) {
             void => return &Value.None,
             bool => return if (val) &Value.True else &Value.False,
@@ -591,6 +595,11 @@ pub const Value = union(Type) {
                 // assume val was allocated with vm.gc
                 const str = try vm.gc.alloc();
                 str.* = Value.string(val);
+                return str;
+            },
+            String => {
+                const str = try vm.gc.alloc();
+                str.* = Value{ .str = val };
                 return str;
             },
             type => switch (@typeInfo(val)) {
@@ -607,6 +616,11 @@ pub const Value = union(Type) {
 
                     inline for (info.decls) |decl| {
                         if (!decl.is_pub) continue;
+                        // skip common interfaces
+                        if (comptime std.mem.eql(u8, decl.name, "intoBog")) continue;
+                        if (comptime std.mem.eql(u8, decl.name, "fromBog")) continue;
+                        if (comptime std.mem.eql(u8, decl.name, "format")) continue;
+
                         const key = try vm.gc.alloc();
                         key.* = Value.string(decl.name);
                         const value = try zigToBog(vm, @field(val, decl.name));
@@ -622,6 +636,14 @@ pub const Value = union(Type) {
                 else => @compileError("unsupported type: " ++ @typeName(val)),
             },
             else => switch (@typeInfo(@TypeOf(val))) {
+                .Pointer => |info| {
+                    if (info.size == .Slice) @compileError("unsupported type: " ++ @typeName(val));
+                    const int = try vm.gc.alloc();
+                    int.* = .{
+                        .int = @bitCast(isize, @ptrToInt(val)),
+                    };
+                    return int;
+                },
                 .Fn => {
                     const native = try vm.gc.alloc();
                     native.* = .{
@@ -669,7 +691,12 @@ pub const Value = union(Type) {
                     };
                     return tag;
                 },
-                else => @compileError("TODO unsupported type " ++ @typeName(@TypeOf(val))),
+                .Optional => if (val) |some| {
+                    return zigToBog(vm, some);
+                } else {
+                    return &Value.None;
+                },
+                else => @compileError("unsupported type: " ++ @typeName(@TypeOf(val))),
             },
         }
     }
@@ -677,6 +704,10 @@ pub const Value = union(Type) {
     /// Converts Bog value to Zig value. Returned string is invalidated
     /// on next garbage collection.
     pub fn bogToZig(val: *Value, comptime T: type, vm: *Vm) Vm.Error!T {
+        if (comptime std.meta.trait.hasFn("fromBog")(T)) {
+            return try T.fromBog(val, vm);
+        }
+
         return switch (T) {
             void => {
                 if (val.* != .none)
@@ -745,9 +776,62 @@ pub const Value = union(Type) {
                         return vm.fatal("expected no value");
                     return e;
                 },
-                else => @compileError("TODO unsupported type"),
+                else => @compileError("unsupported type: " ++ @typeName(T)),
             },
         };
+    }
+
+    pub fn jsonStringify(val: Value, options: std.json.StringifyOptions, writer: anytype) @TypeOf(writer).Error!void {
+        switch (val) {
+            .none => try writer.writeAll("null"),
+            .tuple => |t| {
+                try writer.writeByte('[');
+                for (t) |e, i| {
+                    if (i != 0) try writer.writeByte(',');
+                    try e.jsonStringify(options, writer);
+                }
+                try writer.writeByte(']');
+            },
+            .list => |*l| {
+                try writer.writeByte('[');
+                for (l.items) |e, i| {
+                    if (i != 0) try writer.writeByte(',');
+                    try e.jsonStringify(options, writer);
+                }
+                try writer.writeByte(']');
+            },
+            .map => |*m| {
+                try writer.writeByte('{');
+                for (m.items()) |*entry, i| {
+                    if (i != 0)
+                        try writer.writeAll(", ");
+                    
+                    try entry.key.jsonStringify(options, writer);
+                    try writer.writeAll(":");
+                    try entry.value.jsonStringify(options, writer);
+                }
+                try writer.writeByte('}');
+            },
+
+            .int,
+            .num,
+            .bool,
+            => try val.dump(writer, 0),
+            .str => |s| {
+                try writer.print("\"{Z}\"", .{s.data});
+            },
+            .native,
+            .func,
+            .range,
+            .err,
+            .tagged,
+            => {
+                try writer.writeByte('\"');
+                try val.dump(writer, 0);
+                try writer.writeByte('\"');
+            },
+            .iterator => unreachable,
+        }
     }
 };
 
