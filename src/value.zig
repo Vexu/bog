@@ -804,12 +804,6 @@ fn testDump(val: Value, expected: []const u8) void {
     std.testing.expectEqualStrings(expected, fbs.getWritten());
 }
 
-comptime {
-    // TODO workaround false dependency loop
-    // https://github.com/ziglang/zig/issues/4562
-    _ = @import("main.zig").main;
-}
-
 test "dump int/num" {
     var int = Value{
         .int = 2,

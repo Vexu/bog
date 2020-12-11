@@ -4,6 +4,7 @@ const Allocator = mem.Allocator;
 const assert = std.debug.assert;
 const bog = @import("bog.zig");
 const Value = bog.Value;
+const expect = std.testing.expect;
 
 //! A generational non-moving garbage collector.
 //! Inspired by https://www.pllab.riec.tohoku.ac.jp/papers/icfp2011UenoOhoriOtomoAuthorVersion.pdf
@@ -63,13 +64,37 @@ const Page = struct {
         }
         return null;
     }
+
+    fn clear(page: *Page, gc: *Gc) u32 {
+        var freed: u32 = 0;
+        for (page.meta) |s, i| {
+            switch (s) {
+                .black, .gray => {
+                    // value lives to see another day
+                    page.meta[i] = .white;
+                },
+                .white => {
+                    freed += 1;
+                    page.meta[i] = .empty;
+                    page.values[i].deinit(gc.gpa);
+                    if (page.free > i) {
+                        page.free = @truncate(u32, i);
+                    }
+                },
+                .empty => {},
+            }
+        }
+        return freed;
+    }
 };
 
 const Gc = @This();
 
-pages: std.ArrayListUnmanaged(*Page),
-stack: std.ArrayListUnmanaged(?*Value),
+pages: std.ArrayListUnmanaged(*Page) = .{},
+stack: std.ArrayListUnmanaged(?*Value) = .{},
+roots: std.ArrayListUnmanaged(*Value) = .{},
 gpa: *Allocator,
+page_limit: u32,
 
 const PageAndIndex = struct {
     page: *Page,
@@ -87,18 +112,89 @@ fn findInPage(gc: *Gc, value: *Value) PageAndIndex {
         return .{
             .page = page,
             // calculate index from offset from `Page.values`
-            .index = (@ptrToInt(value) - (@ptrToInt(page) + @byteOffsetOf(Page, values))) / @sizeOf(Value),
+            .index = (@ptrToInt(value) - (@ptrToInt(page) + @byteOffsetOf(Page, "values"))) / @sizeOf(Value),
         };
     }
 
     unreachable; // value was not allocated by the gc.
 }
 
-pub fn init(allocator: *Allocator) Gc {
+fn markGray(gc: *Gc) void {
+    for (gc.pages.items) |page| {
+        for (page.meta) |*s, i| {
+            if (s.* == .gray) {
+                s.* = .black;
+                switch (page.values[i]) {
+                    .list => |list| {
+                        for (list.items) |val| {
+                            const loc = gc.findInPage(val);
+                            if (loc.page.meta[loc.index] == .white) {
+                                loc.page.meta[loc.index] = .gray;
+                            }
+                        }
+                    },
+                    .tuple => |tuple| {
+                        for (tuple) |val| {
+                            const loc = gc.findInPage(val);
+                            if (loc.page.meta[loc.index] == .white) {
+                                loc.page.meta[loc.index] = .gray;
+                            }
+                        }
+                    },
+                    .map => |map| {
+                        @panic("TODO");
+                    },
+                    .err => |err| {
+                        const loc = gc.findInPage(err);
+                        if (loc.page.meta[loc.index] == .white) {
+                            loc.page.meta[loc.index] = .gray;
+                        }
+                    },
+                    .func => |func| {
+                        for (func.captures) |val| {
+                            const loc = gc.findInPage(val);
+                            if (loc.page.meta[loc.index] == .white) {
+                                loc.page.meta[loc.index] = .gray;
+                            }
+                        }
+                    },
+                    .iterator => |iter| {
+                        const loc = gc.findInPage(iter.value);
+                        if (loc.page.meta[loc.index] == .white) {
+                            loc.page.meta[loc.index] = .gray;
+                        }
+                    },
+                    else => {},
+                }
+            }
+        }
+    }
+}
+
+pub fn collect(gc: *Gc) usize {
+    for (gc.stack.items) |val| {
+        const loc = gc.findInPage(val orelse continue);
+
+        loc.page.meta[loc.index] = .gray;
+    }
+    for (gc.roots.items) |val| {
+        const loc = gc.findInPage(val);
+
+        loc.page.meta[loc.index] = .gray;
+    }
+    gc.markGray();
+    var freed: usize = 0;
+    for (gc.pages.items) |page| {
+        freed += page.clear(gc);
+    }
+    return freed;
+}
+
+pub fn init(allocator: *Allocator, page_limit: u32) Gc {
+    std.debug.assert(page_limit >= 1);
     return .{
-        .pages = .{},
-        .stack = .{},
         .gpa = allocator,
+        .page_limit = page_limit,
     };
 }
 
@@ -107,6 +203,7 @@ pub fn deinit(gc: *Gc) void {
     for (gc.pages.items) |page| page.deinit(gc);
     gc.pages.deinit(gc.gpa);
     gc.stack.deinit(gc.gpa);
+    gc.roots.deinit(gc.gpa);
 }
 
 /// Allocate a new Value on the heap.
@@ -124,7 +221,21 @@ pub fn alloc(gc: *Gc) !*Value {
         if (page.alloc()) |some| return some;
     }
 
-    // TODO collect
+    const freed = gc.collect();
+
+    if (freed < Page.val_count / 4 and gc.pages.items.len != gc.page_limit) {
+        const page = try Page.create();
+        errdefer page.deinit(gc);
+        try gc.pages.append(gc.gpa, page);
+
+        // we just created this page so it is empty.
+        return page.alloc() orelse unreachable;
+    } else if (freed != 0) {
+        // we just freed over Page.val_count / 4, values, allocation cannot fail
+        return gc.alloc() catch unreachable;
+    }
+
+    // no values could be collected and page_limit has been reached
     return error.OutOfMemory;
 }
 
@@ -200,4 +311,69 @@ pub fn stackAlloc(gc: *Gc, index: usize) !*Value {
 pub fn stackShrink(gc: *Gc, size: usize) void {
     if (size > gc.stack.items.len) return;
     gc.stack.items.len = size;
+}
+
+pub fn removeRoot(gc: *Gc, opt_val: ?*Value) void {
+    const val = opt_val orelse return;
+    for (gc.roots.items) |root, i| {
+        if (root == val) {
+            _ = gc.roots.swapRemove(i);
+            return;
+        }
+    }
+}
+
+test "basic collect" {
+    var gc = Gc.init(std.testing.allocator, 1);
+    defer gc.deinit();
+
+    var tuple = try gc.stackAlloc(0);
+    tuple.* = .{ .tuple = try gc.gpa.alloc(*Value, 32) };
+
+    for (tuple.tuple) |*e, i| {
+        const val = try gc.alloc();
+        val.* = .{ .int = @intCast(i64, i) };
+        e.* = val;
+    }
+
+    var i: i64 = 0;
+    while (i < (1024 - 32 - 1 - 2)) : (i += 1) {
+        const val = try gc.alloc();
+        val.* = .{ .int = @intCast(i64, i) };
+    }
+
+    {
+        // self referencing values should be collected
+        const a = try gc.alloc();
+        const b = try gc.alloc();
+        a.* = .{ .err = b };
+        b.* = .{ .err = a };
+    }
+
+    expect(gc.pages.items[0].free == 1024);
+    expect(gc.collect() == 1024 - 32 - 1);
+    expect(gc.pages.items[0].free == 33);
+}
+
+test "major collection" {
+    var gc = Gc.init(std.testing.allocator, 2);
+    defer gc.deinit();
+
+    // ensure we allocate at least 2 pages.
+    const alloc_count = Page.val_count + Page.val_count / 2;
+
+    // create a looped chain of values
+    var i: i64 = 0;
+    var first: *Value = try gc.stackAlloc(0);
+    var prev: *Value = first;
+    while (i < alloc_count) : (i += 1) {
+        const val = try gc.alloc();
+        prev.* = .{ .err = val };
+        prev = val;
+        val.* = .{ .int = 1 };
+    }
+    prev.* = .{ .err = first };
+
+    gc.stack.items.len = 0;
+    expect(gc.collect() == alloc_count + 1);
 }

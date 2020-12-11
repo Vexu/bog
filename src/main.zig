@@ -334,6 +334,5 @@ fn debugRead(gpa: *std.mem.Allocator, args: [][]const u8) !void {
 }
 
 comptime {
-    _ = @import("tokenizer.zig");
-    _ = @import("value.zig");
+    _ = main;
 }

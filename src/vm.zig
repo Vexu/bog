@@ -33,7 +33,6 @@ pub const Vm = struct {
 
     options: Options,
 
-    // TODO gc can't see this and it will be invalidated on collect
     last_get: *Value = &Value.None,
 
     const max_depth = 512;
@@ -47,6 +46,11 @@ pub const Vm = struct {
 
         /// maximum size of imported files
         max_import_size: u32 = 1024 * 1024,
+
+        /// maximum amount of pages gc may allocate.
+        /// 1 page == 1 MiB.
+        /// default 2 GiB.
+        page_limit: u32 = 2048,
     };
 
     const FunctionFrame = struct {
@@ -57,8 +61,6 @@ pub const Vm = struct {
         module: *Module,
         // this points to the Fn values captures so the gc can see them
         captures: []*Value,
-
-        // TODO gc can't see this and it will be invalidated on collect
         this: ?*Value = null,
     };
 
@@ -71,7 +73,7 @@ pub const Vm = struct {
         return .{
             .ip = 0,
             .sp = 0,
-            .gc = Gc.init(allocator),
+            .gc = Gc.init(allocator, options.page_limit),
             .errors = Errors.init(allocator),
             .options = options,
         };
@@ -434,6 +436,7 @@ pub const Vm = struct {
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
+                    vm.gc.removeRoot(frame.this);
 
                     const ret_val = try vm.gc.stackAlloc(vm.sp + frame.ret_reg);
                     ret_val.* = arg.*;
@@ -655,7 +658,9 @@ pub const Vm = struct {
                     try container.get(vm, index, res);
 
                     // this will become the value of `this` for the next function call
+                    vm.gc.removeRoot(vm.last_get);
                     vm.last_get = container;
+                    try vm.gc.roots.append(vm.gc.gpa, container);
                 },
                 .set_triple => {
                     const container = try vm.getVal(module, inst.triple.res);
@@ -725,6 +730,7 @@ pub const Vm = struct {
                         return vm.reportErr("maximum depth exceeded");
                     }
 
+                    try vm.gc.roots.append(vm.gc.gpa, vm.last_get);
                     try vm.call_stack.append(vm.gc.gpa, .{
                         .sp = vm.sp,
                         .ip = vm.ip,
@@ -755,6 +761,7 @@ pub const Vm = struct {
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
+                    vm.gc.removeRoot(frame.this);
 
                     const ret_val = try vm.gc.stackRef(vm.sp + frame.ret_reg);
                     ret_val.* = arg;
@@ -774,6 +781,7 @@ pub const Vm = struct {
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
+                    vm.gc.removeRoot(frame.this);
 
                     const ret_val = try vm.gc.stackRef(vm.sp + frame.ret_reg);
                     ret_val.* = &Value.None;
@@ -984,13 +992,14 @@ pub const Vm = struct {
         @setCold(true);
         try vm.errors.add(msg, vm.line_loc, .err);
         var i: u8 = 0;
-        while (vm.call_stack.popOrNull()) |some| {
-            try vm.errors.add("called here", some.line_loc, .trace);
+        while (vm.call_stack.popOrNull()) |frame| {
+            try vm.errors.add("called here", frame.line_loc, .trace);
             i += 1;
             if (i > 32) {
-                try vm.errors.add("too many calls, stopping now", some.line_loc, .note);
+                try vm.errors.add("too many calls, stopping now", frame.line_loc, .note);
                 break;
             }
+            vm.gc.removeRoot(frame.this);
         }
         return error.RuntimeError;
     }
