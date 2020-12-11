@@ -54,6 +54,14 @@ pub fn builder(allocator: *Allocator) Builder {
     };
 }
 
+pub fn init(allocator: *Allocator, comptime fmt: []const u8, args: anytype) !String {
+    var b = builder(allocator);
+    errdefer b.cancel();
+
+    try b.writer().print(fmt, args);
+    return b.finish();
+}
+
 pub fn deinit(str: *String, allocator: *Allocator) void {
     if (str.capacity != 0) {
         allocator.free(str.data);

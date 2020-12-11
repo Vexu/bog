@@ -228,14 +228,13 @@ pub const Token = struct {
         .{ "_", .Underscore },
     });
 
-    pub fn string(id: Id) []const u8 {
+    pub fn string(id: @TagType(Id)) []const u8 {
         return switch (id) {
             .Comment => "<Comment>",
             .Eof => "<EOF>",
             .Nl => "<NL>",
             .Indent => "<INDENT>",
             .Identifier => "Identifier",
-            .This => "this",
             .String => "String",
             .Integer => "Integer",
             .Number => "Number",
@@ -253,6 +252,7 @@ pub const Token = struct {
             .LBracket => "[",
             .RBracket => "]",
             .Period => ".",
+            .EqualRarr => "=>",
             .Caret => "^",
             .CaretEqual => "^=",
             .Plus => "+",
@@ -282,6 +282,8 @@ pub const Token = struct {
             .Tilde => "~",
             .Colon => ":",
             .Underscore => "_",
+            .At => "@",
+            .FormatStart, .Format, .FormatEnd => "Format string",
 
             .Keyword_not => "not",
             .Keyword_and => "and",
@@ -306,6 +308,7 @@ pub const Token = struct {
             .Keyword_fn => "fn",
             .Keyword_as => "as",
             .Keyword_const => "const",
+            .Keyword_this => "this",
         };
     }
 };
@@ -393,7 +396,7 @@ pub const Tokenizer = struct {
 
     fn reportErr(self: *Tokenizer, msg: []const u8, c: u21) Error {
         try self.errors.add(
-            msg,
+            .{ .data = msg },
             @truncate(u32, self.it.i - (unicode.utf8CodepointSequenceLength(c) catch unreachable)),
             .err,
         );

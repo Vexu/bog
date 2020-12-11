@@ -59,7 +59,7 @@ pub const Errors = struct {
     };
 
     const List = zig_std.ArrayList(struct {
-        msg: []const u8,
+        msg: Value.String,
         index: u32,
         kind: Kind,
     });
@@ -69,10 +69,13 @@ pub const Errors = struct {
     }
 
     pub fn deinit(self: *Errors) void {
+        for (self.list.items) |*err| {
+            err.msg.deinit(self.list.allocator);
+        }
         self.list.deinit();
     }
 
-    pub fn add(self: *Errors, msg: []const u8, index: u32, kind: Kind) !void {
+    pub fn add(self: *Errors, msg: Value.String, index: u32, kind: Kind) !void {
         try self.list.append(.{
             .msg = msg,
             .index = index,
@@ -87,13 +90,13 @@ pub const Errors = struct {
         const RESET = "\x1b[0m";
         const CYAN = "\x1b[36;1m";
 
-        for (self.list.items) |e| {
+        for (self.list.items) |*e| {
             switch (e.kind) {
                 .err => try writer.writeAll(RED ++ "error: " ++ BOLD),
                 .note => try writer.writeAll(CYAN ++ "note: " ++ BOLD),
                 .trace => {},
             }
-            try writer.print("{}\n" ++ RESET, .{e.msg});
+            try writer.print("{}\n" ++ RESET, .{e.msg.data});
 
             const start = lineBegin(source, e.index);
             const end = zig_std.mem.indexOfScalarPos(u8, source, e.index, '\n') orelse source.len;
@@ -101,6 +104,7 @@ pub const Errors = struct {
             try writer.writeAll(zig_std.cstr.line_sep);
             try writer.writeByteNTimes(' ', e.index - start);
             try writer.writeAll(GREEN ++ "^\n" ++ RESET);
+            e.msg.deinit(self.list.allocator);
         }
         self.list.items.len = 0;
     }

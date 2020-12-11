@@ -742,7 +742,7 @@ pub const Parser = struct {
         if (try parser.forExpr(skip_nl, allow_range, level)) |res| return res;
         if (try parser.matchExpr(skip_nl, level)) |res| return res;
         if (try parser.tryExpr(skip_nl, allow_range, level)) |res| return res;
-        return parser.reportErr("expected Identifier, String, Number, true, false, '(', '{{', '[', error, import, if, while, for or match", parser.tokens[parser.tok_index]);
+        return parser.reportErr("expected Identifier, String, Number, true, false, '(', '{{', '[', error, try, import, if, while, for or match", parser.tokens[parser.tok_index]);
     }
 
     /// format_string : FORMAT_START expr (FORMAT expr)* FORMAT_END
@@ -1103,7 +1103,7 @@ pub const Parser = struct {
     }
 
     fn reportErr(parser: *Parser, msg: []const u8, tok: Token) Error {
-        try parser.errors.add(msg, tok.start, .err);
+        try parser.errors.add(.{ .data = msg }, tok.start, .err);
         return error.ParseError;
     }
 
@@ -1159,6 +1159,12 @@ pub const Parser = struct {
 
     fn expectToken(parser: *Parser, id: TokenId, skip_nl: bool) !TokenIndex {
         if (parser.eatToken(id, skip_nl)) |tok| return tok;
-        return parser.reportErr("unexpected token", parser.tokens[parser.tok_index]);
+        const tok = parser.tokens[parser.tok_index];
+        try parser.errors.add(try bog.Value.String.init(
+            parser.gpa,
+            "expected '{}', found '{}'",
+            .{ Token.string(id), Token.string(tok.id) },
+        ), tok.start, .err);
+        return error.ParseError;
     }
 };

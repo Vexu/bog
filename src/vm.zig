@@ -702,8 +702,7 @@ pub const Vm = struct {
 
                     if (func.* == .native) {
                         if (func.native.arg_count != arg_count) {
-                            // TODO improve this error message to tell the expected and given counts
-                            return vm.reportErr("unexpected arg count");
+                            return vm.reportErrExtra(try Value.String.init(vm.gc.gpa, "expected {} args, got {}", .{ func.native.arg_count, arg_count }));
                         }
                         const args = vm.gc.stack.items[vm.sp + first ..][0..arg_count];
                         for (args) |arg| {
@@ -722,8 +721,7 @@ pub const Vm = struct {
                     }
 
                     if (func.func.arg_count != arg_count) {
-                        // TODO improve this error message to tell the expected and given counts
-                        return vm.reportErr("unexpected arg count");
+                        return vm.reportErrExtra(try Value.String.init(vm.gc.gpa, "expected {} args, got {}", .{ func.func.arg_count, arg_count }));
                     }
 
                     if (vm.call_stack.items.len > max_depth) {
@@ -990,13 +988,18 @@ pub const Vm = struct {
 
     pub fn reportErr(vm: *Vm, msg: []const u8) Error {
         @setCold(true);
-        try vm.errors.add(msg, vm.line_loc, .err);
+        return vm.reportErrExtra(.{ .data = msg });
+    }
+
+    pub fn reportErrExtra(vm: *Vm, str: Value.String) Error {
+        @setCold(true);
+        try vm.errors.add(str, vm.line_loc, .err);
         var i: u8 = 0;
         while (vm.call_stack.popOrNull()) |frame| {
-            try vm.errors.add("called here", frame.line_loc, .trace);
+            try vm.errors.add(.{ .data = "called here" }, frame.line_loc, .trace);
             i += 1;
             if (i > 32) {
-                try vm.errors.add("too many calls, stopping now", frame.line_loc, .note);
+                try vm.errors.add(.{ .data = "too many calls, stopping now" }, frame.line_loc, .note);
                 break;
             }
             vm.gc.removeRoot(frame.this);

@@ -101,7 +101,7 @@ const PageAndIndex = struct {
     index: usize,
 };
 
-fn findInPage(gc: *Gc, value: *Value) PageAndIndex {
+fn findInPage(gc: *Gc, value: *const Value) PageAndIndex {
     for (gc.pages.items) |page| {
         // is the value before this page
         if (@ptrToInt(value) < @ptrToInt(page)) continue;
@@ -119,6 +119,13 @@ fn findInPage(gc: *Gc, value: *Value) PageAndIndex {
     unreachable; // value was not allocated by the gc.
 }
 
+fn markVal(gc: *Gc, value: *const Value) void {
+    const loc = gc.findInPage(value);
+    if (loc.page.meta[loc.index] == .white) {
+        loc.page.meta[loc.index] = .gray;
+    }
+}
+
 fn markGray(gc: *Gc) void {
     for (gc.pages.items) |page| {
         for (page.meta) |*s, i| {
@@ -127,42 +134,30 @@ fn markGray(gc: *Gc) void {
                 switch (page.values[i]) {
                     .list => |list| {
                         for (list.items) |val| {
-                            const loc = gc.findInPage(val);
-                            if (loc.page.meta[loc.index] == .white) {
-                                loc.page.meta[loc.index] = .gray;
-                            }
+                            gc.markVal(val);
                         }
                     },
                     .tuple => |tuple| {
                         for (tuple) |val| {
-                            const loc = gc.findInPage(val);
-                            if (loc.page.meta[loc.index] == .white) {
-                                loc.page.meta[loc.index] = .gray;
-                            }
+                            gc.markVal(val);
                         }
                     },
                     .map => |map| {
-                        @panic("TODO");
+                        for (map.items()) |*entry| {
+                            gc.markVal(entry.key);
+                            gc.markVal(entry.value);
+                        }
                     },
                     .err => |err| {
-                        const loc = gc.findInPage(err);
-                        if (loc.page.meta[loc.index] == .white) {
-                            loc.page.meta[loc.index] = .gray;
-                        }
+                        gc.markVal(err);
                     },
                     .func => |func| {
                         for (func.captures) |val| {
-                            const loc = gc.findInPage(val);
-                            if (loc.page.meta[loc.index] == .white) {
-                                loc.page.meta[loc.index] = .gray;
-                            }
+                            gc.markVal(val);
                         }
                     },
                     .iterator => |iter| {
-                        const loc = gc.findInPage(iter.value);
-                        if (loc.page.meta[loc.index] == .white) {
-                            loc.page.meta[loc.index] = .gray;
-                        }
+                        gc.markVal(iter.value);
                     },
                     else => {},
                 }

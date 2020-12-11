@@ -361,6 +361,7 @@ const warn = std.debug.warn;
 const bog = @import("bog");
 
 fn testTransform(source: []const u8, expected: []const u8) void {
+    _ = bog.Vm; // avoid false dependency loop
     var errors = bog.Errors.init(std.testing.allocator);
     defer errors.deinit();
     var tree = bog.parse(std.testing.allocator, source, &errors) catch |e| switch (e) {

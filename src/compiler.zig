@@ -16,7 +16,6 @@ pub fn compile(gpa: *Allocator, source: []const u8, errors: *Errors) (Compiler.E
     var tree = try bog.parse(gpa, source, errors);
     defer tree.deinit();
 
-    // TODO reduce usage of arenas
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
     const arena = &arena_state.allocator;
@@ -2385,7 +2384,7 @@ pub const Compiler = struct {
     }
 
     fn reportErr(self: *Compiler, msg: []const u8, tok: TokenIndex) Error {
-        try self.errors.add(msg, self.tokens[tok].start, .err);
+        try self.errors.add(.{ .data = msg }, self.tokens[tok].start, .err);
         return error.CompileError;
     }
 };

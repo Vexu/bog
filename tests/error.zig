@@ -1,3 +1,20 @@
+test "unexpected token" {
+    expectError(
+        \\if (a b
+    ,
+        \\expected ')', found 'Identifier'
+    );
+}
+
+test "unexpected arg count" {
+    expectError(
+        \\const foo = fn (a, b) a + b
+        \\foo(1)
+    ,
+        \\expected 2 args, got 1
+    );
+}
+
 test "extra cases after catch-all" {
     expectError(
         \\match (1)
@@ -102,7 +119,7 @@ fn expectError(source: []const u8, expected: []const u8) void {
         else => @panic("test failure"),
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
             const result = vm.errors.list.items[0].msg;
-            std.testing.expectEqualStrings(expected, result);
+            std.testing.expectEqualStrings(expected, result.data);
             return;
         },
     };
