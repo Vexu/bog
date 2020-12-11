@@ -501,7 +501,10 @@ pub const Module = struct {
                 .build_range => {
                     const cont = module.code[ip].range_cont;
                     ip += 1;
-                    try writer.print("{} <- {}:{}:{}\n", .{ inst.range.res, inst.range.start, inst.range.end, cont.step });
+                    try writer.print("{} <- {}:{}:{} #{}:{}:{}\n", .{
+                        inst.range.res,            inst.range.start,        inst.range.end,           cont.step,
+                        @tagName(cont.start_kind), @tagName(cont.end_kind), @tagName(cont.step_kind),
+                    });
                 },
 
                 .call => {

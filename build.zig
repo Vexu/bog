@@ -2,9 +2,10 @@ const std = @import("std");
 const Builder = std.build.Builder;
 
 pub fn build(b: *Builder) void {
-    b.setPreferredReleaseMode(.ReleaseSafe);
+    const mode = b.standardReleaseOptions();
 
     const lib = b.addStaticLibrary("bog", "src/lib.zig");
+    lib.setBuildMode(mode);
     lib.linkLibC();
     lib.addBuildOption(
         bool,
@@ -21,6 +22,7 @@ pub fn build(b: *Builder) void {
 
     // c library usage example
     const c_example = b.addExecutable("bog_from_c", null);
+    c_example.setBuildMode(mode);
     c_example.addCSourceFile("examples/bog_from_c.c", &[_][]const u8{});
     c_example.addIncludeDir("include");
     c_example.linkSystemLibrary("bog");
@@ -31,6 +33,7 @@ pub fn build(b: *Builder) void {
 
     // calling zig from bog example
     const zig_from_bog = b.addExecutable("zig_from_bog", "examples/zig_from_bog.zig");
+    zig_from_bog.setBuildMode(mode);
     zig_from_bog.addPackagePath("bog", "src/bog.zig");
     zig_from_bog.setOutputDir("examples/bin");
 
@@ -46,6 +49,7 @@ pub fn build(b: *Builder) void {
     });
 
     var exe = b.addExecutable("bog", "src/main.zig");
+    exe.setBuildMode(mode);
     exe.install();
 
     const fmt_step = b.step("fmt", "Format all source files");

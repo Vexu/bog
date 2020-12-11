@@ -1,3 +1,18 @@
+test "std.gc" {
+    expectOutput(
+        \\const {collect} = import("std.gc")
+        \\const json = import("std.json")
+        \\
+        \\const makeGarbage = fn()
+        \\    json.stringify({"a": [2, "foo", ()]})
+        \\
+        \\for (0:5) makeGarbage()
+        \\return collect()
+    ,
+        \\52
+    );
+}
+
 test "std.json" {
     expectOutput(
         \\const json = import("std.json")

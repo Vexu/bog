@@ -6,7 +6,7 @@ const bog = @import("bog.zig");
 const Value = bog.Value;
 const expect = std.testing.expect;
 
-//! A generational non-moving garbage collector.
+//! A non-moving garbage collector.
 //! Inspired by https://www.pllab.riec.tohoku.ac.jp/papers/icfp2011UenoOhoriOtomoAuthorVersion.pdf
 
 /// A pool of values prefixed with a header containing two bitmaps for
@@ -101,7 +101,12 @@ const PageAndIndex = struct {
     index: usize,
 };
 
-fn findInPage(gc: *Gc, value: *const Value) PageAndIndex {
+fn findInPage(gc: *Gc, value: *const Value) ?PageAndIndex {
+    // These will never be allocated
+    if (value == &Value.None or
+        value == &Value.True or
+        value == &Value.False) return null;
+
     for (gc.pages.items) |page| {
         // is the value before this page
         if (@ptrToInt(value) < @ptrToInt(page)) continue;
@@ -109,7 +114,7 @@ fn findInPage(gc: *Gc, value: *const Value) PageAndIndex {
         if (@ptrToInt(value) > @ptrToInt(page) + @sizeOf(Page)) continue;
 
         // value is in this page
-        return .{
+        return PageAndIndex{
             .page = page,
             // calculate index from offset from `Page.values`
             .index = (@ptrToInt(value) - (@ptrToInt(page) + @byteOffsetOf(Page, "values"))) / @sizeOf(Value),
@@ -120,13 +125,14 @@ fn findInPage(gc: *Gc, value: *const Value) PageAndIndex {
 }
 
 fn markVal(gc: *Gc, value: *const Value) void {
-    const loc = gc.findInPage(value);
+    const loc = gc.findInPage(value) orelse return;
     if (loc.page.meta[loc.index] == .white) {
         loc.page.meta[loc.index] = .gray;
     }
 }
 
 fn markGray(gc: *Gc) void {
+    // mark all white values reachable from gray values as gray
     for (gc.pages.items) |page| {
         for (page.meta) |*s, i| {
             if (s.* == .gray) {
@@ -159,25 +165,36 @@ fn markGray(gc: *Gc) void {
                     .iterator => |iter| {
                         gc.markVal(iter.value);
                     },
-                    else => {},
+                    .tagged => |tag| {
+                        gc.markVal(tag.value);
+                    },
+                    // These values don't reference any other values
+                    .native, .str, .int, .num, .range, .none, .bool => {},
                 }
             }
         }
     }
 }
 
+/// Collect all unreachable values.
 pub fn collect(gc: *Gc) usize {
+    // mark roots as reachable
     for (gc.stack.items) |val| {
-        const loc = gc.findInPage(val orelse continue);
+        // beautiful
+        const loc = gc.findInPage(val orelse continue) orelse continue;
 
         loc.page.meta[loc.index] = .gray;
     }
     for (gc.roots.items) |val| {
-        const loc = gc.findInPage(val);
+        const loc = gc.findInPage(val) orelse continue;
 
         loc.page.meta[loc.index] = .gray;
     }
+
+    // mark values referenced from root values as reachable
     gc.markGray();
+
+    // free all unreachable values
     var freed: usize = 0;
     for (gc.pages.items) |page| {
         freed += page.clear(gc);

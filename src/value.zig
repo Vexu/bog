@@ -805,7 +805,7 @@ pub const Value = union(Type) {
                 for (m.items()) |*entry, i| {
                     if (i != 0)
                         try writer.writeAll(", ");
-                    
+
                     try entry.key.jsonStringify(options, writer);
                     try writer.writeAll(":");
                     try entry.value.jsonStringify(options, writer);
