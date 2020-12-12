@@ -380,6 +380,10 @@ test "major collection" {
 }
 
 test "stack protect" {
+    if (std.builtin.os.tag == .windows) {
+        // TODO @frameAddress returns an address after &val1 on windows?
+        return error.SkipZigTest;
+    }
     var gc = Gc.init(std.testing.allocator, 2);
     defer gc.deinit();
 

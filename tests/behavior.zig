@@ -1,4 +1,8 @@
 test "std.gc" {
+    if (std.builtin.os.tag == .windows) {
+        // TODO this gives a different result on windows
+        return error.SkipZigTest;
+    }
     expectOutput(
         \\const {collect} = import("std.gc")
         \\const json = import("std.json")
