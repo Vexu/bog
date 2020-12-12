@@ -170,9 +170,6 @@ pub const Compiler = struct {
         name: []const u8,
         // val: Value,
         reg: RegRef,
-
-        /// if this is a capture, this tells where the closure stored it
-        capture_reg: RegRef = 0,
         mut: bool,
     };
 
@@ -311,7 +308,7 @@ pub const Compiler = struct {
 
     fn clearScopes(self: *Compiler, scope_count: usize) void {
         var i = self.scopes.items.len;
-        while (i != scope_count) {
+        while (i > scope_count) {
             i -= 1;
             const scope = self.scopes.items[i];
             switch (scope) {
@@ -469,8 +466,16 @@ pub const Compiler = struct {
                 .func => |f| {
                     for (f.captures.items) |capture| {
                         if (mem.eql(u8, capture.name, name)) {
+                            const capture_reg = try f.regAlloc();
+                            try f.code.append(.{
+                                .double = .{
+                                    .op = .load_capture_double,
+                                    .res = capture_reg,
+                                    .arg = @truncate(u8, f.captures.items.len - 1),
+                                },
+                            });
                             return RegAndMut{
-                                .reg = capture.capture_reg,
+                                .reg = capture_reg,
                                 .mut = capture.mut,
                             };
                         }
@@ -478,8 +483,6 @@ pub const Compiler = struct {
 
                     const sym = try self.findSymbolExtra(tok, i, f);
                     const capture_reg = try f.regAlloc();
-                    f.captures.items[f.captures.items.len - 1].capture_reg = capture_reg;
-
                     try f.code.append(.{
                         .double = .{
                             .op = .load_capture_double,
@@ -516,6 +519,23 @@ pub const Compiler = struct {
             }
         }
         return self.reportErr("use of undeclared identifier", tok);
+    }
+
+    fn checkRedeclaration(self: *Compiler, tok: TokenIndex) !void {
+        const name = self.tokenSlice(tok);
+        var i = self.scopes.items.len;
+        while (i > 0) {
+            i -= 1;
+            const scope = self.scopes.items[i];
+            switch (scope) {
+                .symbol => |sym| if (std.mem.eql(u8, sym.name, name)) {
+                    const msg = try bog.Value.String.init(self.gpa, "redeclaration of '{}'", .{name});
+                    try self.errors.add(msg, self.tokens[tok].start, .err);
+                    return error.CompileError;
+                },
+                else => {},
+            }
+        }
     }
 
     fn getForwardDecl(self: *Compiler, tok: TokenIndex) ?RegRef {
@@ -2264,8 +2284,9 @@ pub const Compiler = struct {
                     assert(val.* == .func);
                     return self.makeRuntime(some, val.*);
                 }
-                var reg = try val.toRt(self);
+                try self.checkRedeclaration(node.tok);
 
+                var reg = try val.toRt(self);
                 if (val.* == .ref and lval == .mut) {
                     // copy on assign
                     const copy_reg = try self.func.regAlloc();

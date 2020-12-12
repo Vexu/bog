@@ -1,3 +1,12 @@
+test "redeclaration" {
+    expectError(
+        \\let i = 0
+        \\let i = 1
+    ,
+        \\redeclaration of 'i'
+    );
+}
+
 test "unexpected token" {
     expectError(
         \\if (a b
