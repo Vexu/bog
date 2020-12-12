@@ -14,8 +14,9 @@ const Error = error{ UnexpectedToken, UnexpectedEndOfJson } || std.mem.Allocator
 fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) Error!*Value {
     switch (token) {
         .ObjectBegin => {
-            var map = Value.Map{};
-            errdefer map.deinit(vm.gc.gpa);
+            const res = try vm.gc.alloc();
+            res.* = .{ .map = Value.Map{} };
+            const map = &res.map;
 
             while (true) {
                 var tok = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
@@ -28,13 +29,12 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
                 const val = try parseInternal(vm, tok, tokens);
                 try map.put(vm.gc.gpa, key, val);
             }
-            const val = try vm.gc.alloc();
-            val.* = .{ .map = map };
-            return val;
+            return res;
         },
         .ArrayBegin => {
-            var list = Value.List{};
-            errdefer list.deinit(vm.gc.gpa);
+            const res = try vm.gc.alloc();
+            res.* = .{ .list = Value.List{} };
+            const list = &res.list;
 
             while (true) {
                 const tok = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
@@ -44,9 +44,7 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
                 }
                 try list.append(vm.gc.gpa, try parseInternal(vm, tok, tokens));
             }
-            const val = try vm.gc.alloc();
-            val.* = .{ .list = list };
-            return val;
+            return res;
         },
         .ObjectEnd, .ArrayEnd => return error.UnexpectedToken,
         .String => |info| {

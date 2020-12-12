@@ -125,6 +125,10 @@ pub const Vm = struct {
 
     /// Continues execution from current instruction pointer.
     pub fn exec(vm: *Vm, mod: *Module) Error!*Value {
+        if (vm.gc.stack_protect_start == 0) {
+            vm.gc.stack_protect_start = @frameAddress();
+        }
+
         const start_len = vm.call_stack.items.len;
         var module = mod;
         while (vm.ip < module.code.len) {
@@ -436,7 +440,6 @@ pub const Vm = struct {
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
-                    vm.gc.removeRoot(frame.this);
 
                     const ret_val = try vm.gc.stackAlloc(vm.sp + frame.ret_reg);
                     ret_val.* = arg.*;
@@ -658,9 +661,7 @@ pub const Vm = struct {
                     try container.get(vm, index, res);
 
                     // this will become the value of `this` for the next function call
-                    vm.gc.removeRoot(vm.last_get);
                     vm.last_get = container;
-                    try vm.gc.roots.append(vm.gc.gpa, container);
                 },
                 .set_triple => {
                     const container = try vm.getVal(module, inst.triple.res);
@@ -730,7 +731,6 @@ pub const Vm = struct {
                         return vm.fatal("maximum depth exceeded");
                     }
 
-                    try vm.gc.roots.append(vm.gc.gpa, vm.last_get);
                     try vm.call_stack.append(vm.gc.gpa, .{
                         .sp = vm.sp,
                         .ip = vm.ip,
@@ -761,7 +761,6 @@ pub const Vm = struct {
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
-                    vm.gc.removeRoot(frame.this);
 
                     const ret_val = try vm.gc.stackRef(vm.sp + frame.ret_reg);
                     ret_val.* = arg;
@@ -781,7 +780,6 @@ pub const Vm = struct {
                     vm.ip = frame.ip;
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
-                    vm.gc.removeRoot(frame.this);
 
                     const ret_val = try vm.gc.stackRef(vm.sp + frame.ret_reg);
                     ret_val.* = &Value.None;
@@ -901,8 +899,8 @@ pub const Vm = struct {
         if (vm.ip + 1 > module.code.len)
             return error.MalformedByteCode;
 
-        vm.ip += 1;
-        return module.code[vm.ip - 1].bare;
+        defer vm.ip += 1;
+        return module.code[vm.ip].bare;
     }
 
     fn getLong(vm: *Vm, module: *Module, comptime T: type) !T {
@@ -988,23 +986,22 @@ pub const Vm = struct {
         };
     }
 
-    pub fn errorFmt(vm: *Vm, comptime fmt: []const u8, args: anytype) !*Value {
-        const msg = try std.fmt.allocPrint(vm.gc.gpa, fmt, args);
-        errdefer vm.gc.gpa.free(msg);
+    pub fn errorFmt(vm: *Vm, comptime fmt: []const u8, args: anytype) Vm.Error!*Value {
+        const str = try vm.gc.alloc();
+        str.* = .{ .str = try Value.String.init(vm.gc.gpa, fmt, args) };
 
-        return vm.errorVal(Value.string(msg));
+        const err = try vm.gc.alloc();
+        err.* = .{ .err = str };
+        return err;
     }
 
     pub fn typeError(vm: *Vm, expected: bog.Type, got: bog.Type) Vm.Error!*Value {
-        const msg = try std.fmt.allocPrint(vm.gc.gpa, "expected {}, got {}", .{ @tagName(expected), @tagName(got) });
-        errdefer vm.gc.gpa.free(msg);
-
-        return vm.errorVal(Value.string(msg));
+        return vm.errorFmt("expected {}, got {}", .{ @tagName(expected), @tagName(got) });
     }
 
-    pub fn errorVal(vm: *Vm, msg: Value) !*Value {
+    pub fn errorVal(vm: *Vm, msg: []const u8) !*Value {
         const str = try vm.gc.alloc();
-        str.* = msg;
+        str.* = Value.string(msg);
 
         const err = try vm.gc.alloc();
         err.* = .{ .err = str };
@@ -1027,7 +1024,6 @@ pub const Vm = struct {
                 try vm.errors.add(.{ .data = "too many calls, stopping now" }, frame.line_loc, .note);
                 break;
             }
-            vm.gc.removeRoot(frame.this);
         }
         return error.RuntimeError;
     }

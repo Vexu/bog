@@ -7,7 +7,7 @@ const Module = bog.Module;
 const util = @import("util.zig");
 
 pub const Type = enum(u8) {
-    none,
+    none = 0,
     int,
     num,
     bool,

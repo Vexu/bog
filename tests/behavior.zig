@@ -9,7 +9,7 @@ test "std.gc" {
         \\for (0:5) makeGarbage()
         \\return collect()
     ,
-        \\52
+        \\42
     );
 }
 

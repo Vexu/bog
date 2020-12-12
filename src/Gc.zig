@@ -20,8 +20,8 @@ const Page = struct {
     const val_count = 25_574;
     const pad_size = max_size - @sizeOf(u32) - (@sizeOf(Value) + @sizeOf(State)) * val_count;
 
-    const State = enum(u8) {
-        empty,
+    const State = packed enum(u8) {
+        empty = 0,
         white,
         gray,
         black,
@@ -92,9 +92,9 @@ const Gc = @This();
 
 pages: std.ArrayListUnmanaged(*Page) = .{},
 stack: std.ArrayListUnmanaged(?*Value) = .{},
-roots: std.ArrayListUnmanaged(*Value) = .{},
 gpa: *Allocator,
 page_limit: u32,
+stack_protect_start: usize = 0,
 
 const PageAndIndex = struct {
     page: *Page,
@@ -109,19 +109,19 @@ fn findInPage(gc: *Gc, value: *const Value) ?PageAndIndex {
 
     for (gc.pages.items) |page| {
         // is the value before this page
-        if (@ptrToInt(value) < @ptrToInt(page)) continue;
+        if (@ptrToInt(value) < @ptrToInt(&page.values[0])) continue;
         // is the value after this page
-        if (@ptrToInt(value) > @ptrToInt(page) + @sizeOf(Page)) continue;
+        if (@ptrToInt(value) > @ptrToInt(&page.values[page.values.len - 1])) continue;
 
         // value is in this page
         return PageAndIndex{
             .page = page,
             // calculate index from offset from `Page.values`
-            .index = (@ptrToInt(value) - (@ptrToInt(page) + @byteOffsetOf(Page, "values"))) / @sizeOf(Value),
+            .index = (@ptrToInt(value) - @ptrToInt(&page.values[0])) / @sizeOf(Value),
         };
     }
 
-    unreachable; // value was not allocated by the gc.
+    return null; // value was not allocated by the gc.
 }
 
 fn markVal(gc: *Gc, value: *const Value) void {
@@ -185,10 +185,15 @@ pub fn collect(gc: *Gc) usize {
 
         loc.page.meta[loc.index] = .gray;
     }
-    for (gc.roots.items) |val| {
-        const loc = gc.findInPage(val) orelse continue;
+    if (gc.stack_protect_start != 0) {
+        var i = @intToPtr([*]*Value, gc.stack_protect_start);
+        while (@ptrToInt(i) > @frameAddress()) : (i -= 1) {
+            const loc = gc.findInPage(i[0]) orelse continue;
 
-        loc.page.meta[loc.index] = .gray;
+            if (loc.page.meta[loc.index] != .empty) {
+                loc.page.meta[loc.index] = .gray;
+            }
+        }
     }
 
     // mark values referenced from root values as reachable
@@ -215,7 +220,6 @@ pub fn deinit(gc: *Gc) void {
     for (gc.pages.items) |page| page.deinit(gc);
     gc.pages.deinit(gc.gpa);
     gc.stack.deinit(gc.gpa);
-    gc.roots.deinit(gc.gpa);
 }
 
 /// Allocate a new Value on the heap.
@@ -320,16 +324,6 @@ pub fn stackShrink(gc: *Gc, size: usize) void {
     gc.stack.items.len = size;
 }
 
-pub fn removeRoot(gc: *Gc, opt_val: ?*Value) void {
-    const val = opt_val orelse return;
-    for (gc.roots.items) |root, i| {
-        if (root == val) {
-            _ = gc.roots.swapRemove(i);
-            return;
-        }
-    }
-}
-
 test "basic collect" {
     var gc = Gc.init(std.testing.allocator, 1);
     defer gc.deinit();
@@ -383,4 +377,19 @@ test "major collection" {
 
     gc.stack.items.len = 0;
     expect(gc.collect() == alloc_count + 1);
+}
+
+test "stack protect" {
+    var gc = Gc.init(std.testing.allocator, 2);
+    defer gc.deinit();
+
+    gc.stack_protect_start = @frameAddress();
+
+    var val1 = try gc.alloc();
+    var val2 = try gc.alloc();
+
+    expect(gc.collect() == 0);
+
+    gc.stack_protect_start = 0;
+    expect(gc.collect() == 2);
 }

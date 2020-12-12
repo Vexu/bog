@@ -138,18 +138,18 @@ pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {
         else if (mem.eql(u8, str.data, "false"))
             return &Value.False
         else
-            return vm.errorVal(Value.string("cannot cast string to bool"));
+            return vm.errorVal("cannot cast string to bool");
     }
 
     const new_val = try vm.gc.alloc();
     new_val.* = switch (type_id) {
         .int => .{
             .int = @import("util.zig").parseInt(str.data) catch
-                return vm.errorVal(Value.string("cannot cast string to int")),
+                return vm.errorVal("cannot cast string to int"),
         },
         .num => .{
             .num = @import("util.zig").parseNum(str.data) catch
-                return vm.errorVal(Value.string("cannot cast string to num")),
+                return vm.errorVal("cannot cast string to num"),
         },
         .bool => unreachable,
         .str => unreachable, // already string
@@ -224,7 +224,7 @@ pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
                 try w.writeByte(c);
             } else {
                 if (arg_i >= args.len) {
-                    return vm.errorVal(Value.string("too few arguments"));
+                    return vm.errorVal("too few arguments");
                 }
                 format_start = i;
                 state = .format;
@@ -254,7 +254,7 @@ pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
                         try args[arg_i].dump(w, default_dump_depth);
                     },
                     else => {
-                        return vm.errorVal(Value.string("unknown format specifier"));
+                        return vm.errorVal("unknown format specifier");
                     },
                 }
 
@@ -264,7 +264,7 @@ pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
         }
     }
     if (arg_i != args.len) {
-        return vm.errorVal(Value.string("unused arguments"));
+        return vm.errorVal("unused arguments");
     }
 
     const ret = try vm.gc.alloc();
