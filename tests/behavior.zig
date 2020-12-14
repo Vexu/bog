@@ -1,3 +1,16 @@
+test "continue" {
+    expectOutput(
+        \\let i = 0
+        \\while (i < 1)
+        \\    i += 1
+        \\    continue
+    , "()");
+    expectOutput(
+        \\for (let i in 0:1)
+        \\    continue
+    , "()");
+}
+
 test "std.gc" {
     if (std.builtin.os.tag == .windows) {
         // TODO this gives a different result on windows

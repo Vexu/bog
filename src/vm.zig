@@ -137,21 +137,21 @@ pub const Vm = struct {
 
             switch (inst.op.op) {
                 .const_int => {
-                    const res = try vm.getNewVal(module, inst.int.res);
+                    const res = try vm.getNewVal(inst.int.res);
 
                     res.* = .{
                         .int = if (inst.int.long) try vm.getLong(module, i64) else inst.int.arg,
                     };
                 },
                 .const_num => {
-                    const res = try vm.getNewVal(module, inst.single.arg);
+                    const res = try vm.getNewVal(inst.single.arg);
 
                     res.* = .{
                         .num = try vm.getLong(module, f64),
                     };
                 },
                 .const_primitive => {
-                    const res = try vm.getRef(module, inst.primitive.res);
+                    const res = try vm.getRef(inst.primitive.res);
 
                     res.* = switch (inst.primitive.kind) {
                         .none => &Value.None,
@@ -161,15 +161,15 @@ pub const Vm = struct {
                     };
                 },
                 .const_string_off => {
-                    const res = try vm.getNewVal(module, inst.off.res);
+                    const res = try vm.getNewVal(inst.off.res);
                     const str = try vm.getString(module, inst);
 
                     res.* = Value.string(str);
                 },
                 .add_triple => {
-                    const res = try vm.getNewVal(module, inst.triple.res);
-                    const lhs = try vm.getNum(module, inst.triple.lhs);
-                    const rhs = try vm.getNum(module, inst.triple.rhs);
+                    const res = try vm.getNewVal(inst.triple.res);
+                    const lhs = try vm.getNum(inst.triple.lhs);
+                    const rhs = try vm.getNum(inst.triple.rhs);
 
                     // TODO https://github.com/ziglang/zig/issues/3234 on all of these
                     const copy: Value = if (needNum(lhs, rhs))
@@ -179,9 +179,9 @@ pub const Vm = struct {
                     res.* = copy;
                 },
                 .sub_triple => {
-                    const res = try vm.getNewVal(module, inst.triple.res);
-                    const lhs = try vm.getNum(module, inst.triple.lhs);
-                    const rhs = try vm.getNum(module, inst.triple.rhs);
+                    const res = try vm.getNewVal(inst.triple.res);
+                    const lhs = try vm.getNum(inst.triple.lhs);
+                    const rhs = try vm.getNum(inst.triple.rhs);
 
                     const copy: Value = if (needNum(lhs, rhs))
                         .{ .num = asNum(lhs) - asNum(rhs) }
@@ -190,9 +190,9 @@ pub const Vm = struct {
                     res.* = copy;
                 },
                 .mul_triple => {
-                    const res = try vm.getNewVal(module, inst.triple.res);
-                    const lhs = try vm.getNum(module, inst.triple.lhs);
-                    const rhs = try vm.getNum(module, inst.triple.rhs);
+                    const res = try vm.getNewVal(inst.triple.res);
+                    const lhs = try vm.getNum(inst.triple.lhs);
+                    const rhs = try vm.getNum(inst.triple.rhs);
 
                     const copy: Value = if (needNum(lhs, rhs))
                         .{ .num = asNum(lhs) * asNum(rhs) }
@@ -201,9 +201,9 @@ pub const Vm = struct {
                     res.* = copy;
                 },
                 .pow_triple => {
-                    const res = try vm.getNewVal(module, inst.triple.res);
-                    const lhs = try vm.getNum(module, inst.triple.lhs);
-                    const rhs = try vm.getNum(module, inst.triple.rhs);
+                    const res = try vm.getNewVal(inst.triple.res);
+                    const lhs = try vm.getNum(inst.triple.lhs);
+                    const rhs = try vm.getNum(inst.triple.rhs);
 
                     const copy: Value = if (needNum(lhs, rhs))
                         .{ .num = std.math.pow(f64, asNum(lhs), asNum(rhs)) }
@@ -212,9 +212,9 @@ pub const Vm = struct {
                     res.* = copy;
                 },
                 .div_floor_triple => {
-                    const res = try vm.getNewVal(module, inst.triple.res);
-                    const lhs = try vm.getNum(module, inst.triple.lhs);
-                    const rhs = try vm.getNum(module, inst.triple.rhs);
+                    const res = try vm.getNewVal(inst.triple.res);
+                    const lhs = try vm.getNum(inst.triple.lhs);
+                    const rhs = try vm.getNum(inst.triple.rhs);
 
                     const copy: Value = if (needNum(lhs, rhs))
                         .{ .int = @floatToInt(i64, @divFloor(asNum(lhs), asNum(rhs))) }
@@ -223,17 +223,17 @@ pub const Vm = struct {
                     res.* = copy;
                 },
                 .div_triple => {
-                    const res = try vm.getNewVal(module, inst.triple.res);
-                    const lhs = try vm.getNum(module, inst.triple.lhs);
-                    const rhs = try vm.getNum(module, inst.triple.rhs);
+                    const res = try vm.getNewVal(inst.triple.res);
+                    const lhs = try vm.getNum(inst.triple.lhs);
+                    const rhs = try vm.getNum(inst.triple.rhs);
 
                     const copy = Value{ .num = asNum(lhs) / asNum(rhs) };
                     res.* = copy;
                 },
                 .mod_triple => {
-                    const res = try vm.getNewVal(module, inst.triple.res);
-                    const lhs = try vm.getNum(module, inst.triple.lhs);
-                    const rhs = try vm.getNum(module, inst.triple.rhs);
+                    const res = try vm.getNewVal(inst.triple.res);
+                    const lhs = try vm.getNum(inst.triple.lhs);
+                    const rhs = try vm.getNum(inst.triple.rhs);
 
                     const copy: Value = if (needNum(lhs, rhs))
                         .{ .num = @rem(asNum(lhs), asNum(rhs)) }
@@ -242,90 +242,90 @@ pub const Vm = struct {
                     res.* = copy;
                 },
                 .bool_and_triple => {
-                    const res = try vm.getRef(module, inst.triple.res);
-                    const lhs = try vm.getBool(module, inst.triple.lhs);
-                    const rhs = try vm.getBool(module, inst.triple.rhs);
+                    const res = try vm.getRef(inst.triple.res);
+                    const lhs = try vm.getBool(inst.triple.lhs);
+                    const rhs = try vm.getBool(inst.triple.rhs);
 
                     res.* = if (lhs and rhs) &Value.True else &Value.False;
                 },
                 .bool_or_triple => {
-                    const res = try vm.getRef(module, inst.triple.res);
-                    const lhs = try vm.getBool(module, inst.triple.lhs);
-                    const rhs = try vm.getBool(module, inst.triple.rhs);
+                    const res = try vm.getRef(inst.triple.res);
+                    const lhs = try vm.getBool(inst.triple.lhs);
+                    const rhs = try vm.getBool(inst.triple.rhs);
 
                     res.* = if (lhs or rhs) &Value.True else &Value.False;
                 },
                 .move_double => {
-                    const res = try vm.getRef(module, inst.double.res);
-                    const arg = try vm.getVal(module, inst.double.arg);
+                    const res = try vm.getRef(inst.double.res);
+                    const arg = try vm.getVal(inst.double.arg);
 
                     res.* = arg;
                 },
                 .copy_double => {
-                    const res = try vm.getRef(module, inst.double.res);
-                    const arg = try vm.getVal(module, inst.double.arg);
+                    const res = try vm.getRef(inst.double.res);
+                    const arg = try vm.getVal(inst.double.arg);
 
                     res.* = try vm.gc.dupe(arg);
                 },
                 .bool_not_double => {
-                    const res = try vm.getRef(module, inst.double.res);
-                    const arg = try vm.getBool(module, inst.double.arg);
+                    const res = try vm.getRef(inst.double.res);
+                    const arg = try vm.getBool(inst.double.arg);
 
                     res.* = if (arg) &Value.False else &Value.True;
                 },
                 .bit_not_double => {
-                    const res = try vm.getNewVal(module, inst.double.res);
-                    const arg = try vm.getInt(module, inst.double.arg);
+                    const res = try vm.getNewVal(inst.double.res);
+                    const arg = try vm.getInt(inst.double.arg);
 
                     res.* = .{
                         .int = ~arg,
                     };
                 },
                 .bit_and_triple => {
-                    const res = try vm.getNewVal(module, inst.triple.res);
-                    const lhs = try vm.getInt(module, inst.triple.lhs);
-                    const rhs = try vm.getInt(module, inst.triple.rhs);
+                    const res = try vm.getNewVal(inst.triple.res);
+                    const lhs = try vm.getInt(inst.triple.lhs);
+                    const rhs = try vm.getInt(inst.triple.rhs);
 
                     res.* = .{
                         .int = lhs & rhs,
                     };
                 },
                 .bit_or_triple => {
-                    const res = try vm.getNewVal(module, inst.triple.res);
-                    const lhs = try vm.getInt(module, inst.triple.lhs);
-                    const rhs = try vm.getInt(module, inst.triple.rhs);
+                    const res = try vm.getNewVal(inst.triple.res);
+                    const lhs = try vm.getInt(inst.triple.lhs);
+                    const rhs = try vm.getInt(inst.triple.rhs);
 
                     res.* = .{
                         .int = lhs | rhs,
                     };
                 },
                 .bit_xor_triple => {
-                    const res = try vm.getNewVal(module, inst.triple.res);
-                    const lhs = try vm.getInt(module, inst.triple.lhs);
-                    const rhs = try vm.getInt(module, inst.triple.rhs);
+                    const res = try vm.getNewVal(inst.triple.res);
+                    const lhs = try vm.getInt(inst.triple.lhs);
+                    const rhs = try vm.getInt(inst.triple.rhs);
 
                     res.* = .{
                         .int = lhs ^ rhs,
                     };
                 },
                 .equal_triple => {
-                    const res = try vm.getRef(module, inst.triple.res);
-                    const lhs = try vm.getVal(module, inst.triple.lhs);
-                    const rhs = try vm.getVal(module, inst.triple.rhs);
+                    const res = try vm.getRef(inst.triple.res);
+                    const lhs = try vm.getVal(inst.triple.lhs);
+                    const rhs = try vm.getVal(inst.triple.rhs);
 
                     res.* = if (lhs.eql(rhs)) &Value.True else &Value.False;
                 },
                 .not_equal_triple => {
-                    const res = try vm.getRef(module, inst.triple.res);
-                    const lhs = try vm.getVal(module, inst.triple.lhs);
-                    const rhs = try vm.getVal(module, inst.triple.rhs);
+                    const res = try vm.getRef(inst.triple.res);
+                    const lhs = try vm.getVal(inst.triple.lhs);
+                    const rhs = try vm.getVal(inst.triple.rhs);
 
                     res.* = if (lhs.eql(rhs)) &Value.False else &Value.True;
                 },
                 .less_than_triple => {
-                    const res = try vm.getRef(module, inst.triple.res);
-                    const lhs = try vm.getNum(module, inst.triple.lhs);
-                    const rhs = try vm.getNum(module, inst.triple.rhs);
+                    const res = try vm.getRef(inst.triple.res);
+                    const lhs = try vm.getNum(inst.triple.lhs);
+                    const rhs = try vm.getNum(inst.triple.rhs);
 
                     const bool_val = if (needNum(lhs, rhs))
                         asNum(lhs) < asNum(rhs)
@@ -335,9 +335,9 @@ pub const Vm = struct {
                     res.* = if (bool_val) &Value.True else &Value.False;
                 },
                 .less_than_equal_triple => {
-                    const res = try vm.getRef(module, inst.triple.res);
-                    const lhs = try vm.getNum(module, inst.triple.lhs);
-                    const rhs = try vm.getNum(module, inst.triple.rhs);
+                    const res = try vm.getRef(inst.triple.res);
+                    const lhs = try vm.getNum(inst.triple.lhs);
+                    const rhs = try vm.getNum(inst.triple.rhs);
 
                     const bool_val = if (needNum(lhs, rhs))
                         asNum(lhs) <= asNum(rhs)
@@ -347,9 +347,9 @@ pub const Vm = struct {
                     res.* = if (bool_val) &Value.True else &Value.False;
                 },
                 .greater_than_triple => {
-                    const res = try vm.getRef(module, inst.triple.res);
-                    const lhs = try vm.getNum(module, inst.triple.lhs);
-                    const rhs = try vm.getNum(module, inst.triple.rhs);
+                    const res = try vm.getRef(inst.triple.res);
+                    const lhs = try vm.getNum(inst.triple.lhs);
+                    const rhs = try vm.getNum(inst.triple.rhs);
 
                     const bool_val = if (needNum(lhs, rhs))
                         asNum(lhs) > asNum(rhs)
@@ -359,9 +359,9 @@ pub const Vm = struct {
                     res.* = if (bool_val) &Value.True else &Value.False;
                 },
                 .greater_than_equal_triple => {
-                    const res = try vm.getRef(module, inst.triple.res);
-                    const lhs = try vm.getNum(module, inst.triple.lhs);
-                    const rhs = try vm.getNum(module, inst.triple.rhs);
+                    const res = try vm.getRef(inst.triple.res);
+                    const lhs = try vm.getNum(inst.triple.lhs);
+                    const rhs = try vm.getNum(inst.triple.rhs);
 
                     const bool_val = if (needNum(lhs, rhs))
                         asNum(lhs) >= asNum(rhs)
@@ -371,9 +371,9 @@ pub const Vm = struct {
                     res.* = if (bool_val) &Value.True else &Value.False;
                 },
                 .in_triple => {
-                    const res = try vm.getRef(module, inst.triple.res);
-                    const lhs = try vm.getVal(module, inst.triple.lhs);
-                    const rhs = try vm.getVal(module, inst.triple.rhs);
+                    const res = try vm.getRef(inst.triple.res);
+                    const lhs = try vm.getVal(inst.triple.lhs);
+                    const rhs = try vm.getVal(inst.triple.rhs);
 
                     switch (rhs.*) {
                         .str, .tuple, .list, .map, .range => {},
@@ -383,9 +383,9 @@ pub const Vm = struct {
                     res.* = if (lhs.in(rhs)) &Value.True else &Value.False;
                 },
                 .l_shift_triple => {
-                    const res = try vm.getNewVal(module, inst.triple.res);
-                    const lhs = try vm.getInt(module, inst.triple.lhs);
-                    const rhs = try vm.getInt(module, inst.triple.rhs);
+                    const res = try vm.getNewVal(inst.triple.res);
+                    const lhs = try vm.getInt(inst.triple.lhs);
+                    const rhs = try vm.getInt(inst.triple.rhs);
 
                     if (rhs < 0)
                         return vm.fatal("shift by negative amount");
@@ -395,9 +395,9 @@ pub const Vm = struct {
                     };
                 },
                 .r_shift_triple => {
-                    const res = try vm.getNewVal(module, inst.triple.res);
-                    const lhs = try vm.getInt(module, inst.triple.lhs);
-                    const rhs = try vm.getInt(module, inst.triple.rhs);
+                    const res = try vm.getNewVal(inst.triple.res);
+                    const lhs = try vm.getInt(inst.triple.lhs);
+                    const rhs = try vm.getInt(inst.triple.rhs);
 
                     if (rhs < 0)
                         return vm.fatal("shift by negative amount");
@@ -407,8 +407,8 @@ pub const Vm = struct {
                     };
                 },
                 .negate_double => {
-                    const res = try vm.getNewVal(module, inst.double.res);
-                    const arg = try vm.getNum(module, inst.double.arg);
+                    const res = try vm.getNewVal(inst.double.res);
+                    const arg = try vm.getNum(inst.double.arg);
 
                     const copy: Value = if (arg.* == .num)
                         .{ .num = -arg.num }
@@ -417,8 +417,8 @@ pub const Vm = struct {
                     res.* = copy;
                 },
                 .try_double => {
-                    const res = try vm.getRef(module, inst.double.res);
-                    const arg = try vm.getVal(module, inst.double.arg);
+                    const res = try vm.getRef(inst.double.res);
+                    const arg = try vm.getVal(inst.double.arg);
 
                     if (arg.* != .err) {
                         res.* = arg;
@@ -451,7 +451,7 @@ pub const Vm = struct {
                 },
                 .jump_false => {
                     const base = vm.ip;
-                    const arg = try vm.getBool(module, inst.jump.arg);
+                    const arg = try vm.getBool(inst.jump.arg);
                     const offset = try vm.getSingle(module);
 
                     if (arg == false) {
@@ -460,7 +460,7 @@ pub const Vm = struct {
                 },
                 .jump_true => {
                     const base = vm.ip;
-                    const arg = try vm.getBool(module, inst.jump.arg);
+                    const arg = try vm.getBool(inst.jump.arg);
                     const offset = try vm.getSingle(module);
 
                     if (arg == true) {
@@ -469,7 +469,7 @@ pub const Vm = struct {
                 },
                 .jump_error => {
                     const base = vm.ip;
-                    const arg = try vm.getVal(module, inst.jump.arg);
+                    const arg = try vm.getVal(inst.jump.arg);
                     const offset = try vm.getSingle(module);
 
                     if (arg.* == .err) {
@@ -478,7 +478,7 @@ pub const Vm = struct {
                 },
                 .jump_not_error => {
                     const base = vm.ip;
-                    const arg = try vm.getVal(module, inst.jump.arg);
+                    const arg = try vm.getVal(inst.jump.arg);
                     const offset = try vm.getSingle(module);
 
                     if (arg.* != .err) {
@@ -487,7 +487,7 @@ pub const Vm = struct {
                 },
                 .jump_none => {
                     const base = vm.ip;
-                    const arg = try vm.getVal(module, inst.jump.arg);
+                    const arg = try vm.getVal(inst.jump.arg);
                     const offset = try vm.getSingle(module);
 
                     if (arg.* == .none) {
@@ -495,15 +495,15 @@ pub const Vm = struct {
                     }
                 },
                 .iter_init_double => {
-                    const res = try vm.getRef(module, inst.double.res);
-                    const arg = try vm.getVal(module, inst.double.arg);
+                    const res = try vm.getRef(inst.double.res);
+                    const arg = try vm.getVal(inst.double.arg);
 
                     res.* = try Value.iterator(arg, vm);
                 },
                 .iter_next_double => {
                     const base = vm.ip;
-                    const res = try vm.getRef(module, inst.double.res);
-                    const arg = try vm.getVal(module, inst.double.arg);
+                    const res = try vm.getRef(inst.double.res);
+                    const arg = try vm.getVal(inst.double.arg);
                     const offset = try vm.getSingle(module);
 
                     if (arg.* != .iterator)
@@ -516,16 +516,16 @@ pub const Vm = struct {
                     }
                 },
                 .unwrap_error_double => {
-                    const res = try vm.getRef(module, inst.double.res);
-                    const arg = try vm.getVal(module, inst.double.arg);
+                    const res = try vm.getRef(inst.double.res);
+                    const arg = try vm.getVal(inst.double.arg);
 
                     if (arg.* != .err)
                         return vm.fatal("expected an error");
                     res.* = try vm.gc.dupe(arg.err);
                 },
                 .unwrap_tagged => {
-                    const res = try vm.getRef(module, inst.double.res);
-                    const arg = try vm.getVal(module, inst.double.arg);
+                    const res = try vm.getRef(inst.double.res);
+                    const arg = try vm.getVal(inst.double.arg);
                     const offset = try vm.getSingle(module);
                     const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
                     const name = module.strings[offset + @sizeOf(u32) ..][0..len];
@@ -537,13 +537,13 @@ pub const Vm = struct {
                     res.* = arg.tagged.value;
                 },
                 .import_off => {
-                    const res = try vm.getRef(module, inst.off.res);
+                    const res = try vm.getRef(inst.off.res);
                     const str = try vm.getString(module, inst);
 
                     res.* = try vm.import(str);
                 },
                 .discard_single => {
-                    const arg = try vm.getVal(module, inst.single.arg);
+                    const arg = try vm.getVal(inst.single.arg);
 
                     if (arg.* == .err) {
                         return vm.fatal("error discarded");
@@ -553,7 +553,7 @@ pub const Vm = struct {
                     }
                 },
                 .build_tuple_off => {
-                    const res = try vm.getNewVal(module, inst.off.res);
+                    const res = try vm.getNewVal(inst.off.res);
                     const size = if (inst.off.isArg())
                         try vm.getSingle(module)
                     else
@@ -562,7 +562,7 @@ pub const Vm = struct {
                     res.* = .{ .tuple = try vm.gc.gpa.alloc(*Value, size) };
                 },
                 .build_list_off => {
-                    const res = try vm.getNewVal(module, inst.off.res);
+                    const res = try vm.getNewVal(inst.off.res);
                     const size = if (inst.off.isArg())
                         try vm.getSingle(module)
                     else
@@ -572,7 +572,7 @@ pub const Vm = struct {
                     try res.list.resize(vm.gc.gpa, size);
                 },
                 .build_map_off => {
-                    const res = try vm.getNewVal(module, inst.off.res);
+                    const res = try vm.getNewVal(inst.off.res);
                     const size = if (inst.off.isArg())
                         try vm.getSingle(module)
                     else
@@ -582,15 +582,15 @@ pub const Vm = struct {
                     try res.map.ensureCapacity(vm.gc.gpa, size);
                 },
                 .build_error_double => {
-                    const res = try vm.getNewVal(module, inst.double.res);
-                    const arg = try vm.getVal(module, inst.double.arg);
+                    const res = try vm.getNewVal(inst.double.res);
+                    const arg = try vm.getVal(inst.double.arg);
 
                     res.* = .{
                         .err = try vm.gc.dupe(arg),
                     };
                 },
                 .build_func => {
-                    const res = try vm.getNewVal(module, inst.func.res);
+                    const res = try vm.getNewVal(inst.func.res);
                     if (inst.func.arg_count > max_params)
                         return error.MalformedByteCode;
 
@@ -604,10 +604,10 @@ pub const Vm = struct {
                     };
                 },
                 .build_tagged => {
-                    const res = try vm.getNewVal(module, inst.tagged.res);
+                    const res = try vm.getNewVal(inst.tagged.res);
                     const arg = switch (inst.tagged.kind) {
                         .none => &Value.None,
-                        .some => try vm.gc.dupe(try vm.getVal(module, inst.tagged.arg)),
+                        .some => try vm.gc.dupe(try vm.getVal(inst.tagged.arg)),
                         _ => return error.MalformedByteCode,
                     };
                     const offset = try vm.getSingle(module);
@@ -622,7 +622,7 @@ pub const Vm = struct {
                     };
                 },
                 .build_range => {
-                    const res = try vm.getNewVal(module, inst.range.res);
+                    const res = try vm.getNewVal(inst.range.res);
                     {
                         if (vm.ip + 1 > module.code.len)
                             return error.MalformedByteCode;
@@ -635,28 +635,28 @@ pub const Vm = struct {
                     };
                     const range = &res.range;
                     switch (cont.start_kind) {
-                        .reg => range.start = try vm.getInt(module, inst.range.start),
+                        .reg => range.start = try vm.getInt(inst.range.start),
                         .value => range.start = inst.range.start,
                         .default => {},
                         _ => return error.MalformedByteCode,
                     }
                     switch (cont.end_kind) {
-                        .reg => range.end = try vm.getInt(module, inst.range.end),
+                        .reg => range.end = try vm.getInt(inst.range.end),
                         .value => range.end = inst.range.end,
                         .default => {},
                         _ => return error.MalformedByteCode,
                     }
                     switch (cont.step_kind) {
-                        .reg => range.step = try vm.getInt(module, inst.range_cont.step),
+                        .reg => range.step = try vm.getInt(inst.range_cont.step),
                         .value => range.step = cont.step,
                         .default => {},
                         _ => return error.MalformedByteCode,
                     }
                 },
                 .get_triple => {
-                    const res = try vm.getRef(module, inst.triple.res);
-                    const container = try vm.getVal(module, inst.triple.lhs);
-                    const index = try vm.getVal(module, inst.triple.rhs);
+                    const res = try vm.getRef(inst.triple.res);
+                    const container = try vm.getVal(inst.triple.lhs);
+                    const index = try vm.getVal(inst.triple.rhs);
 
                     try container.get(vm, index, res);
 
@@ -664,15 +664,15 @@ pub const Vm = struct {
                     vm.last_get = container;
                 },
                 .set_triple => {
-                    const container = try vm.getVal(module, inst.triple.res);
-                    const index = try vm.getVal(module, inst.triple.lhs);
-                    const val = try vm.getVal(module, inst.triple.rhs);
+                    const container = try vm.getVal(inst.triple.res);
+                    const index = try vm.getVal(inst.triple.lhs);
+                    const val = try vm.getVal(inst.triple.rhs);
 
                     try container.set(vm, index, val);
                 },
                 .as_type_id => {
-                    const res = try vm.getRef(module, inst.type_id.res);
-                    const arg = try vm.getVal(module, inst.type_id.arg);
+                    const res = try vm.getRef(inst.type_id.res);
+                    const arg = try vm.getVal(inst.type_id.arg);
 
                     // Value.as will hit unreachable on invalid type_id
                     switch (inst.type_id.type_id) {
@@ -683,8 +683,8 @@ pub const Vm = struct {
                     res.* = try arg.as(vm, inst.type_id.type_id);
                 },
                 .is_type_id => {
-                    const res = try vm.getRef(module, inst.type_id.res);
-                    const arg = try vm.getVal(module, inst.type_id.arg);
+                    const res = try vm.getRef(inst.type_id.res);
+                    const arg = try vm.getVal(inst.type_id.arg);
 
                     switch (inst.type_id.type_id) {
                         .none, .int, .num, .bool, .str, .tuple, .map, .list, .err, .range, .func, .tagged => {},
@@ -695,7 +695,7 @@ pub const Vm = struct {
                 },
                 .call => {
                     const res = inst.call.res;
-                    const func = try vm.getVal(module, inst.call.func);
+                    const func = try vm.getVal(inst.call.func);
                     const first = inst.call.first;
                     const arg_count = try vm.getSingle(module);
                     if (arg_count > max_params)
@@ -745,7 +745,7 @@ pub const Vm = struct {
                     module = func.func.module;
                 },
                 .return_single => {
-                    const arg = try vm.getVal(module, inst.single.arg);
+                    const arg = try vm.getVal(inst.single.arg);
 
                     if (vm.call_stack.items.len == start_len) {
                         if (start_len == 0) {
@@ -785,7 +785,7 @@ pub const Vm = struct {
                     ret_val.* = &Value.None;
                 },
                 .load_capture_double => {
-                    const res = try vm.getRef(module, inst.double.res);
+                    const res = try vm.getRef(inst.double.res);
                     const arg = inst.double.arg;
 
                     const frame = vm.call_stack.items[vm.call_stack.items.len - 1];
@@ -794,8 +794,8 @@ pub const Vm = struct {
                     res.* = frame.captures[arg];
                 },
                 .store_capture_triple => {
-                    const res = try vm.getVal(module, inst.triple.res);
-                    const lhs = try vm.getVal(module, inst.triple.lhs);
+                    const res = try vm.getVal(inst.triple.res);
+                    const lhs = try vm.getVal(inst.triple.lhs);
                     const rhs = inst.triple.rhs;
 
                     if (res.* != .func) return error.MalformedByteCode;
@@ -804,15 +804,15 @@ pub const Vm = struct {
                     res.func.captures[rhs] = lhs;
                 },
                 .load_this_single => {
-                    const res = try vm.getRef(module, inst.single.arg);
+                    const res = try vm.getRef(inst.single.arg);
 
                     const frame = vm.call_stack.items[vm.call_stack.items.len - 1];
                     res.* = frame.this orelse
                         return vm.fatal("this has not been set");
                 },
                 .append_double => {
-                    const lhs = try vm.getVal(module, inst.double.res);
-                    const rhs = try vm.getVal(module, inst.double.arg);
+                    const lhs = try vm.getVal(inst.double.res);
+                    const rhs = try vm.getVal(inst.double.arg);
 
                     switch (lhs.*) {
                         .list => |*list| try list.append(vm.gc.gpa, try vm.gc.dupe(rhs)),
@@ -915,16 +915,16 @@ pub const Vm = struct {
         return @bitCast(T, arr);
     }
 
-    fn getVal(vm: *Vm, module: *Module, reg: RegRef) !*Value {
+    fn getVal(vm: *Vm, reg: RegRef) !*Value {
         return vm.gc.stackGet(vm.sp + reg) catch
             return error.MalformedByteCode;
     }
 
-    fn getRef(vm: *Vm, module: *Module, reg: RegRef) !*?*Value {
+    fn getRef(vm: *Vm, reg: RegRef) !*?*Value {
         return try vm.gc.stackRef(vm.sp + reg);
     }
 
-    fn getNewVal(vm: *Vm, module: *Module, reg: RegRef) !*Value {
+    fn getNewVal(vm: *Vm, reg: RegRef) !*Value {
         return try vm.gc.stackAlloc(vm.sp + reg);
     }
 
@@ -938,8 +938,8 @@ pub const Vm = struct {
         return module.strings[offset + @sizeOf(u32) ..][0..len];
     }
 
-    fn getBool(vm: *Vm, module: *Module, reg: RegRef) !bool {
-        const val = try vm.getVal(module, reg);
+    fn getBool(vm: *Vm, reg: RegRef) !bool {
+        const val = try vm.getVal(reg);
 
         if (val.* != .bool) {
             return vm.fatal("expected a boolean");
@@ -947,8 +947,8 @@ pub const Vm = struct {
         return val.bool;
     }
 
-    fn getInt(vm: *Vm, module: *Module, reg: RegRef) !i64 {
-        const val = try vm.getVal(module, reg);
+    fn getInt(vm: *Vm, reg: RegRef) !i64 {
+        const val = try vm.getVal(reg);
 
         if (val.* != .int) {
             return vm.fatal("expected an integer");
@@ -956,8 +956,8 @@ pub const Vm = struct {
         return val.int;
     }
 
-    fn getIntRef(vm: *Vm, module: *Module, reg: RegRef) !*Value {
-        const val = try vm.getVal(module, reg);
+    fn getIntRef(vm: *Vm, reg: RegRef) !*Value {
+        const val = try vm.getVal(reg);
 
         if (val.* != .int) {
             return vm.fatal("expected an integer");
@@ -965,8 +965,8 @@ pub const Vm = struct {
         return val;
     }
 
-    fn getNum(vm: *Vm, module: *Module, reg: RegRef) !*Value {
-        const val = try vm.getVal(module, reg);
+    fn getNum(vm: *Vm, reg: RegRef) !*Value {
+        const val = try vm.getVal(reg);
 
         if (val.* != .int and val.* != .num) {
             return vm.fatal("expected a number");

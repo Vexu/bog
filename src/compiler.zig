@@ -549,8 +549,7 @@ pub const Compiler = struct {
             switch (item) {
                 .module => break,
                 .func => in_fn_scope = true,
-                .loop, .try_catch => {},
-                .symbol => return null,
+                .loop, .try_catch, .symbol => {},
                 .forward_decl => |sym| if (mem.eql(u8, sym.name, name)) {
                     assert(!in_fn_scope);
                     return sym.reg;
@@ -910,7 +909,7 @@ pub const Compiler = struct {
         };
         if (node.op == .Continue) {
             self.func.code.items[try self.emitJump(.jump, null)] = .{
-                .bare_signed = @intCast(i32, -@intCast(isize, self.func.code.items.len - loop_scope.cond_begin)),
+                .bare_signed = @intCast(i32, -@intCast(isize, self.func.code.items.len - loop_scope.cond_begin - 1)),
             };
         } else {
             try loop_scope.breaks.append(try self.emitJump(.jump, null));
@@ -1011,14 +1010,6 @@ pub const Compiler = struct {
         const scope_count = self.scopes.items.len;
         defer self.clearScopes(scope_count);
 
-        var loop = Loop{
-            .breaks = Loop.BreakList.init(self.strings.allocator),
-            .cond_begin = @intCast(u32, self.func.code.items.len),
-        };
-        defer loop.breaks.deinit();
-
-        try self.scopes.append(.{ .loop = &loop });
-
         const cond_val = try self.genNode(node.cond, .value);
         if (!cond_val.isRt() and cond_val != .str)
             return self.reportErr("expected iterable value", node.cond.firstToken());
@@ -1036,11 +1027,15 @@ pub const Compiler = struct {
             try try_scope.jumps.append(try self.emitJump(.jump_error, iter_reg));
         }
 
+        var loop = Loop{
+            .breaks = Loop.BreakList.init(self.strings.allocator),
+            .cond_begin = @intCast(u32, self.func.code.items.len),
+        };
+        defer loop.breaks.deinit();
+        try self.scopes.append(.{ .loop = &loop });
+
         const iter_val_reg = try self.func.regAlloc();
         defer self.func.regFree(iter_val_reg);
-
-        // loop condition
-        loop.cond_begin = @intCast(u32, self.func.code.items.len);
 
         // iter_next is fused with a jump_none
         try self.emitDouble(.iter_next_double, iter_val_reg, iter_reg);
@@ -1925,13 +1920,15 @@ pub const Compiler = struct {
             return sub_res.toVal();
         }
 
+        // if no error jump over all catchers
+        const first = try self.emitJump(.jump_not_error, try_scope.err_reg);
+
         for (try_scope.jumps.items) |jump| {
             self.finishJump(jump);
         }
         try_scope.jumps.items.len = 0;
+        try try_scope.jumps.append(first);
 
-        // if no error jump over all catchers
-        try try_scope.jumps.append(try self.emitJump(.jump_not_error, try_scope.err_reg));
         // otherwise unwrap the error
         try self.emitDouble(.unwrap_error_double, try_scope.err_reg, try_scope.err_reg);
 

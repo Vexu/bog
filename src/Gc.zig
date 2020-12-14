@@ -300,8 +300,9 @@ pub fn stackGet(gc: *Gc, index: usize) !*Value {
 
 /// Only valid until next `stackAlloc` call.
 pub fn stackRef(gc: *Gc, index: usize) !*?*Value {
+    try gc.stack.ensureCapacity(gc.gpa, index + 1);
     while (index >= gc.stack.items.len) {
-        try gc.stack.append(gc.gpa, null);
+        gc.stack.appendAssumeCapacity(null);
     }
     return &gc.stack.items[index];
 }
