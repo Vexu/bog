@@ -4,7 +4,7 @@ stmt
     : decl "=" block_or_expr
     | expr
 
-decl : ("let" | "const") primary_expr
+decl : ("let" | "const") bool_expr
 
 expr
     : fn
@@ -19,7 +19,7 @@ assign : ("=" | "+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>="
 
 jump_expr : "return" block_or_expr? | "break" | "continue"
 
-fn : "fn" "(" (primary_expr ",")* primary_expr? ")" block_or_expr
+fn : "fn" "(" (bool_expr ",")* bool_expr? ")" block_or_expr
 
 bool_expr
     : "not" comparision_expr

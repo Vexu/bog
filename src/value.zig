@@ -428,6 +428,24 @@ pub const Value = union(Type) {
             },
             .str => |*str| return str.get(vm, index, res),
             .iterator => unreachable,
+            .range => |*r| switch (index.*) {
+                .str => |*s| {
+                    if (res.* == null) {
+                        res.* = try vm.gc.alloc();
+                    }
+
+                    if (mem.eql(u8, s.data, "start")) {
+                        res.*.?.* = .{ .int = r.start };
+                    } else if (mem.eql(u8, s.data, "end")) {
+                        res.*.?.* = .{ .int = r.end };
+                    } else if (mem.eql(u8, s.data, "step")) {
+                        res.*.?.* = .{ .int = r.step };
+                    } else {
+                        return vm.fatal("no such property");
+                    }
+                },
+                else => return vm.fatal("invalid index type"),
+            },
             else => return vm.fatal("invalid subscript type"),
         }
     }

@@ -1,3 +1,10 @@
+test "range destructuring" {
+    expectOutput(
+        \\const start:end:step = 1:2:3
+        \\return start+end+step
+    , "6");
+}
+
 test "continue" {
     expectOutput(
         \\let i = 0

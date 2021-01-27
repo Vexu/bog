@@ -2140,7 +2140,32 @@ pub const Compiler = struct {
         if (!val.isRt()) {
             return self.reportErr("expected a range", node.base.firstToken());
         }
-        return self.reportErr("TODO: range destructure", node.base.firstToken());
+        if (node.start) |some| {
+            try self.genLValRangePart(some, val.getRt(), lval, "start");
+        }
+        if (node.end) |some| {
+            try self.genLValRangePart(some, val.getRt(), lval, "end");
+        }
+        if (node.step) |some| {
+            try self.genLValRangePart(some, val.getRt(), lval, "step");
+        }
+    }
+
+    fn genLValRangePart(self: *Compiler, node: *Node, range_reg: RegRef, lval: Lval, part: []const u8) Error!void {
+        const result_reg = try self.func.regAlloc();
+        const index_reg = try self.func.regAlloc();
+        defer self.func.regFree(index_reg);
+        const str_loc = try self.putString(part);
+        try self.emitOff(.const_string_off, index_reg, str_loc);
+
+        try self.emitTriple(.get_triple, result_reg, range_reg, index_reg);
+        const rt_val = Value{ .rt = result_reg };
+        try self.genLval(node, switch (lval) {
+            .constant => .{ .constant = &rt_val },
+            .mut => .{ .mut = &rt_val },
+            .assign => .{ .assign = &rt_val },
+            .aug_assign => unreachable,
+        });
     }
 
     fn genLValTagged(self: *Compiler, node: *Node.Tagged, lval: Lval) Error!void {

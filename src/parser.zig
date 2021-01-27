@@ -87,11 +87,11 @@ pub const Parser = struct {
         return parser.expr(false, true, level);
     }
 
-    /// decl : ("let" | "const") primary_expr
+    /// decl : ("let" | "const") bool_expr
     fn decl(parser: *Parser, level: u16) Error!?*Node {
         const tok = parser.eatToken(.Keyword_let, true) orelse
             parser.eatToken(.Keyword_const, true) orelse return null;
-        const capture = try parser.primaryExpr(true, true, level);
+        const capture = try parser.boolExpr(true, true, level);
         const eq_tok = try parser.expectToken(.Equal, false);
         const value = try parser.blockOrExpr(false, true, level);
         const node = try parser.arena.create(Node.Decl);
@@ -121,12 +121,12 @@ pub const Parser = struct {
         return try parser.expr(skip_nl, allow_range, level);
     }
 
-    /// fn : "fn" "(" (primary_expr ",")* primary_expr? ")" block_or_expr
+    /// fn : "fn" "(" (bool_expr ",")* bool_expr? ")" block_or_expr
     fn func(parser: *Parser, skip_nl: bool, allow_range: bool, level: u16) Error!?*Node {
         const tok = parser.eatToken(.Keyword_fn, true) orelse return null;
 
         _ = try parser.expectToken(.LParen, true);
-        const params = try parser.listParser(skip_nl, level, primaryExpr, .RParen, null);
+        const params = try parser.listParser(skip_nl, level, boolExpr, .RParen, null);
         const node = try parser.arena.create(Node.Fn);
         node.* = .{
             .fn_tok = tok,
