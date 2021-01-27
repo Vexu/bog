@@ -354,7 +354,7 @@ pub const Value = union(Type) {
                 try writer.print("native({})@0x{}", .{ n.arg_count, @ptrToInt(n.func) });
             },
             .tagged => |*t| {
-                try writer.print("@{}", .{t.name});
+                try writer.print("@{s}", .{t.name});
                 if (level == 0) {
                     try writer.writeAll("(...)");
                 } else {
@@ -504,7 +504,7 @@ pub const Value = union(Type) {
                 .num => |num| num != 0,
                 .bool => unreachable,
                 .str => unreachable,
-                else => return vm.errorFmt("cannot cast {} to bool", .{@tagName(val.*)}),
+                else => return vm.errorFmt("cannot cast {s} to bool", .{@tagName(val.*)}),
             };
 
             return if (bool_res) &Value.True else &Value.False;
@@ -520,7 +520,7 @@ pub const Value = union(Type) {
                     .num => |num| @floatToInt(i64, num),
                     .bool => |b| @boolToInt(b),
                     .str => unreachable,
-                    else => return vm.errorFmt("cannot cast {} to int", .{@tagName(val.*)}),
+                    else => return vm.errorFmt("cannot cast {s} to int", .{@tagName(val.*)}),
                 },
             },
             .num => .{
@@ -529,7 +529,7 @@ pub const Value = union(Type) {
                     .int => |int| @intToFloat(f64, int),
                     .bool => |b| @intToFloat(f64, @boolToInt(b)),
                     .str => unreachable,
-                    else => return vm.errorFmt("cannot cast {} to num", .{@tagName(val.*)}),
+                    else => return vm.errorFmt("cannot cast {s} to num", .{@tagName(val.*)}),
                 },
             },
             .str, .bool, .none => unreachable,
@@ -583,7 +583,7 @@ pub const Value = union(Type) {
             .range => |*r| start = r.start,
             .str, .tuple, .list, .map => {},
             .iterator => unreachable,
-            else => return vm.errorFmt("cannot iterate {}", .{@tagName(val.*)}),
+            else => return vm.errorFmt("cannot iterate {s}", .{@tagName(val.*)}),
         }
         const iter = try vm.gc.alloc();
         iter.* = .{
@@ -837,7 +837,7 @@ pub const Value = union(Type) {
             .bool,
             => try val.dump(writer, 0),
             .str => |s| {
-                try writer.print("{}", .{fmtEscapes(s.data)});
+                try writer.print("{s}", .{fmtEscapes(s.data)});
             },
             .native,
             .func,

@@ -1162,7 +1162,7 @@ pub const Parser = struct {
         const tok = parser.tokens[parser.tok_index];
         try parser.errors.add(try bog.Value.String.init(
             parser.gpa,
-            "expected '{}', found '{}'",
+            "expected '{s}', found '{s}'",
             .{ Token.string(id), Token.string(tok.id) },
         ), tok.start, .err);
         return error.ParseError;
