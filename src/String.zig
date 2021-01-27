@@ -6,6 +6,7 @@ const bog = @import("bog.zig");
 const Vm = bog.Vm;
 const Value = bog.Value;
 const Type = bog.Type;
+const fmtEscapes = std.zig.fmtEscapes;
 
 const default_dump_depth = 4;
 
@@ -75,7 +76,7 @@ pub fn eql(a: String, b: String) bool {
 
 pub fn dump(str: String, writer: anytype) !void {
     try writer.writeByte('"');
-    try std.fmt.formatZigEscapes(str.data, .{}, writer);
+    try writer.print("{}", .{fmtEscapes(str.data)});
     try writer.writeByte('"');
 }
 

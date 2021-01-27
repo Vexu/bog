@@ -5,6 +5,7 @@ const bog = @import("bog.zig");
 const Vm = bog.Vm;
 const Module = bog.Module;
 const util = @import("util.zig");
+const fmtEscapes = std.zig.fmtEscapes;
 
 pub const Type = enum(u8) {
     none = 0,
@@ -836,7 +837,7 @@ pub const Value = union(Type) {
             .bool,
             => try val.dump(writer, 0),
             .str => |s| {
-                try writer.print("\"{Z}\"", .{s.data});
+                try writer.print("{}", .{fmtEscapes(s.data)});
             },
             .native,
             .func,
