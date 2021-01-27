@@ -1,12 +1,38 @@
 const std = @import("std");
+const math = std.math;
 const bog = @import("../bog.zig");
 const Value = bog.Value;
 const Vm = bog.Vm;
 
-pub const pi = std.math.pi;
-pub const e = std.math.e;
-pub const sqrt2 = std.math.sqrt2;
-pub const ln2 = std.math.ln2;
+/// Euler's number (e)
+pub const e = math.e;
+
+/// Archimedes' constant (π)
+pub const pi = math.pi;
+
+/// Circle constant (τ)
+pub const tau = math.tau;
+
+/// log2(e)
+pub const log2e = math.log2e;
+
+/// log10(e)
+pub const log10e = math.log10e;
+
+/// ln(2)
+pub const ln2 = math.ln2;
+
+/// ln(10)
+pub const ln10 = math.ln10;
+
+/// 2/sqrt(π)
+pub const two_sqrtpi = math.two_sqrtpi;
+
+/// sqrt(2)
+pub const sqrt2 = math.sqrt2;
+
+/// 1/sqrt(2)
+pub const sqrt1_2 = math.sqrt1_2;
 
 pub fn ln(vm: *Vm, val: Value) !*Value {
     return switch (val) {
