@@ -712,13 +712,13 @@ pub const Vm = struct {
                         }
 
                         const ret_val = try func.native.func(vm, @bitCast([]*Value, args));
-                        const ret_ref = try vm.gc.stackRef(vm.sp + res);
+                        const ret_ref = try vm.getRef(res);
                         ret_ref.* = ret_val;
                         continue;
                     }
 
                     if (func.* != .func) {
-                        const ret_ref = try vm.gc.stackRef(vm.sp + res);
+                        const ret_ref = try vm.getRef(res);
                         ret_ref.* = try vm.typeError(.func, func.*);
                         continue;
                     }
@@ -762,7 +762,7 @@ pub const Vm = struct {
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
 
-                    const ret_val = try vm.gc.stackRef(vm.sp + frame.ret_reg);
+                    const ret_val = try vm.getRef(frame.ret_reg);
                     ret_val.* = arg;
                 },
                 .return_none => {
@@ -781,7 +781,8 @@ pub const Vm = struct {
                     vm.sp = frame.sp;
                     vm.line_loc = frame.line_loc;
 
-                    const ret_val = try vm.gc.stackRef(vm.sp + frame.ret_reg);
+                    const ret_val = try vm.getRef(frame.ret_reg);
+
                     ret_val.* = &Value.None;
                 },
                 .load_capture_double => {

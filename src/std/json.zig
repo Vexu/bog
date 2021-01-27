@@ -55,7 +55,7 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
                 .Some => {
                     const output = try vm.gc.gpa.alloc(u8, info.decodedLength());
                     errdefer vm.gc.gpa.free(output);
-                    try std.json.unescapeString(output, source_slice);
+                    try std.json.unescapeValidString(output, source_slice);
                     val.* = Value.string(output);
                 },
             }

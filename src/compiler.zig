@@ -2035,14 +2035,26 @@ pub const Compiler = struct {
             } else if (uncasted_case.cast(.MatchCase)) |case| {
                 expr = case.expr;
 
-                if (case.items.len != 1) {
-                    return self.reportErr("TODO multi item cases", uncasted_case.firstToken());
-                }
+                if (case.items.len == 1) {
+                    _ = try self.genNodeNonEmpty(case.items[0], .{ .rt = case_reg });
+                    // if not equal to the error value jump over this handler
+                    try self.emitTriple(.equal_triple, case_reg, case_reg, cond_reg);
+                    case_skip = try self.emitJump(.jump_false, case_reg);
+                } else {
+                    var tally_reg = try self.func.regAlloc();
+                    defer self.func.regFree(tally_reg);
 
-                _ = try self.genNodeNonEmpty(case.items[0], .{ .rt = case_reg });
-                // if not equal to the error value jump over this handler
-                try self.emitTriple(.equal_triple, case_reg, case_reg, cond_reg);
-                case_skip = try self.emitJump(.jump_false, case_reg);
+                    for (case.items) |item, i| {
+                        _ = try self.genNodeNonEmpty(item, .{ .rt = case_reg });
+                        if (i == 0) {
+                            try self.emitTriple(.equal_triple, tally_reg, case_reg, cond_reg);
+                        } else {
+                            try self.emitTriple(.equal_triple, case_reg, case_reg, cond_reg);
+                            try self.emitTriple(.bool_or_triple, tally_reg, tally_reg, case_reg);
+                        }
+                    }
+                    case_skip = try self.emitJump(.jump_false, tally_reg);
+                }
             } else unreachable;
 
             const case_res = try self.genNode(expr, sub_res);

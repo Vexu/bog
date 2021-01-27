@@ -66,19 +66,20 @@ test "match" {
     expectOutput(
         \\const getNum = fn (arg)
         \\    return match (arg)
-        \\        1 => 69
+        \\        1, 2 => 69
         \\        12 => 42
         \\        10004 => 17
         \\        _ => 0
         \\
         \\let arr = []
         \\arr ++ getNum(1)
+        \\arr ++ getNum(2)
         \\arr ++ getNum(12)
         \\arr ++ getNum(10004)
         \\arr ++ getNum(9)
         \\return arr
     ,
-        \\[69, 42, 17, 0]
+        \\[69, 69, 42, 17, 0]
     );
     expectOutput(
         \\const getNum = fn() 42
