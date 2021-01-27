@@ -353,7 +353,7 @@ pub const Value = union(Type) {
                 try writer.print("native({})@0x{}", .{ n.arg_count, @ptrToInt(n.func) });
             },
             .tagged => |*t| {
-                try writer.print("@{}", .{t.name});
+                try writer.print("@{s}", .{t.name});
                 if (level == 0) {
                     try writer.writeAll("(...)");
                 } else {
@@ -836,7 +836,7 @@ pub const Value = union(Type) {
             .bool,
             => try val.dump(writer, 0),
             .str => |s| {
-                try writer.print("\"{Z}\"", .{s.data});
+                try writer.print("\"{s}\"", .{std.zig.fmtEscapes(s.data)});
             },
             .native,
             .func,

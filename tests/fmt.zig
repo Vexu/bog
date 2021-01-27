@@ -367,7 +367,7 @@ fn testTransform(source: []const u8, expected: []const u8) void {
     var tree = bog.parse(std.testing.allocator, source, &errors) catch |e| switch (e) {
         else => @panic("test failure"),
         error.TokenizeError, error.ParseError => {
-            errors.render(source, std.io.getStdErr().outStream()) catch {};
+            errors.render(source, std.io.getStdErr().writer()) catch {};
             @panic("test failure");
         },
     };
@@ -375,7 +375,7 @@ fn testTransform(source: []const u8, expected: []const u8) void {
 
     var out_buf = std.ArrayList(u8).init(std.testing.allocator);
     defer out_buf.deinit();
-    _ = tree.render(out_buf.outStream()) catch @panic("test failure");
+    _ = tree.render(out_buf.writer()) catch @panic("test failure");
     std.testing.expectEqualStrings(expected, out_buf.items);
 }
 

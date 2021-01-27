@@ -366,16 +366,16 @@ pub const Module = struct {
                 try writer.writeAll("\nentry:");
             }
             if (jumps.get(ip)) |label| {
-                try writer.print("\n{}:", .{label});
+                try writer.print("\n{s}:", .{label});
             }
             const inst = module.code[ip];
             ip += 1;
             if (inst.op.op != .line_info) {
-                try writer.print("\n {: <5} {: <20} ", .{ ip, @tagName(inst.op.op) });
+                try writer.print("\n {: <5} {s: <20} ", .{ ip, @tagName(inst.op.op) });
             }
             switch (inst.op.op) {
                 .const_primitive => {
-                    try writer.print("{} <- ({})\n", .{ inst.primitive.res, @tagName(inst.primitive.kind) });
+                    try writer.print("{} <- ({s})\n", .{ inst.primitive.res, @tagName(inst.primitive.kind) });
                 },
                 .const_int => {
                     const val = if (inst.int.long) blk: {
@@ -396,7 +396,7 @@ pub const Module = struct {
 
                     const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
                     const slice = module.strings[offset + @sizeOf(u32) ..][0..len];
-                    try writer.print("{} <- \"{}\"\n", .{ inst.off.res, slice });
+                    try writer.print("{} <- \"{s}\"\n", .{ inst.off.res, slice });
                 },
 
                 .build_tagged => {
@@ -406,9 +406,9 @@ pub const Module = struct {
                     const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
                     const slice = module.strings[offset + @sizeOf(u32) ..][0..len];
                     if (inst.tagged.kind == .none)
-                        try writer.print("{} <- @{}\n", .{ inst.off.res, slice })
+                        try writer.print("{} <- @{s}\n", .{ inst.off.res, slice })
                     else
-                        try writer.print("{} <- @{}({})\n", .{ inst.off.res, slice, inst.tagged.arg });
+                        try writer.print("{} <- @{s}({})\n", .{ inst.off.res, slice, inst.tagged.arg });
                 },
 
                 .jump, .jump_false, .jump_true, .jump_none, .jump_error, .jump_not_error => {
@@ -420,16 +420,16 @@ pub const Module = struct {
                     const label = jumps.get(jump_target) orelse unreachable;
 
                     if (inst.jump.op == .jump)
-                        try writer.print("to {}\n", .{label})
+                        try writer.print("to {s}\n", .{label})
                     else
-                        try writer.print("to {}, cond {}\n", .{ label, inst.jump.arg });
+                        try writer.print("to {s}, cond {}\n", .{ label, inst.jump.arg });
                 },
 
                 .build_func => {
                     const offset = module.code[ip].bare;
                     ip += 1;
                     const label = jumps.get(offset) orelse unreachable;
-                    try writer.print("{} <- {}({})[{}]\n", .{ inst.func.res, label, inst.func.arg_count, inst.func.capture_count });
+                    try writer.print("{} <- {s}({})[{}]\n", .{ inst.func.res, label, inst.func.arg_count, inst.func.capture_count });
                 },
 
                 .div_floor_triple,
@@ -454,7 +454,7 @@ pub const Module = struct {
                 .bool_and_triple,
                 .bool_or_triple,
                 => {
-                    try writer.print("{} <- {} {} {}\n", .{ inst.triple.res, inst.triple.lhs, opToStr(inst.triple.op), inst.triple.rhs });
+                    try writer.print("{} <- {} {s} {}\n", .{ inst.triple.res, inst.triple.lhs, opToStr(inst.triple.op), inst.triple.rhs });
                 },
                 .get_triple => {
                     try writer.print("{} <- {}[{}]\n", .{ inst.triple.res, inst.triple.lhs, inst.triple.rhs });
@@ -467,7 +467,7 @@ pub const Module = struct {
                     const jump_target = ip + module.code[ip].bare;
                     ip += 1;
                     const label = jumps.get(jump_target) orelse unreachable;
-                    try writer.print("{} <- {}, jump_none to {}\n", .{ inst.double.res, inst.double.arg, label });
+                    try writer.print("{} <- {}, jump_none to {s}\n", .{ inst.double.res, inst.double.arg, label });
                 },
                 .build_error_double, .unwrap_error_double, .iter_init_double, .move_double, .copy_double, .append_double => {
                     try writer.print("{} <- {}\n", .{ inst.double.res, inst.double.arg });
@@ -478,10 +478,10 @@ pub const Module = struct {
 
                     const len = @ptrCast(*align(1) const u32, module.strings[offset..].ptr).*;
                     const slice = module.strings[offset + @sizeOf(u32) ..][0..len];
-                    try writer.print("{} <- @{}({})\n", .{ inst.double.res, slice, inst.double.arg });
+                    try writer.print("{} <- @{s}({})\n", .{ inst.double.res, slice, inst.double.arg });
                 },
                 .bool_not_double, .bit_not_double, .negate_double, .try_double => {
-                    try writer.print("{} <- {} {}\n", .{ inst.double.res, opToStr(inst.double.op), inst.double.arg });
+                    try writer.print("{} <- {s} {}\n", .{ inst.double.res, opToStr(inst.double.op), inst.double.arg });
                 },
 
                 .store_capture_triple => {
@@ -501,7 +501,7 @@ pub const Module = struct {
                 .build_range => {
                     const cont = module.code[ip].range_cont;
                     ip += 1;
-                    try writer.print("{} <- {}:{}:{} #{}:{}:{}\n", .{
+                    try writer.print("{} <- {}:{}:{} #{s}:{s}:{s}\n", .{
                         inst.range.res,            inst.range.start,        inst.range.end,           cont.step,
                         @tagName(cont.start_kind), @tagName(cont.end_kind), @tagName(cont.step_kind),
                     });
@@ -524,7 +524,7 @@ pub const Module = struct {
 
                 .line_info => ip += 1,
                 .is_type_id, .as_type_id => {
-                    try writer.print("{} <- {} {} {}\n", .{ inst.type_id.res, inst.type_id.arg, opToStr(inst.op.op), @tagName(inst.type_id.type_id) });
+                    try writer.print("{} <- {} {s} {s}\n", .{ inst.type_id.res, inst.type_id.arg, opToStr(inst.op.op), @tagName(inst.type_id.type_id) });
                 },
                 .discard_single, .return_single, .load_this_single => {
                     try writer.print("{}\n", .{inst.single.arg});
@@ -553,7 +553,7 @@ pub const Module = struct {
                     ip += 1;
                     if (map.get(jump_target)) |_| continue;
 
-                    _ = try map.put(jump_target, try std.fmt.allocPrint(arena, "{}_{}", .{ @tagName(inst.op.op), mangle }));
+                    _ = try map.put(jump_target, try std.fmt.allocPrint(arena, "{s}_{}", .{ @tagName(inst.op.op), mangle }));
                     mangle += 1;
                 },
 

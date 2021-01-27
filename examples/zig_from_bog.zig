@@ -19,7 +19,7 @@ pub fn main() !void {
     const res = vm.run(source) catch |e| switch (e) {
         else => |err| return err,
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
-            try vm.errors.render(source, std.io.getStdErr().outStream());
+            try vm.errors.render(source, std.io.getStdErr().writer());
             return error.RunningBogFailed;
         },
     };

@@ -74,9 +74,7 @@ pub fn eql(a: String, b: String) bool {
 }
 
 pub fn dump(str: String, writer: anytype) !void {
-    try writer.writeByte('"');
-    try std.fmt.formatZigEscapes(str.data, .{}, writer);
-    try writer.writeByte('"');
+    try writer.print("\"{s}\"", .{std.zig.fmtEscapes(str.data)});
 }
 
 pub fn get(str: *const String, vm: *Vm, index: *const Value, res: *?*Value) Vm.Error!void {

@@ -86,7 +86,7 @@ export fn bog_Vm_call(vm: *bog.Vm, res: **bog.Value, container: *bog.Value, func
 }
 
 export fn bog_Vm_renderErrors(vm: *bog.Vm, source: [*:0]const u8, out: *std.c.FILE) Error {
-    vm.errors.render(span(source), std.io.cOutStream(out)) catch return .IoError;
+    vm.errors.render(span(source), std.io.cWriter(out)) catch return .IoError;
 
     return .None;
 }
@@ -106,7 +106,7 @@ export fn bog_Errors_deinit(errors: *bog.Errors) void {
 }
 
 export fn bog_Errors_render(errors: *bog.Errors, source: [*:0]const u8, out: *std.c.FILE) Error {
-    errors.render(span(source), std.io.cOutStream(out)) catch return .IoError;
+    errors.render(span(source), std.io.cWriter(out)) catch return .IoError;
 
     return .None;
 }
@@ -126,7 +126,7 @@ export fn bog_Tree_deinit(tree: *bog.Tree) void {
 }
 
 export fn bog_Tree_render(tree: *bog.Tree, out: *std.c.FILE, changed: ?*bool) Error {
-    const c = tree.render(std.io.cOutStream(out)) catch return .IoError;
+    const c = tree.render(std.io.cWriter(out)) catch return .IoError;
     if (changed) |some| {
         some.* = c;
     }

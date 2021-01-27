@@ -96,7 +96,7 @@ pub const Errors = struct {
                 .note => try writer.writeAll(CYAN ++ "note: " ++ BOLD),
                 .trace => {},
             }
-            try writer.print("{}\n" ++ RESET, .{e.msg.data});
+            try writer.print("{s}\n" ++ RESET, .{e.msg.data});
 
             const start = lineBegin(source, e.index);
             const end = zig_std.mem.indexOfScalarPos(u8, source, e.index, '\n') orelse source.len;

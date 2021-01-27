@@ -529,7 +529,7 @@ pub const Compiler = struct {
             const scope = self.scopes.items[i];
             switch (scope) {
                 .symbol => |sym| if (std.mem.eql(u8, sym.name, name)) {
-                    const msg = try bog.Value.String.init(self.gpa, "redeclaration of '{}'", .{name});
+                    const msg = try bog.Value.String.init(self.gpa, "redeclaration of '{s}'", .{name});
                     try self.errors.add(msg, self.tokens[tok].start, .err);
                     return error.CompileError;
                 },
