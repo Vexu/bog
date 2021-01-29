@@ -125,11 +125,6 @@ pub fn pow(x: f64, y: f64) f64 {
     return math.pow(f64, x, y);
 }
 
-// TODO catch errors
-//pub fn powi(x: i64, y: i64) i64 {
-//    return math.powi(i64, x, y);
-//}
-
 pub fn cbrt(val: f64) f64 {
     return math.cbrt(val);
 }
