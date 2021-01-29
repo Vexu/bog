@@ -121,10 +121,6 @@ pub fn scalbn(val: f64, n: i32) f64 {
     return math.scalbn(val, n);
 }
 
-pub fn pow(x: f64, y: f64) f64 {
-    return math.pow(f64, x, y);
-}
-
 pub fn cbrt(val: f64) f64 {
     return math.cbrt(val);
 }
