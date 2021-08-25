@@ -115,12 +115,11 @@ pub const Token = struct {
     end: u32,
     id: Id,
 
-    pub const List = std.ArrayList(Token);
+    pub const List = std.MultiArrayList(Token);
     pub const Index = u32;
 
-    pub const Id = union(enum) {
+    pub const Id = enum(u8) {
         eof,
-        indent: u16,
         identifier,
         string,
         integer,
@@ -174,6 +173,40 @@ pub const Token = struct {
         format_start,
         format,
         format_end,
+
+        /// indentation
+        indent_1,
+        indent_2,
+        indent_3,
+        indent_4,
+        indent_5,
+        indent_6,
+        indent_7,
+        indent_8,
+        indent_9,
+        indent_10,
+        indent_11,
+        indent_12,
+        indent_13,
+        indent_14,
+        indent_15,
+        indent_16,
+        indent_17,
+        indent_18,
+        indent_19,
+        indent_20,
+        indent_21,
+        indent_22,
+        indent_23,
+        indent_24,
+        indent_25,
+        indent_26,
+        indent_27,
+        indent_28,
+        indent_29,
+        indent_30,
+        indent_31,
+        indent_32,
 
         /// keywords
         keyword_and,
@@ -353,11 +386,8 @@ pub const Token = struct {
     }
 };
 
-pub fn tokenize(allocator: mem.Allocator, source: []const u8, errors: *Errors) Tokenizer.Error![]const Token {
-    // estimate one token per 8 bytes to reduce allocation in the beginning
-    const estimated = source.len / 8;
+pub fn tokenize(gpa: mem.Allocator, source: []const u8, errors: *Errors) Tokenizer.Error![]Token.List {
     var tokenizer = Tokenizer{
-        .tokens = try Token.List.initCapacity(allocator, estimated),
         .errors = errors,
         .it = .{
             .i = 0,
@@ -366,12 +396,15 @@ pub fn tokenize(allocator: mem.Allocator, source: []const u8, errors: *Errors) T
         .repl = false,
     };
     errdefer tokenizer.tokens.deinit();
+
+    // estimate one token per 8 bytes to reduce allocation in the beginning
+    const estimated = source.len / 8;
+    try tokenizer.tokens.ensureUnusedCapacity(gpa, estimated);
+
     while (true) {
-        const tok = try tokenizer.tokens.addOne();
-        tok.* = try tokenizer.next();
-        if (tok.id == .eof) {
-            return tokenizer.tokens.toOwnedSlice();
-        }
+        const tok = try tokenizer.next();
+        try tokenizer.tokens.append(gpa, tok);
+        if (tok.id == .eof) return tokenizer.tokens;
     }
 }
 
@@ -385,8 +418,8 @@ pub fn tokenizeRepl(repl: *@import("repl.zig").Repl) Tokenizer.Error!bool {
     const start_len = self.tokens.items.len;
 
     while (true) {
-        const tok = try self.tokens.addOne();
-        tok.* = try self.next();
+        const tok = try self.next();
+        try tokenizer.tokens.append(repl.gpa, tok);
         if (tok.id == .eof) {
             // check if more input is expected
             return if (self.tokens.items.len == start_len + 2)
@@ -405,7 +438,7 @@ pub fn tokenizeRepl(repl: *@import("repl.zig").Repl) Tokenizer.Error!bool {
 
 pub const Tokenizer = struct {
     errors: *Errors,
-    tokens: Token.List,
+    tokens: Token.List = .{},
     it: unicode.Utf8Iterator,
 
     /// indentation specific variables
@@ -517,14 +550,14 @@ pub const Tokenizer = struct {
         }
         const level = @divExact(count, self.chars_per_indent.?);
 
-        if (level > 50) {
-            return self.reportErr("indentation exceeds maximum of 50 levels", 'a');
+        if (level > 32) {
+            return self.reportErr("indentation exceeds maximum of 32 levels", 'a');
         }
 
         // needed by the repl tokenizer
         self.indent_level = level;
         return Token{
-            .id = .{ .indent = level },
+            .id = @intToEnum(Token.Id, @enumToInt(Token.Id.indent_1) + (level - 1)),
             .start = @truncate(u32, start_index),
             .end = @truncate(u32, self.it.i),
         };
@@ -1332,18 +1365,18 @@ test "indentation" {
     , &.{
         .keyword_if,
         .nl,
-        .{ .indent = 1 },
+        .indent_1,
         .keyword_if,
         .nl,
-        .{ .indent = 2 },
+        .indent_2,
         .keyword_if,
         .nl,
         .keyword_if,
         .nl,
-        .{ .indent = 1 },
+        .indent_1,
         .keyword_if,
         .nl,
-        .{ .indent = 1 },
+        .indent_1,
         .keyword_if,
         .nl,
     });
