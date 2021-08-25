@@ -1,50 +1,91 @@
-root : (stmt NL)* EOF
+file : (decl_or_export NL)* EOF
+
+decl_or_export
+    : "export" decl
+    | decl
+
+decl
+    : import STRING import_suffix?
+    | "let" destructuring "=" block_or_expr
+    | "type" IDENTIFIER "=" type
+    | "fn" IDENTIFIER "(" (destructuring ",")* destructuring? ")" (":" type)? block_or_expr
+
+import_suffix : IDENTIFIER ("." IDENTIFIER)* ("," IDENTIFIER ("." IDENTIFIER)*)*
+
+destructuring
+    : "mut"? IDENTIFIER (":" type)?
+    | "_"
+    | IDENTIFIER compound_destructuring
+    | "error" compound_destructuring
+    | compound_destructuring
+    | destructuring? ":" (destructuring? (":" destructuring)?)?
+    
+compound_destructuring
+    : "(" destructuring ")"
+    | "(" destructuring ("," destructuring)* ","? ")"
+    | "[" destructuring ("," destructuring)* ","? "]"
+    | "{" destructuring ("," destructuring)* ","? "}"
+
+type
+    : "any"
+    | "never"
+    | "none"
+    | "int"
+    | "num"
+    | "bool"
+    | "str"
+    | "range"
+    | "unique" type
+    | type ("|" type)+
+    | "fn" "(" type ("," type)* ","? ")" (":" type)?
+    | "error" compound_type
+    | "enum" IDENTIFIER compound_type ("," IDENTIFIER compound_type)*
+    
+compound_type
+    : "(" type ")"
+    | "(" type ("," type)* "," ")"
+    | "[" type "]"
+    | "{" type "=" type "}"
 
 stmt
-    : decl "=" block_or_expr
-    | expr
+    : decl
+    | assign_expr
 
-decl : ("let" | "const") bool_expr
-
-expr
-    : fn
-    | jump_expr
-    | bool_expr assign?
+assign_expr : expr (("=" | "+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") block_or_expr)?
 
 block_or_expr : block | expr
 
-block : NL BEGIN (stmt NL)+ END
+block : NL (stmt NL)+
 
-assign : ("=" | "+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") block_or_expr
+expr
+    : jump_expr
+    | lambda
+    | bool_expr
 
-jump_expr : "return" block_or_expr? | "break" | "continue"
+jump_expr : "return" block_or_expr? | "break" | "continue" | "throw" block_or_expr
 
-fn : "fn" "(" (bool_expr ",")* bool_expr? ")" block_or_expr
+lambda : "fn" "(" (destructuring ",")* destructuring? ")" (":" type)? block_or_expr
 
 bool_expr
-    : "not" comparision_expr
-    | comparision_expr ("or" comparision_expr)*
-    | comparision_expr ("and" comparision_expr)*
+    : "not" comparison_expr
+    | comparison_expr ("or" comparison_expr)*
+    | comparison_expr ("and" comparison_expr)*
 
-comparision_expr
+comparison_expr
     : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in") range_expr)?
-    | range_expr ("is" type_name)?
+    | range_expr ("is" type)?
 
-type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
-
-range_expr
-    IF(allow_range) bit_expr? (":" bit_expr? (":" bit_expr?)?)?
-    ELSE bit_expr
+range_expr : bit_expr? (":" bit_expr? (":" bit_expr)?)?
 
 bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)*
 
 shift_expr : add_expr (("<<" | ">>") add_expr)?
 
-add_expr : mul_expr (("-" | "+" | "++") mul_expr)*
+add_expr : mul_expr (("-" | "+") mul_expr)*
 
 mul_expr : cast_expr (("*" | "/" | "//" | "%") cast_expr)*
 
-cast_expr : prefix_expr ("as" type_name)?
+cast_expr : prefix_expr ("as" type)?
 
 prefix_expr : ("-" | "+" | "~")? power_expr
 
@@ -57,18 +98,16 @@ suffix_expr
 
 primary_expr
     : IDENTIFIER
-    | "_"
     | STRING
     | format_string
     | NUMBER
     | "true"
     | "false"
     | "this"
-    | "(" ")"
+    | "null"
     | initializer
     | "error" initializer?
     | "@" IDENTIFIER initializer?
-    | "import" "(" STRING ")"
     | if
     | while
     | for
@@ -80,19 +119,19 @@ format_string : FORMAT_START expr (FORMAT expr)* FORMAT_END
 initializer
     : "(" block_or_expr ")"
     | "(" (expr ",")+ expr? ")"
-    | "{" (expr ":" expr ",")* (expr ":" expr)? "}"
+    | "{" (expr "=" expr ",")* (expr "=" expr)? "}"
     | "[" (expr ",")* expr? "]"
 
-if : "if" "(" (decl "=")? expr ")" block_or_expr ("else" block_or_expr)?
+if : "if" ("let" destructuring "=")? expr block_or_expr ("else" block_or_expr)?
 
-while : "while" "(" (decl "=")? expr ")" block_or_expr
+while : "while" ("let" destructuring "=")? expr block_or_expr
 
-for : "for" "(" (decl "in")? expr ")" block_or_expr
+for : "for" ("let" destructuring "in")? expr block_or_expr
 
-match : "match" "(" expr ")" (NL match_case)+ NL
+match : "match" expr (NL match_case)+ NL
 
 match_case
-    : decl "=>" block_or_expr
+    : "let" destructuring "=>" block_or_expr
     | expr ("," expr)* ","? "=>" block_or_expr
 
-try : "try" block_or_expr ("catch" ("(" decl ")" | expr)? block_or_expr)+
+try : "try" block_or_expr ("catch" ("let" destructuring | expr)? block_or_expr)*
