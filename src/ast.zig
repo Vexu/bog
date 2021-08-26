@@ -7,14 +7,17 @@ const Token = bog.Token;
 pub const Tree = struct {
     tokens: Token.List,
     nodes: Node.List,
-    extra: std.ArrayList(Node.Index),
+    extra: []Node.Index,
+    root_decls: []Node.Index,
 
     /// not owned by the tree
     source: []const u8,
 
-    pub fn deinit(tree: *Tree) void {
-        tree.tokens.deinit(tree.extra.allocator);
-        tree.nodes.deinit(tree.extra.allocator);
+    pub fn deinit(tree: *Tree, gpa: *Allocator) void {
+        tree.tokens.deinit(gpa);
+        tree.nodes.deinit(gpa);
+        gpa.free(tree.extra);
+        gpa.free(tree.root_decls);
     }
 
     pub const render = @import("render.zig").render;
@@ -49,7 +52,7 @@ pub const Node = struct {
                 // there are N -1 expressions for N string parts
                 return extra[f.args_start..][0 .. f.args_start - f.fmt_start - 1];
             }
-        }
+        },
     },
 
     pub const List = std.MultiArrayList(Node);
@@ -74,7 +77,7 @@ pub const Node = struct {
         /// fn token(extra[start..end-1]) extra[end-1]
         fn_decl_ret,
         /// fn token(): lhs rhs
-        fn_decl_ret,
+        fn_decl_zero,
         /// fn token(lhs) rhs
         fn_decl_one,
 
@@ -88,22 +91,6 @@ pub const Node = struct {
         discard_dest,
         /// token un
         enum_dest,
-        /// error un
-        error_dest,
-        /// ( un )
-        paren_dest,
-        /// ( extra[start..end] )
-        tuple_dest,
-        /// ( lhs, rhs ) rhs may be omitted
-        tuple_dest_two,
-        /// [ extra[start..end] ]
-        list_dest,
-        /// [ lhs, rhs ] rhs may be omitted
-        list_dest_two,
-        /// { extra[start..end] }
-        map_dest,
-        /// { lhs, rhs } rhs may be omitted
-        map_dest_two,
 
         // types
 
@@ -121,26 +108,12 @@ pub const Node = struct {
         bool_type,
         /// str
         str_type,
-        /// range
-        range_type,
         /// range[start] | range[start + 1] | ... | range[end]
         union_type,
         /// lhs | rhs
         union_type_two,
         /// enum 
         enum_type,
-        /// error un
-        error_type,
-        /// cond : extra[0] : extra[1]
-        range_dest,
-        /// : lhs : rhs, lhs and rhs may be omitted
-        range_dest_start,
-        /// lhs : : rhs, rhs may be omitted
-        range_dest_end,
-        /// lhs : rhs :
-        range_dest_step,
-        /// ( un )
-        paren_type,
 
         // statements
 
@@ -193,7 +166,7 @@ pub const Node = struct {
         /// fn(extra[start..end-1]) extra[end-1]
         lambda_expr_ret,
         /// fn(): lhs rhs
-        lambda_expr_ret,
+        lambda_expr_zero,
         /// fn(lhs) rhs
         lambda_expr_one,
         /// ( data.un )
@@ -318,6 +291,10 @@ pub const Node = struct {
         not_equal_expr,
         /// lhs in rhs
         in_expr,
+        /// lhs is rhs
+        is_expr,
+        /// lhs as rhs
+        as_expr,
         /// lhs & rhs
         bit_and_expr,
         /// lhs | rhs

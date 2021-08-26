@@ -386,7 +386,7 @@ pub const Token = struct {
     }
 };
 
-pub fn tokenize(gpa: mem.Allocator, source: []const u8, errors: *Errors) Tokenizer.Error![]Token.List {
+pub fn tokenize(gpa: mem.Allocator, source: []const u8, errors: *Errors) Tokenizer.Error!Token.List {
     var tokenizer = Tokenizer{
         .errors = errors,
         .it = .{
@@ -395,7 +395,7 @@ pub fn tokenize(gpa: mem.Allocator, source: []const u8, errors: *Errors) Tokeniz
         },
         .repl = false,
     };
-    errdefer tokenizer.tokens.deinit();
+    errdefer tokenizer.tokens.deinit(gpa);
 
     // estimate one token per 8 bytes to reduce allocation in the beginning
     const estimated = source.len / 8;
@@ -502,8 +502,8 @@ pub const Tokenizer = struct {
             },
         } else {
             if (self.repl) {
-                if (self.indent_level == 0 and self.tokens.items.len > 2) {
-                    switch (self.tokens.items[self.tokens.items.len - 3].id) {
+                if (self.indent_level == 0 and self.tokens.len > 2) {
+                    switch (self.tokens.items(.id)[self.tokens.len - 3]) {
                         // no further input is expected after these tokens
                         // so we can stop asking for more input
                         .identifier,

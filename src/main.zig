@@ -42,6 +42,9 @@ pub fn main() !void {
     const in = std.io.bufferedReader(std.io.getStdIn().reader()).reader();
     var stdout = std.io.getStdOut().writer();
 
+    if (true) {
+        @panic("TODO re-enable repl");
+    }
     try repl.run(gpa, in, stdout);
 }
 
@@ -62,6 +65,9 @@ fn help() !void {
 }
 
 fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
+    if (true) {
+        @panic("TODO re-enable run");
+    }
     std.debug.assert(args.len > 0);
     const file_name = args[0];
 
@@ -195,6 +201,10 @@ fn fmtFile(gpa: std.mem.Allocator, name: []const u8) FmtError!bool {
     };
     defer tree.deinit();
 
+    if (true) {
+        @panic("TODO render tree");
+    }
+
     const file = try std.fs.cwd().createFile(name, .{});
     defer file.close();
 
@@ -221,6 +231,9 @@ const usage_debug =
 ;
 
 fn debugDump(gpa: std.mem.Allocator, args: [][]const u8) !void {
+    if (true) {
+        @panic("TODO re-enable debugDump");
+    }
     const file_name = getFileName(usage_debug, args);
 
     const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
@@ -260,21 +273,56 @@ fn debugTokens(gpa: std.mem.Allocator, args: [][]const u8) !void {
     var errors = bog.Errors.init(gpa);
     defer errors.deinit();
 
-    const tokens = bog.tokenize(gpa, source, &errors) catch |e| switch (e) {
+    var tokens = bog.tokenize(gpa, source, &errors) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.TokenizeError => {
             try errors.render(source, std.io.getStdErr().writer());
             process.exit(1);
         },
     };
-    defer gpa.free(tokens);
+    defer tokens.deinit(gpa);
 
     const stream = std.io.getStdOut().writer();
-    for (tokens) |tok| {
-        switch (tok.id) {
-            .Nl, .Eof => try stream.print("{s}\n", .{@tagName(tok.id)}),
-            .Indent => |level| try stream.print("{s} {}\n", .{ @tagName(tok.id), level }),
-            else => try stream.print("{s} |{s}|\n", .{ @tagName(tok.id), source[tok.start..tok.end] }),
+    const starts = tokens.items(.start);
+    const ends = tokens.items(.end);
+    for (tokens.items(.id)) |id, i| {
+        switch (id) {
+            .nl,
+            .eof,
+            .indent_1,
+            .indent_2,
+            .indent_3,
+            .indent_4,
+            .indent_5,
+            .indent_6,
+            .indent_7,
+            .indent_8,
+            .indent_9,
+            .indent_10,
+            .indent_11,
+            .indent_12,
+            .indent_13,
+            .indent_14,
+            .indent_15,
+            .indent_16,
+            .indent_17,
+            .indent_18,
+            .indent_19,
+            .indent_20,
+            .indent_21,
+            .indent_22,
+            .indent_23,
+            .indent_24,
+            .indent_25,
+            .indent_26,
+            .indent_27,
+            .indent_28,
+            .indent_29,
+            .indent_30,
+            .indent_31,
+            .indent_32,
+            => try stream.print("{s}\n", .{@tagName(id)}),
+            else => try stream.print("{s} |{s}|\n", .{ @tagName(id), source[starts[i]..ends[i]] }),
         }
     }
 }
@@ -285,6 +333,9 @@ const usage_debug_write =
 ;
 
 fn debugWrite(gpa: std.mem.Allocator, args: [][]const u8) !void {
+    if (true) {
+        @panic("TODO re-enable debugWrite");
+    }
     if (args.len != 2) {
         fatal("{s}", .{usage_debug_write});
     }
