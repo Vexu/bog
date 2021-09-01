@@ -157,7 +157,7 @@ pub const Instruction = packed union {
         op: Op = .build_tagged,
         res: RegRef,
         arg: RegRef,
-        kind: packed enum(u8) {
+        kind: enum(u8) {
             none = 0,
             some = 1,
             _,
@@ -166,7 +166,7 @@ pub const Instruction = packed union {
     primitive: packed struct {
         op: Op = .const_primitive,
         res: u8,
-        kind: packed enum(u8) {
+        kind: enum(u8) {
             none = 0,
             True = 1,
             False = 2,
@@ -219,7 +219,7 @@ pub const Instruction = packed union {
         step_kind: RangeKind,
     },
 
-    pub const RangeKind = packed enum(u8) {
+    pub const RangeKind = enum(u8) {
         reg,
         value,
         default,
@@ -295,7 +295,8 @@ pub const Module = struct {
         if (src.len < @sizeOf(Header))
             return error.InvalidHeader;
 
-        const header = if (@import("builtin").endian == .Little)
+        // const header = if (@import("builtin").endian == .Little)
+        const header = if (std.Target.current.cpu.arch.endian() == .Little)
             @ptrCast(*const Header, src.ptr).*
         else
             Header{

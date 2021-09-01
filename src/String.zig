@@ -74,7 +74,7 @@ pub fn eql(a: String, b: String) bool {
 }
 
 pub fn dump(str: String, writer: anytype) !void {
-    try writer.print("\"{s}\"", .{std.zig.fmtEscapes(str.data)});
+    try writer.print("\"{}\"", .{std.zig.fmtEscapes(str.data)});
 }
 
 pub fn get(str: *const String, vm: *Vm, index: *const Value, res: *?*Value) Vm.Error!void {
@@ -124,6 +124,9 @@ pub fn get(str: *const String, vm: *Vm, index: *const Value, res: *?*Value) Vm.E
 }
 
 pub fn set(str: *String, vm: *Vm, index: *const Value, new_val: *const Value) Vm.Error!void {
+    _ = str;
+    _ = index;
+    _ = new_val;
     return vm.fatal("TODO set string");
 }
 
@@ -244,7 +247,7 @@ pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
                         if (args[arg_i].* != .int) {
                             return vm.typeError(.int, args[arg_i].*);
                         }
-                        try std.fmt.formatInt(args[arg_i].int, 16, fmt[0] == 'X', options, w);
+                        try std.fmt.formatInt(args[arg_i].int, 16, @intToEnum(std.fmt.Case, @boolToInt(fmt[0] == 'X')), options, w);
                     },
                     0 => if (args[arg_i].* == .str) {
                         try b.append(args[arg_i].str.data);

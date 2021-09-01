@@ -7,29 +7,29 @@ pub fn build(b: *Builder) void {
     const lib = b.addStaticLibrary("bog", "src/lib.zig");
     lib.setBuildMode(mode);
     lib.linkLibC();
-    lib.addBuildOption(
-        bool,
-        "no_std",
-        b.option(bool, "NO_ADD_STD", "Do not export bog_Vm_addStd to reduce binary size") orelse false,
-    );
-    lib.addBuildOption(
-        bool,
-        "no_std_no_io",
-        b.option(bool, "NO_ADD_STD_NO_IO", "Do not export bog_Vm_addStd to reduce binary size") orelse false,
-    );
+    // lib.addBuildOption(
+    //     bool,
+    //     "no_std",
+    //     b.option(bool, "NO_ADD_STD", "Do not export bog_Vm_addStd to reduce binary size") orelse false,
+    // );
+    // lib.addBuildOption(
+    //     bool,
+    //     "no_std_no_io",
+    //     b.option(bool, "NO_ADD_STD_NO_IO", "Do not export bog_Vm_addStd to reduce binary size") orelse false,
+    // );
     const lib_step = b.step("lib", "Build C library");
     lib_step.dependOn(&b.addInstallArtifact(lib).step);
 
     // c library usage example
-    const c_example = b.addExecutable("bog_from_c", null);
-    c_example.setBuildMode(mode);
-    c_example.addCSourceFile("examples/bog_from_c.c", &[_][]const u8{});
-    c_example.addIncludeDir("include");
-    c_example.linkSystemLibrary("bog");
-    c_example.linkLibC();
-    c_example.addLibPath("zig-cache/lib");
-    c_example.step.dependOn(lib_step);
-    c_example.setOutputDir("examples/bin");
+    // const c_example = b.addExecutable("bog_from_c", null);
+    // c_example.setBuildMode(mode);
+    // c_example.addCSourceFile("examples/bog_from_c.c", &[_][]const u8{});
+    // c_example.addIncludeDir("include");
+    // c_example.linkSystemLibrary("bog");
+    // c_example.linkLibC();
+    // c_example.addLibPath("zig-cache/lib");
+    // c_example.step.dependOn(lib_step);
+    // c_example.setOutputDir("examples/bin");
 
     // calling zig from bog example
     const zig_from_bog = b.addExecutable("zig_from_bog", "examples/zig_from_bog.zig");
@@ -38,7 +38,7 @@ pub fn build(b: *Builder) void {
     zig_from_bog.setOutputDir("examples/bin");
 
     const examples_step = b.step("examples", "Build all examples");
-    examples_step.dependOn(&b.addInstallArtifact(c_example).step);
+    // examples_step.dependOn(&b.addInstallArtifact(c_example).step);
     examples_step.dependOn(&b.addInstallArtifact(zig_from_bog).step);
 
     addTests(b, examples_step, .{

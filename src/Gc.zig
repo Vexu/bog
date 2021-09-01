@@ -6,9 +6,8 @@ const bog = @import("bog.zig");
 const Value = bog.Value;
 const expect = std.testing.expect;
 
-//! A non-moving garbage collector.
-//! Inspired by https://www.pllab.riec.tohoku.ac.jp/papers/icfp2011UenoOhoriOtomoAuthorVersion.pdf
-
+/// A non-moving garbage collector.
+/// Inspired by https://www.pllab.riec.tohoku.ac.jp/papers/icfp2011UenoOhoriOtomoAuthorVersion.pdf
 /// A pool of values prefixed with a header containing two bitmaps for
 /// the old and young generation.
 const Page = struct {
@@ -20,7 +19,7 @@ const Page = struct {
     const val_count = 25_574;
     const pad_size = max_size - @sizeOf(u32) - (@sizeOf(Value) + @sizeOf(State)) * val_count;
 
-    const State = packed enum(u8) {
+    const State = enum(u8) {
         empty = 0,
         white,
         gray,
@@ -149,9 +148,10 @@ fn markGray(gc: *Gc) void {
                         }
                     },
                     .map => |map| {
-                        for (map.items()) |*entry| {
-                            gc.markVal(entry.key);
-                            gc.markVal(entry.value);
+                        var iter = map.iterator();
+                        while (iter.next()) |entry| {
+                            gc.markVal(entry.key_ptr.*);
+                            gc.markVal(entry.value_ptr.*);
                         }
                     },
                     .err => |err| {
@@ -390,8 +390,8 @@ test "stack protect" {
 
     gc.stack_protect_start = @frameAddress();
 
-    var val1 = try gc.alloc();
-    var val2 = try gc.alloc();
+    _ = try gc.alloc();
+    _ = try gc.alloc();
 
     expect(gc.collect() == 0);
 

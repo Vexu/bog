@@ -4,7 +4,7 @@ const Tree = bog.Tree;
 const Node = bog.Node;
 const TokenIndex = bog.Token.Index;
 const changeDetectionWriter = std.io.changeDetectionStream;
-const autoIndentingWriter = std.io.autoIndentingStream;
+// const autoIndentingWriter = std.io.autoIndentingStream;
 
 const indent_delta = 4;
 
@@ -15,22 +15,22 @@ pub fn render(tree: *Tree, writer: anytype) @TypeOf(writer).Error!bool {
     };
 
     var change_writer = changeDetectionWriter(tree.source, writer);
-    var indent_writer = autoIndentingWriter(indent_delta, change_writer.writer());
+    // var indent_writer = autoIndentingWriter(indent_delta, change_writer.writer());
 
-    try renderer.renderComments(0, &indent_writer, .newline);
+    // try renderer.renderComments(0, &indent_writer, .newline);
     for (tree.nodes) |node, i| {
-        try renderer.renderNode(node, &indent_writer, .newline);
+        // try renderer.renderNode(node, &indent_writer, .newline);
         if (Renderer.isBlock(node)) {
             // render extra newlines after blocks
-            try indent_writer.insertNewline();
-            try indent_writer.insertNewline();
+            // try indent_writer.insertNewline();
+            // try indent_writer.insertNewline();
             continue;
         }
 
         if (i + 1 == tree.nodes.len) break;
         const last_token = node.lastToken();
         if (renderer.lineDist(last_token, renderer.nextToken(last_token)) > 1) {
-            try indent_writer.writer().writeByte('\n');
+            // try indent_writer.writer().writeByte('\n');
         }
     }
 
@@ -391,7 +391,7 @@ const Renderer = struct {
         if (prev == .Comma or prev == .Nl or prev == .Comment or self.lineDist(nodes[0].firstToken(), last_token) > 0) {
             try writer.insertNewline();
             writer.pushIndent();
-            for (nodes) |node, i| {
+            for (nodes) |node| {
                 try self.renderNode(node, writer, .comma);
             }
             writer.popIndent();
@@ -408,6 +408,7 @@ const Renderer = struct {
     }
 
     fn renderComments(self: *Renderer, token: TokenIndex, writer: anytype, space: Space) !void {
+        _ = space;
         var i = token;
         var last_token = i;
         while (true) : (i += 1) {

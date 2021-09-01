@@ -3,9 +3,8 @@ const span = std.mem.span;
 const bog = @import("bog.zig");
 const gpa = std.heap.c_allocator;
 
-//! ABI WARNING -- REMEMBER TO CHANGE include/bog.h
-
-const Error = extern enum {
+/// ABI WARNING -- REMEMBER TO CHANGE include/bog.h
+const Error = enum {
     None,
     OutOfMemory,
     TokenizeError,

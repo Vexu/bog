@@ -86,7 +86,7 @@ pub const Vm = struct {
         vm.imports.deinit(vm.gc.gpa);
         var it = vm.imported_modules.iterator();
         while (it.next()) |mod| {
-            mod.value.deinit(vm.gc.gpa);
+            mod.value_ptr.*.deinit(vm.gc.gpa);
         }
         vm.imported_modules.deinit(vm.gc.gpa);
     }
@@ -997,7 +997,7 @@ pub const Vm = struct {
     }
 
     pub fn typeError(vm: *Vm, expected: bog.Type, got: bog.Type) Vm.Error!*Value {
-        return vm.errorFmt("expected {}, got {}", .{ @tagName(expected), @tagName(got) });
+        return vm.errorFmt("expected {s}, got {s}", .{ @tagName(expected), @tagName(got) });
     }
 
     pub fn errorVal(vm: *Vm, msg: []const u8) !*Value {

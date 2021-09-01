@@ -818,6 +818,8 @@ pub const Compiler = struct {
                 .{ .mut = &Value{ .rt = cond_reg } }
             else
                 .{ .constant = &Value{ .rt = cond_reg } });
+                
+            _ = lval_res;
         } else if (!cond_val.isRt()) {
             const bool_val = try cond_val.getBool(self, node.cond.firstToken());
 
@@ -1573,7 +1575,7 @@ pub const Compiler = struct {
             },
             .equal, .not_equal => blk: {
                 const eql = switch (lhs_val) {
-                    .none => |a_val| switch (rhs_val) {
+                    .none => |_| switch (rhs_val) {
                         .none => true,
                         else => false,
                     },
@@ -1695,6 +1697,7 @@ pub const Compiler = struct {
     }
 
     fn genDecl(self: *Compiler, node: *Node.Decl, res: Result) Error!Value {
+        _ = res;
         const rhs_val = try self.genNodeNonEmpty(node.value, .value);
 
         try self.genLval(node.capture, if (self.tokens[node.let_const].id == .Keyword_let)
@@ -1714,6 +1717,7 @@ pub const Compiler = struct {
     }
 
     fn genThis(self: *Compiler, node: *Node.SingleToken, res: Result) Error!Value {
+        _ = node;
         const sub_res = try res.toRt(self);
         try self.emitSingle(.load_this_single, sub_res.rt);
         return sub_res.toVal();
@@ -2405,6 +2409,7 @@ pub const Compiler = struct {
     }
 
     fn getLastNode(self: *Compiler, first_node: *Node) *Node {
+        _ = self;
         var node = first_node;
         while (true) switch (node.id) {
             .Grouped => node = @fieldParentPtr(Node.Grouped, "base", node).expr,
