@@ -1,5 +1,5 @@
 test "redeclaration" {
-    expectError(
+    try expectError(
         \\let i = 0
         \\let i = 1
     ,
@@ -8,7 +8,7 @@ test "redeclaration" {
 }
 
 test "unexpected token" {
-    expectError(
+    try expectError(
         \\if (a b
     ,
         \\expected ')', found 'Identifier'
@@ -16,7 +16,7 @@ test "unexpected token" {
 }
 
 test "unexpected arg count" {
-    expectError(
+    try expectError(
         \\const foo = fn (a, b) a + b
         \\foo(1)
     ,
@@ -25,7 +25,7 @@ test "unexpected arg count" {
 }
 
 test "extra cases after catch-all" {
-    expectError(
+    try expectError(
         \\match (1)
         \\    let val => ()
         \\    1 => ()
@@ -35,7 +35,7 @@ test "extra cases after catch-all" {
     );
 }
 test "extra handlers after catch-all" {
-    expectError(
+    try expectError(
         \\const foo = fn() ()
         \\try
         \\    foo()
@@ -50,7 +50,7 @@ test "extra handlers after catch-all" {
 }
 
 test "invalid tag unwrap" {
-    expectError(
+    try expectError(
         \\let foo = @bar[2]
         \\let @foo[baz] = foo
     ,
@@ -59,12 +59,12 @@ test "invalid tag unwrap" {
 }
 
 test "missing capture" {
-    expectError(
+    try expectError(
         \\let error = [2]
     ,
         \\expected a capture
     );
-    expectError(
+    try expectError(
         \\let @foo = [2]
     ,
         \\expected a capture
@@ -72,7 +72,7 @@ test "missing capture" {
 }
 
 test "break outside loop" {
-    expectError(
+    try expectError(
         \\break
     ,
         \\break outside of loop
@@ -80,7 +80,7 @@ test "break outside loop" {
 }
 
 test "invalid type" {
-    expectError(
+    try expectError(
         \\foo
     ,
         \\use of undeclared identifier
@@ -88,7 +88,7 @@ test "invalid type" {
 }
 
 test "invalid map" {
-    expectError(
+    try expectError(
         \\let y = {1}
     ,
         \\expected a key
@@ -96,7 +96,7 @@ test "invalid map" {
 }
 
 test "index out of bounds" {
-    expectError(
+    try expectError(
         \\let y = [0, 0, 0]
         \\y[y["len"]] = true
     ,
@@ -105,7 +105,7 @@ test "index out of bounds" {
 }
 
 test "invalid type" {
-    expectError(
+    try expectError(
         \\1 + true
     ,
         \\expected a number
@@ -120,7 +120,7 @@ const bog = @import("bog");
 const Vm = bog.Vm;
 const Errors = bog.Errors;
 
-fn expectError(source: []const u8, expected: []const u8) void {
+fn expectError(source: []const u8, expected: []const u8) !void {
     var vm = Vm.init(std.testing.allocator, .{});
     defer vm.deinit();
 
@@ -128,7 +128,7 @@ fn expectError(source: []const u8, expected: []const u8) void {
         else => @panic("test failure"),
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
             const result = vm.errors.list.items[0].msg;
-            std.testing.expectEqualStrings(expected, result.data);
+            try std.testing.expectEqualStrings(expected, result.data);
             return;
         },
     };
