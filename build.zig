@@ -7,16 +7,21 @@ pub fn build(b: *Builder) void {
     const lib = b.addStaticLibrary("bog", "src/lib.zig");
     lib.setBuildMode(mode);
     lib.linkLibC();
-    // lib.addBuildOption(
-    //     bool,
-    //     "no_std",
-    //     b.option(bool, "NO_ADD_STD", "Do not export bog_Vm_addStd to reduce binary size") orelse false,
-    // );
-    // lib.addBuildOption(
-    //     bool,
-    //     "no_std_no_io",
-    //     b.option(bool, "NO_ADD_STD_NO_IO", "Do not export bog_Vm_addStd to reduce binary size") orelse false,
-    // );
+
+    const lib_options = b.addOptions();
+    lib.addOptions("lib_options", lib_options);
+
+    lib_options.addOption(
+        bool,
+        "no_std",
+        b.option(bool, "NO_ADD_STD", "Do not export bog_Vm_addStd to reduce binary size") orelse false,
+    );
+    lib_options.addOption(
+        bool,
+        "no_std_no_io",
+        b.option(bool, "NO_ADD_STD_NO_IO", "Do not export bog_Vm_addStd to reduce binary size") orelse false,
+    );
+
     const lib_step = b.step("lib", "Build C library");
     lib_step.dependOn(&b.addInstallArtifact(lib).step);
 
