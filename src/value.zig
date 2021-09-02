@@ -330,9 +330,10 @@ pub const Value = union(Type) {
                     try writer.writeAll("{...}");
                 } else {
                     try writer.writeByte('{');
+                    var i: usize = 0;
                     var iter = m.iterator();
-                    while (iter.next()) |entry| {
-                        if (iter.index != 0)
+                    while (iter.next()) |entry| : (i += 1) {
+                        if (i != 0)
                             try writer.writeAll(", ");
                         try entry.key_ptr.*.dump(writer, level - 1);
                         try writer.writeAll(": ");
@@ -837,9 +838,10 @@ pub const Value = union(Type) {
             },
             .map => |*m| {
                 try writer.writeByte('{');
+                var i: usize = 0;
                 var iter = m.iterator();
-                while (iter.next()) |entry| {
-                    if (iter.index != 0)
+                while (iter.next()) |entry| : (i += 1) {
+                    if (i != 0)
                         try writer.writeAll(", ");
 
                     try entry.key_ptr.*.jsonStringify(options, writer);
@@ -915,22 +917,22 @@ fn wrapZigFunc(func: anytype) Value.Native {
 
 var buffer: [1024]u8 = undefined;
 
-fn testDump(val: Value, expected: []const u8) void {
+fn testDump(val: Value, expected: []const u8) !void {
     var fbs = std.io.fixedBufferStream(&buffer);
 
     val.dump(fbs.writer(), 4) catch @panic("test failed");
-    std.testing.expectEqualStrings(expected, fbs.getWritten());
+    try std.testing.expectEqualStrings(expected, fbs.getWritten());
 }
 
 test "dump int/num" {
     var int = Value{
         .int = 2,
     };
-    testDump(int, "2");
+    try testDump(int, "2");
     var num = Value{
         .num = 2.5,
     };
-    testDump(num, "2.5");
+    try testDump(num, "2.5");
 }
 
 test "dump error" {
@@ -940,5 +942,5 @@ test "dump error" {
     var err = Value{
         .err = &int,
     };
-    testDump(err, "error(2)");
+    try testDump(err, "error(2)");
 }

@@ -352,9 +352,9 @@ test "basic collect" {
         b.* = .{ .err = a };
     }
 
-    expect(gc.pages.items[0].free == 1024);
-    expect(gc.collect() == 1024 - 32 - 1);
-    expect(gc.pages.items[0].free == 33);
+    try expect(gc.pages.items[0].free == 1024);
+    try expect(gc.collect() == 1024 - 32 - 1);
+    try expect(gc.pages.items[0].free == 33);
 }
 
 test "major collection" {
@@ -377,7 +377,7 @@ test "major collection" {
     prev.* = .{ .err = first };
 
     gc.stack.items.len = 0;
-    expect(gc.collect() == alloc_count + 1);
+    try expect(gc.collect() == alloc_count + 1);
 }
 
 test "stack protect" {
@@ -393,8 +393,8 @@ test "stack protect" {
     _ = try gc.alloc();
     _ = try gc.alloc();
 
-    expect(gc.collect() == 0);
+    try expect(gc.collect() == 0);
 
     gc.stack_protect_start = 0;
-    expect(gc.collect() == 2);
+    try expect(gc.collect() == 2);
 }

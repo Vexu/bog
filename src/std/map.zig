@@ -10,9 +10,10 @@ pub fn keys(vm: *Vm, map: *const Value.Map) !*Value {
     try ret.list.resize(vm.gc.gpa, map.count()); //map.items().len);
     const items = ret.list.items;
 
+    var i: usize = 0;
     var iter = map.iterator();
-    while (iter.next()) |e| {
-        items[iter.index] = try vm.gc.dupe(e.key_ptr.*);
+    while (iter.next()) |e| : (i += 1) {
+        items[i] = try vm.gc.dupe(e.key_ptr.*);
     }
 
     return ret;
@@ -24,9 +25,11 @@ pub fn values(vm: *Vm, map: *const Value.Map) !*Value {
     ret.* = .{ .list = .{} };
     try ret.list.resize(vm.gc.gpa, map.count()); //map.items().len);
     const items = ret.list.items;
+
+    var i: usize = 0;
     var iter = map.iterator();
-    while (iter.next()) |e| {
-        items[iter.index] = try vm.gc.dupe(e.value_ptr.*);
+    while (iter.next()) |e| : (i += 1) {
+        items[i] = try vm.gc.dupe(e.value_ptr.*);
     }
 
     return ret;
@@ -39,8 +42,9 @@ pub fn entries(vm: *Vm, map: *const Value.Map) !*Value {
     try ret.list.resize(vm.gc.gpa, map.count()); //map.items().len);
     const items = ret.list.items;
 
+    var i: usize = 0;
     var iter = map.iterator();
-    while (iter.next()) |e| {
+    while (iter.next()) |e| : (i += 1) {
         var entry = try vm.gc.alloc();
         entry.* = .{ .map = .{} };
         try entry.map.ensureCapacity(vm.gc.gpa, 2);
@@ -50,7 +54,7 @@ pub fn entries(vm: *Vm, map: *const Value.Map) !*Value {
         entry.map.putAssumeCapacityNoClobber(try vm.gc.dupe(&key_str), try vm.gc.dupe(e.key_ptr.*));
         entry.map.putAssumeCapacityNoClobber(try vm.gc.dupe(&val_str), try vm.gc.dupe(e.value_ptr.*));
 
-        items[iter.index] = entry;
+        items[i] = entry;
     }
 
     return ret;
