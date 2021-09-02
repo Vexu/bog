@@ -4,7 +4,7 @@ const bog = @import("bog.zig");
 const gpa = std.heap.c_allocator;
 
 /// ABI WARNING -- REMEMBER TO CHANGE include/bog.h
-const Error = enum {
+const Error = enum(c_int) {
     None,
     OutOfMemory,
     TokenizeError,

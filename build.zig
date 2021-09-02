@@ -9,7 +9,7 @@ pub fn build(b: *Builder) void {
     lib.linkLibC();
 
     const lib_options = b.addOptions();
-    lib.addOptions("lib_options", lib_options);
+    lib.addOptions("build_options", lib_options);
 
     lib_options.addOption(
         bool,
@@ -26,15 +26,15 @@ pub fn build(b: *Builder) void {
     lib_step.dependOn(&b.addInstallArtifact(lib).step);
 
     // c library usage example
-    // const c_example = b.addExecutable("bog_from_c", null);
-    // c_example.setBuildMode(mode);
-    // c_example.addCSourceFile("examples/bog_from_c.c", &[_][]const u8{});
-    // c_example.addIncludeDir("include");
-    // c_example.linkSystemLibrary("bog");
-    // c_example.linkLibC();
-    // c_example.addLibPath("zig-cache/lib");
-    // c_example.step.dependOn(lib_step);
-    // c_example.setOutputDir("examples/bin");
+    const c_example = b.addExecutable("bog_from_c", null);
+    c_example.setBuildMode(mode);
+    c_example.addCSourceFile("examples/bog_from_c.c", &[_][]const u8{});
+    c_example.addIncludeDir("include");
+    c_example.linkLibrary(lib);
+    c_example.linkLibC();
+    c_example.addLibPath("zig-cache/lib");
+    c_example.step.dependOn(lib_step);
+    c_example.setOutputDir("examples/bin");
 
     // calling zig from bog example
     const zig_from_bog = b.addExecutable("zig_from_bog", "examples/zig_from_bog.zig");
@@ -43,7 +43,7 @@ pub fn build(b: *Builder) void {
     zig_from_bog.setOutputDir("examples/bin");
 
     const examples_step = b.step("examples", "Build all examples");
-    // examples_step.dependOn(&b.addInstallArtifact(c_example).step);
+    examples_step.dependOn(&b.addInstallArtifact(c_example).step);
     examples_step.dependOn(&b.addInstallArtifact(zig_from_bog).step);
 
     addTests(b, examples_step, .{
