@@ -201,6 +201,7 @@ pub const Value = union(Type) {
 
     pub fn hash(key: *const Value) u32 {
         const autoHash = std.hash.autoHash;
+        const autoHashStrat = std.hash.autoHashStrat;
 
         var hasher = std.hash.Wyhash.init(0);
         autoHash(&hasher, @as(Type, key.*));
@@ -216,9 +217,9 @@ pub const Value = union(Type) {
                 autoHash(&hasher, tuple.ptr);
             },
             .map => |*map| {
-                autoHash(&hasher, map.count()); //map.items().len);
-                // autoHash(&hasher, map.keys()); // ?
-                // autoHash(&hasher, map.values()); //map.items().ptr);
+                autoHash(&hasher, map.count());
+                autoHashStrat(&hasher, map.keys(), .Shallow);
+                autoHashStrat(&hasher, map.values(), .Shallow);
                 autoHash(&hasher, map.index_header);
             },
             .list => |*list| {

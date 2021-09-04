@@ -1,3 +1,5 @@
+//! A non-moving garbage collector.
+//! Inspired by https://www.pllab.riec.tohoku.ac.jp/papers/icfp2011UenoOhoriOtomoAuthorVersion.pdf
 const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
@@ -6,8 +8,6 @@ const bog = @import("bog.zig");
 const Value = bog.Value;
 const expect = std.testing.expect;
 
-/// A non-moving garbage collector.
-/// Inspired by https://www.pllab.riec.tohoku.ac.jp/papers/icfp2011UenoOhoriOtomoAuthorVersion.pdf
 /// A pool of values prefixed with a header containing two bitmaps for
 /// the old and young generation.
 const Page = struct {

@@ -54,7 +54,7 @@ pub fn sqrt(vm: *Vm, val: Value) !*Value {
         .int => |i| {
             _ = i;
             const res = try vm.gc.alloc();
-            res.* = Value{ .int = 0 }; //std.math.sqrt(i) };
+            res.* = Value{ .int = std.math.sqrt(@intCast(u64, i)) };
             return res;
         },
         .num => |n| {

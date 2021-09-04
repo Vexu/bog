@@ -8,7 +8,9 @@ const Errors = bog.Errors;
 
 fn isWhiteSpace(c: u32) bool {
     return switch (c) {
-        ' ', '\t', '\r',
+        ' ',
+        '\t',
+        '\r',
         // NO-BREAK SPACE
         0x00A0,
         // OGHAM SPACE MARK
@@ -48,7 +50,8 @@ fn isWhiteSpace(c: u32) bool {
         // ZERO WIDTH NO-BREAK SPACE
         0xFEFF,
         // HALFWIDTH HANGUL FILLER
-        0xFFA0 => true,
+        0xFFA0,
+        => true,
         else => false,
     };
 }
@@ -1204,8 +1207,7 @@ pub const Tokenizer = struct {
                         // if running in repl this might be a multiline string
                         self.it.i = start_index;
                         res = .Eof;
-                    } else
-                        return self.reportErr("unterminated string", 'a');
+                    } else return self.reportErr("unterminated string", 'a');
                 },
                 .LineComment => res = .Comment,
                 .FloatFraction => res = .Number,

@@ -7,7 +7,7 @@ const Vm = bog.Vm;
 pub fn keys(vm: *Vm, map: *const Value.Map) !*Value {
     var ret = try vm.gc.alloc();
     ret.* = .{ .list = .{} };
-    try ret.list.resize(vm.gc.gpa, map.count()); //map.items().len);
+    try ret.list.resize(vm.gc.gpa, map.count());
     const items = ret.list.items;
 
     var i: usize = 0;
@@ -23,7 +23,7 @@ pub fn keys(vm: *Vm, map: *const Value.Map) !*Value {
 pub fn values(vm: *Vm, map: *const Value.Map) !*Value {
     var ret = try vm.gc.alloc();
     ret.* = .{ .list = .{} };
-    try ret.list.resize(vm.gc.gpa, map.count()); //map.items().len);
+    try ret.list.resize(vm.gc.gpa, map.count());
     const items = ret.list.items;
 
     var i: usize = 0;
@@ -39,7 +39,7 @@ pub fn values(vm: *Vm, map: *const Value.Map) !*Value {
 pub fn entries(vm: *Vm, map: *const Value.Map) !*Value {
     var ret = try vm.gc.alloc();
     ret.* = .{ .list = .{} };
-    try ret.list.resize(vm.gc.gpa, map.count()); //map.items().len);
+    try ret.list.resize(vm.gc.gpa, map.count());
     const items = ret.list.items;
 
     var i: usize = 0;
@@ -62,5 +62,5 @@ pub fn entries(vm: *Vm, map: *const Value.Map) !*Value {
 
 /// Returns the amount of key value pairs in the map.
 pub fn size(map: *const Value.Map) !i64 {
-    return @intCast(i64, map.count()); //map.items().len);
+    return @intCast(i64, map.count());
 }
