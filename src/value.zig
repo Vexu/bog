@@ -261,7 +261,7 @@ pub const Value = union(Type) {
                 .num => |b_val| n == b_val,
                 else => false,
             },
-            else => if (a.* != @as(std.meta.TagType(@TypeOf(b.*)), b.*)) return false,
+            else => if (a.* != @as(std.meta.Tag(@TypeOf(b.*)), b.*)) return false,
         }
         return switch (a.*) {
             .iterator, .int, .num => unreachable,
@@ -276,7 +276,7 @@ pub const Value = union(Type) {
                 }
                 return true;
             },
-            .map => |_| @panic("TODO eql for maps"),
+            .map => @panic("TODO eql for maps"),
             .list => |*l| {
                 if (l.items.len != b.list.items.len) return false;
                 for (l.items) |v, i| {

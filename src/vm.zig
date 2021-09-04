@@ -172,7 +172,11 @@ pub const Vm = struct {
                     const rhs = try vm.getNum(inst.triple.rhs);
 
                     // TODO https://github.com/ziglang/zig/issues/3234 on all of these
-                    const copy: Value = if (needNum(lhs, rhs)) .{ .num = asNum(lhs) + asNum(rhs) } else .{ .int = lhs.int + rhs.int };
+                    const copy: Value = if (needNum(lhs, rhs)) .{
+                        .num = asNum(lhs) + asNum(rhs),
+                    } else .{
+                        .int = lhs.int + rhs.int,
+                    };
                     res.* = copy;
                 },
                 .sub_triple => {
@@ -180,7 +184,11 @@ pub const Vm = struct {
                     const lhs = try vm.getNum(inst.triple.lhs);
                     const rhs = try vm.getNum(inst.triple.rhs);
 
-                    const copy: Value = if (needNum(lhs, rhs)) .{ .num = asNum(lhs) - asNum(rhs) } else .{ .int = lhs.int - rhs.int };
+                    const copy: Value = if (needNum(lhs, rhs)) .{
+                        .num = asNum(lhs) - asNum(rhs),
+                    } else .{
+                        .int = lhs.int - rhs.int,
+                    };
                     res.* = copy;
                 },
                 .mul_triple => {
@@ -188,7 +196,11 @@ pub const Vm = struct {
                     const lhs = try vm.getNum(inst.triple.lhs);
                     const rhs = try vm.getNum(inst.triple.rhs);
 
-                    const copy: Value = if (needNum(lhs, rhs)) .{ .num = asNum(lhs) * asNum(rhs) } else .{ .int = lhs.int * rhs.int };
+                    const copy: Value = if (needNum(lhs, rhs)) .{
+                        .num = asNum(lhs) * asNum(rhs),
+                    } else .{
+                        .int = lhs.int * rhs.int,
+                    };
                     res.* = copy;
                 },
                 .pow_triple => {
@@ -196,7 +208,11 @@ pub const Vm = struct {
                     const lhs = try vm.getNum(inst.triple.lhs);
                     const rhs = try vm.getNum(inst.triple.rhs);
 
-                    const copy: Value = if (needNum(lhs, rhs)) .{ .num = std.math.pow(f64, asNum(lhs), asNum(rhs)) } else .{ .int = std.math.powi(i64, lhs.int, rhs.int) catch @panic("TODO: overflow") };
+                    const copy: Value = if (needNum(lhs, rhs)) .{
+                        .num = std.math.pow(f64, asNum(lhs), asNum(rhs)),
+                    } else .{
+                        .int = std.math.powi(i64, lhs.int, rhs.int) catch @panic("TODO: overflow"),
+                    };
                     res.* = copy;
                 },
                 .div_floor_triple => {
@@ -204,7 +220,11 @@ pub const Vm = struct {
                     const lhs = try vm.getNum(inst.triple.lhs);
                     const rhs = try vm.getNum(inst.triple.rhs);
 
-                    const copy: Value = if (needNum(lhs, rhs)) .{ .int = @floatToInt(i64, @divFloor(asNum(lhs), asNum(rhs))) } else .{ .int = @divFloor(lhs.int, rhs.int) };
+                    const copy: Value = if (needNum(lhs, rhs)) .{
+                        .int = @floatToInt(i64, @divFloor(asNum(lhs), asNum(rhs))),
+                    } else .{
+                        .int = @divFloor(lhs.int, rhs.int),
+                    };
                     res.* = copy;
                 },
                 .div_triple => {
@@ -220,7 +240,11 @@ pub const Vm = struct {
                     const lhs = try vm.getNum(inst.triple.lhs);
                     const rhs = try vm.getNum(inst.triple.rhs);
 
-                    const copy: Value = if (needNum(lhs, rhs)) .{ .num = @rem(asNum(lhs), asNum(rhs)) } else .{ .int = std.math.rem(i64, lhs.int, rhs.int) catch @panic("TODO: overflow") };
+                    const copy: Value = if (needNum(lhs, rhs)) .{
+                        .num = @rem(asNum(lhs), asNum(rhs)),
+                    } else .{
+                        .int = std.math.rem(i64, lhs.int, rhs.int) catch @panic("TODO: overflow"),
+                    };
                     res.* = copy;
                 },
                 .bool_and_triple => {
@@ -392,7 +416,11 @@ pub const Vm = struct {
                     const res = try vm.getNewVal(inst.double.res);
                     const arg = try vm.getNum(inst.double.arg);
 
-                    const copy: Value = if (arg.* == .num) .{ .num = -arg.num } else .{ .int = -arg.int };
+                    const copy: Value = if (arg.* == .num) .{
+                        .num = -arg.num,
+                    } else .{
+                        .int = -arg.int,
+                    };
                     res.* = copy;
                 },
                 .try_double => {

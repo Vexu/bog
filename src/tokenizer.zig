@@ -231,7 +231,7 @@ pub const Token = struct {
         .{ "_", .Underscore },
     });
 
-    pub fn string(id: std.meta.TagType(Id)) []const u8 {
+    pub fn string(id: std.meta.Tag(Id)) []const u8 {
         return switch (id) {
             .Comment => "<Comment>",
             .Eof => "<EOF>",

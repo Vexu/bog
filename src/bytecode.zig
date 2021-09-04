@@ -295,7 +295,7 @@ pub const Module = struct {
         if (src.len < @sizeOf(Header))
             return error.InvalidHeader;
 
-        const header = if (std.Target.current.cpu.arch.endian() == .Little)
+        const header = if (@import("builtin").target.cpu.arch.endian() == .Little)
             @ptrCast(*const Header, src.ptr).*
         else
             Header{
