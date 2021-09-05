@@ -565,11 +565,11 @@ fn AutoIndentingStream(comptime UnderlyingWriter: type) type {
             if (self.indent_delta == new_indent_delta) {
                 return;
             } else if (self.indent_delta > new_indent_delta) {
-                assert(self.indent_delta % new_indent_delta == 0);
+                std.debug.assert(self.indent_delta % new_indent_delta == 0);
                 self.indent_count = self.indent_count * (self.indent_delta / new_indent_delta);
             } else {
                 // assert that the current indentation (in spaces) in a multiple of the new delta
-                assert((self.indent_count * self.indent_delta) % new_indent_delta == 0);
+                std.debug.assert((self.indent_count * self.indent_delta) % new_indent_delta == 0);
                 self.indent_count = self.indent_count / (new_indent_delta / self.indent_delta);
             }
             self.indent_delta = new_indent_delta;
