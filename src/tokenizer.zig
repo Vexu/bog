@@ -8,7 +8,9 @@ const Errors = bog.Errors;
 
 fn isWhiteSpace(c: u32) bool {
     return switch (c) {
-        ' ', '\t', '\r',
+        ' ',
+        '\t',
+        '\r',
         // NO-BREAK SPACE
         0x00A0,
         // OGHAM SPACE MARK
@@ -48,7 +50,8 @@ fn isWhiteSpace(c: u32) bool {
         // ZERO WIDTH NO-BREAK SPACE
         0xFEFF,
         // HALFWIDTH HANGUL FILLER
-        0xFFA0 => true,
+        0xFFA0,
+        => true,
         else => false,
     };
 }
@@ -228,7 +231,7 @@ pub const Token = struct {
         .{ "_", .Underscore },
     });
 
-    pub fn string(id: @TagType(Id)) []const u8 {
+    pub fn string(id: std.meta.Tag(Id)) []const u8 {
         return switch (id) {
             .Comment => "<Comment>",
             .Eof => "<EOF>",
@@ -1204,8 +1207,7 @@ pub const Tokenizer = struct {
                         // if running in repl this might be a multiline string
                         self.it.i = start_index;
                         res = .Eof;
-                    } else
-                        return self.reportErr("unterminated string", 'a');
+                    } else return self.reportErr("unterminated string", 'a');
                 },
                 .LineComment => res = .Comment,
                 .FloatFraction => res = .Number,
@@ -1241,7 +1243,7 @@ pub const Tokenizer = struct {
     }
 };
 
-fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
+fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) !void {
     var errors = Errors.init(std.testing.allocator);
     defer errors.deinit();
     var tokenizer = Tokenizer{
@@ -1256,10 +1258,10 @@ fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
     blk: {
         for (expected_tokens) |expected_token| {
             const token = tokenizer.next() catch break :blk;
-            std.testing.expectEqual(expected_token, token.id);
+            try std.testing.expectEqual(expected_token, token.id);
         }
         const last_token = tokenizer.next() catch break :blk;
-        std.testing.expect(last_token.id == .Eof);
+        try std.testing.expect(last_token.id == .Eof);
         return;
     }
     errors.render(source, std.io.getStdErr().writer()) catch {};
@@ -1267,7 +1269,7 @@ fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) void {
 }
 
 test "operators" {
-    expectTokens(
+    try expectTokens(
         \\!= | |= = ==
         \\( ) { } [ ] . @ =>
         \\^ ^= + += ++ - -=
@@ -1331,7 +1333,7 @@ test "operators" {
 }
 
 test "keywords" {
-    expectTokens(
+    try expectTokens(
         \\not　and or let continue break return if else false true for
         \\while match catch try error import is in fn as const this
     , &[_]Token.Id{
@@ -1364,7 +1366,7 @@ test "keywords" {
 }
 
 test "indentation" {
-    expectTokens(
+    try expectTokens(
         \\if
         \\    if
         \\
@@ -1394,7 +1396,7 @@ test "indentation" {
 }
 
 test "identifiers" {
-    expectTokens(
+    try expectTokens(
         \\0b1gg
         \\0x1gg
         \\0o1gg
@@ -1411,7 +1413,7 @@ test "identifiers" {
         .Nl,
         .Identifier,
     });
-    expectTokens(
+    try expectTokens(
         \\30.30f
         \\30.30ee
         \\30.30e+12a
@@ -1444,7 +1446,7 @@ test "identifiers" {
 }
 
 test "numbers" {
-    expectTokens(
+    try expectTokens(
         \\0.
         \\0,
         \\0.0
@@ -1473,7 +1475,7 @@ test "numbers" {
 }
 
 test "format string" {
-    expectTokens(
+    try expectTokens(
         \\f f"\u{12}{12:12} foo \t\n {f"foo bar" ++ {1:2} as str:3} \x12 " :
     , &[_]Token.Id{
         .Identifier,

@@ -102,7 +102,7 @@ pub const Value = union(Type) {
                     };
                 },
                 .map => |*map| {
-                    if (iter.i.u == map.entries.items.len) {
+                    if (iter.i.u == map.count()) {
                         res.* = &Value.None;
                         return;
                     }
@@ -112,11 +112,13 @@ pub const Value = union(Type) {
                     if (iter.i.u == 0) {
                         res.*.?.* = .{ .tuple = try vm.gc.gpa.alloc(*Value, 2) };
                     }
-                    const e = &map.entries.items[iter.i.u];
+                    // const e = &map.entries.items[iter.i.u];
+                    const e_key = &map.keys()[iter.i.u].*;
+                    const e_value = &map.values()[iter.i.u].*;
                     const t = res.*.?.tuple;
                     // removing `const` on `Map` causes dependency loop??
-                    t[0] = @intToPtr(*Value, @ptrToInt(e.key));
-                    t[1] = e.value;
+                    t[0] = @intToPtr(*Value, @ptrToInt(e_key));
+                    t[1] = e_value;
                     iter.i.u += 1;
                 },
                 .range => {
@@ -142,7 +144,20 @@ pub const Value = union(Type) {
     none,
 
     pub const String = @import("String.zig");
-    pub const Map = std.array_hash_map.ArrayHashMapUnmanaged(*const Value, *Value, hash, eql, true);
+
+    const ValueMapContext = struct {
+        pub fn hash(self: @This(), v: *const Value) u32 {
+            _ = self;
+            return Value.hash(v);
+        }
+
+        pub fn eql(self: @This(), a: *const Value, b: *const Value) bool {
+            _ = self;
+            return Value.eql(a, b);
+        }
+    };
+
+    pub const Map = std.array_hash_map.ArrayHashMapUnmanaged(*const Value, *Value, Value.ValueMapContext, true);
     pub const List = std.ArrayListUnmanaged(*Value);
     pub const Native = struct {
         arg_count: u8,
@@ -186,6 +201,7 @@ pub const Value = union(Type) {
 
     pub fn hash(key: *const Value) u32 {
         const autoHash = std.hash.autoHash;
+        const autoHashStrat = std.hash.autoHashStrat;
 
         var hasher = std.hash.Wyhash.init(0);
         autoHash(&hasher, @as(Type, key.*));
@@ -201,8 +217,9 @@ pub const Value = union(Type) {
                 autoHash(&hasher, tuple.ptr);
             },
             .map => |*map| {
-                autoHash(&hasher, map.items().len);
-                autoHash(&hasher, map.items().ptr);
+                autoHash(&hasher, map.count());
+                autoHashStrat(&hasher, map.keys(), .Shallow);
+                autoHashStrat(&hasher, map.values(), .Shallow);
                 autoHash(&hasher, map.index_header);
             },
             .list => |*list| {
@@ -244,7 +261,7 @@ pub const Value = union(Type) {
                 .num => |b_val| n == b_val,
                 else => false,
             },
-            else => if (a.* != @as(@TagType(@TypeOf(b.*)), b.*)) return false,
+            else => if (a.* != @as(std.meta.Tag(@TypeOf(b.*)), b.*)) return false,
         }
         return switch (a.*) {
             .iterator, .int, .num => unreachable,
@@ -259,7 +276,7 @@ pub const Value = union(Type) {
                 }
                 return true;
             },
-            .map => |*m| @panic("TODO eql for maps"),
+            .map => @panic("TODO eql for maps"),
             .list => |*l| {
                 if (l.items.len != b.list.items.len) return false;
                 for (l.items) |v, i| {
@@ -314,12 +331,14 @@ pub const Value = union(Type) {
                     try writer.writeAll("{...}");
                 } else {
                     try writer.writeByte('{');
-                    for (m.items()) |*entry, i| {
+                    var i: usize = 0;
+                    var iter = m.iterator();
+                    while (iter.next()) |entry| : (i += 1) {
                         if (i != 0)
                             try writer.writeAll(", ");
-                        try entry.key.dump(writer, level - 1);
+                        try entry.key_ptr.*.dump(writer, level - 1);
                         try writer.writeAll(": ");
-                        try entry.value.dump(writer, level - 1);
+                        try entry.value_ptr.*.dump(writer, level - 1);
                     }
                     try writer.writeByte('}');
                 }
@@ -503,7 +522,7 @@ pub const Value = union(Type) {
                 .num => |num| num != 0,
                 .bool => unreachable,
                 .str => unreachable,
-                else => return vm.errorFmt("cannot cast {} to bool", .{@tagName(val.*)}),
+                else => return vm.errorFmt("cannot cast {s} to bool", .{@tagName(val.*)}),
             };
 
             return if (bool_res) &Value.True else &Value.False;
@@ -519,7 +538,7 @@ pub const Value = union(Type) {
                     .num => |num| @floatToInt(i64, num),
                     .bool => |b| @boolToInt(b),
                     .str => unreachable,
-                    else => return vm.errorFmt("cannot cast {} to int", .{@tagName(val.*)}),
+                    else => return vm.errorFmt("cannot cast {s} to int", .{@tagName(val.*)}),
                 },
             },
             .num => .{
@@ -528,7 +547,7 @@ pub const Value = union(Type) {
                     .int => |int| @intToFloat(f64, int),
                     .bool => |b| @intToFloat(f64, @boolToInt(b)),
                     .str => unreachable,
-                    else => return vm.errorFmt("cannot cast {} to num", .{@tagName(val.*)}),
+                    else => return vm.errorFmt("cannot cast {s} to num", .{@tagName(val.*)}),
                 },
             },
             .str, .bool, .none => unreachable,
@@ -582,7 +601,7 @@ pub const Value = union(Type) {
             .range => |*r| start = r.start,
             .str, .tuple, .list, .map => {},
             .iterator => unreachable,
-            else => return vm.errorFmt("cannot iterate {}", .{@tagName(val.*)}),
+            else => return vm.errorFmt("cannot iterate {s}", .{@tagName(val.*)}),
         }
         const iter = try vm.gc.alloc();
         iter.* = .{
@@ -820,13 +839,15 @@ pub const Value = union(Type) {
             },
             .map => |*m| {
                 try writer.writeByte('{');
-                for (m.items()) |*entry, i| {
+                var i: usize = 0;
+                var iter = m.iterator();
+                while (iter.next()) |entry| : (i += 1) {
                     if (i != 0)
                         try writer.writeAll(", ");
 
-                    try entry.key.jsonStringify(options, writer);
+                    try entry.key_ptr.*.jsonStringify(options, writer);
                     try writer.writeAll(":");
-                    try entry.value.jsonStringify(options, writer);
+                    try entry.value_ptr.*.jsonStringify(options, writer);
                 }
                 try writer.writeByte('}');
             },
@@ -836,7 +857,7 @@ pub const Value = union(Type) {
             .bool,
             => try val.dump(writer, 0),
             .str => |s| {
-                try writer.print("\"{s}\"", .{std.zig.fmtEscapes(s.data)});
+                try writer.print("\"{}\"", .{std.zig.fmtEscapes(s.data)});
             },
             .native,
             .func,
@@ -897,22 +918,22 @@ fn wrapZigFunc(func: anytype) Value.Native {
 
 var buffer: [1024]u8 = undefined;
 
-fn testDump(val: Value, expected: []const u8) void {
+fn testDump(val: Value, expected: []const u8) !void {
     var fbs = std.io.fixedBufferStream(&buffer);
 
     val.dump(fbs.writer(), 4) catch @panic("test failed");
-    std.testing.expectEqualStrings(expected, fbs.getWritten());
+    try std.testing.expectEqualStrings(expected, fbs.getWritten());
 }
 
 test "dump int/num" {
     var int = Value{
         .int = 2,
     };
-    testDump(int, "2");
+    try testDump(int, "2");
     var num = Value{
         .num = 2.5,
     };
-    testDump(num, "2.5");
+    try testDump(num, "2.5");
 }
 
 test "dump error" {
@@ -922,5 +943,5 @@ test "dump error" {
     var err = Value{
         .err = &int,
     };
-    testDump(err, "error(2)");
+    try testDump(err, "error(2)");
 }

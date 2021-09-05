@@ -1,5 +1,5 @@
 test "format string" {
-    testTransform(
+    try testTransform(
         \\f"foo {{1:2}:32} bar { 2
         \\*
         \\3:4} baz \t"
@@ -13,7 +13,7 @@ test "format string" {
 }
 
 test "try-catch" {
-    testCanonical(
+    try testCanonical(
         \\try
         \\    assert(x == y)
         \\    assert(x != z)
@@ -27,18 +27,18 @@ test "try-catch" {
         \\
         \\
     );
-    testCanonical(
+    try testCanonical(
         \\try assert(x == y) catch ("assertion failure") print("assertion failure")
         \\
     );
-    testCanonical(
+    try testCanonical(
         \\try foo() catch (1) print("1") catch (2) print("2")
         \\
     );
 }
 
 test "numbers" {
-    testTransform(
+    try testTransform(
         \\[0,0]
         \\[0.0]
         \\[0,0,0]
@@ -51,7 +51,7 @@ test "numbers" {
 }
 
 test "ranges" {
-    testCanonical(
+    try testCanonical(
         \\1:2:3
         \\:2:3
         \\::3
@@ -67,7 +67,7 @@ test "ranges" {
 }
 
 test "ignore comments in indent blocks" {
-    testTransform(
+    try testTransform(
         \\const foo = fn()
         \\                #quux
         \\#foo bar
@@ -90,7 +90,7 @@ test "ignore comments in indent blocks" {
 }
 
 test "tag" {
-    testCanonical(
+    try testCanonical(
         \\@foo
         \\@bar(foo)
         \\@baz(2.4, "foo")
@@ -101,7 +101,7 @@ test "tag" {
 }
 
 test "different error initializations" {
-    testCanonical(
+    try testCanonical(
         \\error
         \\error(foo)
         \\error(2.4, "foo")
@@ -112,7 +112,7 @@ test "different error initializations" {
 }
 
 test "nested blocks and matches" {
-    testCanonical(
+    try testCanonical(
         \\if (false)
         \\    if (true)
         \\        match (2)
@@ -129,7 +129,7 @@ test "nested blocks and matches" {
 }
 
 test "comments after expression" {
-    testCanonical(
+    try testCanonical(
         \\a
         \\#foo
         \\#bar
@@ -138,7 +138,7 @@ test "comments after expression" {
 }
 
 test "two empty lines after block" {
-    testTransform(
+    try testTransform(
         \\const foo = fn(a)
         \\    a * 4
         \\const bar = 2
@@ -153,13 +153,13 @@ test "two empty lines after block" {
 }
 
 test "respect new lines" {
-    testCanonical(
+    try testCanonical(
         \\const foo = 1
         \\
         \\const bar = 2
         \\
     );
-    testTransform(
+    try testTransform(
         \\const foo = 1
         \\
         \\
@@ -173,7 +173,7 @@ test "respect new lines" {
 }
 
 test "nested blocks" {
-    testCanonical(
+    try testCanonical(
         \\if (false)
         \\    if (false)
         \\        3
@@ -188,7 +188,7 @@ test "nested blocks" {
 }
 
 test "preserve comment after comma" {
-    testTransform(
+    try testTransform(
         \\(1, #hello world
         \\    2)
         \\
@@ -199,7 +199,7 @@ test "preserve comment after comma" {
         \\)
         \\
     );
-    testTransform(
+    try testTransform(
         \\(1#hello world
         \\    , 2)
         \\
@@ -213,7 +213,7 @@ test "preserve comment after comma" {
 }
 
 test "preserve comments" {
-    testCanonical(
+    try testCanonical(
         \\#some comment
         \\123 +
         \\    #another comment
@@ -226,7 +226,7 @@ test "preserve comments" {
 }
 
 test "match" {
-    testCanonical(
+    try testCanonical(
         \\match (2)
         \\    let (x, 2) => x + 4
         \\    2, 3 => 1
@@ -238,7 +238,7 @@ test "match" {
 }
 
 test "if" {
-    testCanonical(
+    try testCanonical(
         \\if (foo) bar else baz
         \\if (const foo = bar()) baz
         \\
@@ -246,13 +246,13 @@ test "if" {
 }
 
 test "tuples, lists, maps" {
-    testCanonical(
+    try testCanonical(
         \\(a, b)
         \\[a, b]
         \\{a: b, c: d}
         \\
     );
-    testTransform(
+    try testTransform(
         \\(a,b,c,)
     ,
         \\(
@@ -265,7 +265,7 @@ test "tuples, lists, maps" {
 }
 
 test "functions" {
-    testCanonical(
+    try testCanonical(
         \\const foo = fn(arg1, arg2, _, arg3) (arg1, arg2, arg3)
         \\const bar = fn(val)
         \\    val * 45
@@ -276,7 +276,7 @@ test "functions" {
 }
 
 test "unicode identifiers" {
-    testTransform(
+    try testTransform(
         \\öäöäö;öö
     ,
         \\öäöäö
@@ -286,7 +286,7 @@ test "unicode identifiers" {
 }
 
 test "trailing comma in call" {
-    testCanonical(
+    try testCanonical(
         \\foo(2, 3)
         \\bar(
         \\    2,
@@ -294,7 +294,7 @@ test "trailing comma in call" {
         \\)
         \\
     );
-    testTransform(
+    try testTransform(
         \\foo(2, 3,)
         \\bar(
         \\    2,
@@ -315,7 +315,7 @@ test "trailing comma in call" {
 }
 
 test "loops" {
-    testCanonical(
+    try testCanonical(
         \\while (true) break
         \\return 123 // 4
         \\for (let foo in arr) foo + 2
@@ -325,7 +325,7 @@ test "loops" {
 }
 
 test "declarations" {
-    testCanonical(
+    try testCanonical(
         \\let bar = import("args")
         \\const foo = bar + 2
         \\let err = error(foo)
@@ -334,14 +334,14 @@ test "declarations" {
 }
 
 test "suffix ops" {
-    testCanonical(
+    try testCanonical(
         \\foo[2].bar(2).baz[5 + 5]
         \\
     );
 }
 
 test "prefix ops" {
-    testCanonical(
+    try testCanonical(
         \\not true
         \\-2
         \\
@@ -349,7 +349,7 @@ test "prefix ops" {
 }
 
 test "infix ops" {
-    testCanonical(
+    try testCanonical(
         \\123 + 2 * 3 / (4 as num) + ()
         \\
     );
@@ -360,7 +360,7 @@ const mem = std.mem;
 const warn = std.debug.warn;
 const bog = @import("bog");
 
-fn testTransform(source: []const u8, expected: []const u8) void {
+fn testTransform(source: []const u8, expected: []const u8) !void {
     _ = bog.Vm; // avoid false dependency loop
     var errors = bog.Errors.init(std.testing.allocator);
     defer errors.deinit();
@@ -376,9 +376,9 @@ fn testTransform(source: []const u8, expected: []const u8) void {
     var out_buf = std.ArrayList(u8).init(std.testing.allocator);
     defer out_buf.deinit();
     _ = tree.render(out_buf.writer()) catch @panic("test failure");
-    std.testing.expectEqualStrings(expected, out_buf.items);
+    try std.testing.expectEqualStrings(expected, out_buf.items);
 }
 
-fn testCanonical(source: []const u8) void {
-    return testTransform(source, source);
+fn testCanonical(source: []const u8) !void {
+    try testTransform(source, source);
 }

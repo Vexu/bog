@@ -1,18 +1,18 @@
 test "range destructuring" {
-    expectOutput(
+    try expectOutput(
         \\const start:end:step = 1:2:3
         \\return start+end+step
     , "6");
 }
 
 test "continue" {
-    expectOutput(
+    try expectOutput(
         \\let i = 0
         \\while (i < 1)
         \\    i += 1
         \\    continue
     , "()");
-    expectOutput(
+    try expectOutput(
         \\for (let i in 0:1)
         \\    continue
     , "()");
@@ -23,7 +23,7 @@ test "std.gc" {
         // TODO this gives a different result on windows
         return error.SkipZigTest;
     }
-    expectOutput(
+    try expectOutput(
         \\const {collect} = import("std.gc")
         \\const json = import("std.json")
         \\
@@ -38,13 +38,13 @@ test "std.gc" {
 }
 
 test "std.json" {
-    expectOutput(
+    try expectOutput(
         \\const json = import("std.json")
         \\return json.parse("{\"a\":[2,\"foo\",null]}")
     ,
         \\{"a": [2, "foo", ()]}
     );
-    expectOutput(
+    try expectOutput(
         \\const json = import("std.json")
         \\return json.stringify({"a": [2, "foo", ()]})
     ,
@@ -53,14 +53,14 @@ test "std.json" {
 }
 
 test "boolean short-circuit" {
-    expectOutput(
+    try expectOutput(
         \\const foo = fn() true
         \\const bar = fn() error("should not be evaluated")
         \\return foo() or bar()
     ,
         \\true
     );
-    expectOutput(
+    try expectOutput(
         \\const foo = fn() false
         \\const bar = fn() error("should not be evaluated")
         \\return foo() and bar()
@@ -70,7 +70,7 @@ test "boolean short-circuit" {
 }
 
 test "match" {
-    expectOutput(
+    try expectOutput(
         \\const getNum = fn (arg)
         \\    return match (arg)
         \\        1, 2 => 69
@@ -88,7 +88,7 @@ test "match" {
     ,
         \\[69, 69, 42, 17, 0]
     );
-    expectOutput(
+    try expectOutput(
         \\const getNum = fn() 42
         \\
         \\match (getNum())
@@ -100,7 +100,7 @@ test "match" {
 }
 
 test "try catch" {
-    expectOutput(
+    try expectOutput(
         \\const fails_on_1 = fn(arg) if (arg == 1) error(69)
         \\const fails_on_2 = fn(arg) if (arg == 2) error(42)
         \\const fails_on_3 = fn(arg) if (arg == 3) error(17)
@@ -122,7 +122,7 @@ test "try catch" {
 }
 
 test "string join" {
-    expectOutput(
+    try expectOutput(
         \\return ",".join([1 as str, "bar", [2] as str])
     ,
         \\"1,bar,[2]"
@@ -130,12 +130,12 @@ test "string join" {
 }
 
 test "format string" {
-    expectOutput(
+    try expectOutput(
         \\return f"foo{255:X}bar"
     ,
         \\"fooFFbar"
     );
-    expectOutput(
+    try expectOutput(
         \\return "foo{X}bar".format((255,))
     ,
         \\"fooFFbar"
@@ -143,24 +143,24 @@ test "format string" {
 }
 
 test "concatting" {
-    expectOutput(
+    try expectOutput(
         \\let x = "foo"
         \\return x ++ "bar" ++ "baz"
     ,
         \\"foobarbaz"
     );
-    expectOutput(
+    try expectOutput(
         \\let x = []
         \\return x ++ 1 ++ "bar" ++ 2
     ,
         \\[1, "bar", 2]
     );
-    expectOutput(
+    try expectOutput(
         \\return [[1] as str]
     ,
         \\["[1]"]
     );
-    expectOutput(
+    try expectOutput(
         \\let x = "foo"
         \\x ++ "bar" ++ "baz"
         \\return x
@@ -170,7 +170,7 @@ test "concatting" {
 }
 
 test "comma decimals" {
-    expectOutput(
+    try expectOutput(
         \\return 0,5 + 0,2;
     ,
         \\0.7
@@ -178,17 +178,17 @@ test "comma decimals" {
 }
 
 test "range" {
-    expectOutput(
+    try expectOutput(
         \\return for (let i in 0:7:2) i
     ,
         \\[0, 2, 4, 6]
     );
-    expectOutput(
+    try expectOutput(
         \\return 1 in 0:2
     ,
         \\true
     );
-    expectOutput(
+    try expectOutput(
         \\return 1 in 0:2:2
     ,
         \\false
@@ -196,7 +196,7 @@ test "range" {
 }
 
 test "list comprehension as function argument" {
-    expectOutput(
+    try expectOutput(
         \\const map = {1: 2, 3: 4, 5: 6}
         \\return (fn(l)l)(for (let (k, v) in map) {key: k, val: v})
     ,
@@ -205,7 +205,7 @@ test "list comprehension as function argument" {
 }
 
 test "map iterator" {
-    expectOutput(
+    try expectOutput(
         \\const map = {1: 2, 3: 4, 5: 6}
         \\let sum = 0
         \\for (let (k, v) in map)
@@ -218,12 +218,12 @@ test "map iterator" {
 }
 
 test "list comprehension" {
-    expectOutput(
+    try expectOutput(
         \\return for (const c in "hello") c
     ,
         \\["h", "e", "l", "l", "o"]
     );
-    expectOutput(
+    try expectOutput(
         \\let i = 0
         \\return while (i < 10)
         \\    i += 1
@@ -234,7 +234,7 @@ test "list comprehension" {
 }
 
 test "list.append" {
-    expectOutput(
+    try expectOutput(
         \\let list = [1, 2]
         \\list.append(3)
         \\return list
@@ -244,7 +244,7 @@ test "list.append" {
 }
 
 test "std.map" {
-    expectOutput(
+    try expectOutput(
         \\let val = {foo: 2, bar: 3, 0: 515, [1]: [2]}
         \\const map = import("std.map")
         \\const {assert} = import("std.debug")
@@ -262,7 +262,7 @@ test "std.map" {
 }
 
 test "collections copy hold values" {
-    expectOutput(
+    try expectOutput(
         \\let x = [0]
         \\let y = [x]
         \\x[0] = 1
@@ -270,7 +270,7 @@ test "collections copy hold values" {
     ,
         \\[[0]]
     );
-    expectOutput(
+    try expectOutput(
         \\const foo = [1]
         \\const bar = fn(list) list[0] = 2
         \\bar(foo)
@@ -281,26 +281,26 @@ test "collections copy hold values" {
 }
 
 test "tagged values" {
-    expectOutput(
+    try expectOutput(
         \\return @something{foo: 69}
     ,
         \\@something{"foo": 69}
     );
-    expectOutput(
+    try expectOutput(
         \\const foo = @foo
         \\const bar = @bar
         \\return foo == bar
     ,
         \\false
     );
-    expectOutput(
+    try expectOutput(
         \\const foo = @foo[1]
         \\const bar = @foo[1]
         \\return foo == bar
     ,
         \\true
     );
-    expectOutput(
+    try expectOutput(
         \\const foo = @foo[1, 2]
         \\const @foo[bar, baz] = foo
         \\return bar + baz
@@ -310,7 +310,7 @@ test "tagged values" {
 }
 
 test "error map" {
-    expectOutput(
+    try expectOutput(
         \\const foo = error{a: 2}
         \\const error{a: bar} = foo
         \\return bar * 2
@@ -320,7 +320,7 @@ test "error map" {
 }
 
 test "call bog function" {
-    expectCallOutput(
+    try expectCallOutput(
         \\return {
         \\    foo: 2,
         \\    doTheTest: fn(num) this.foo + num
@@ -331,7 +331,7 @@ test "call bog function" {
 }
 
 test "containers do not overwrite memoized values" {
-    expectOutput(
+    try expectOutput(
         \\let x = [true]
         \\x[0] = 1
         \\return true
@@ -341,7 +341,7 @@ test "containers do not overwrite memoized values" {
 }
 
 test "this" {
-    expectOutput(
+    try expectOutput(
         \\let x = {
         \\    a: 69,
         \\    y: 420,
@@ -358,14 +358,14 @@ test "this" {
 }
 
 test "closures" {
-    expectOutput(
+    try expectOutput(
         \\let x = 2
         \\const foo = fn() x + 5
         \\return foo()
     ,
         \\7
     );
-    expectOutput(
+    try expectOutput(
         \\let x = 2
         \\const foo = fn()
         \\    return fn()
@@ -379,7 +379,7 @@ test "closures" {
 }
 
 test "map" {
-    expectOutput(
+    try expectOutput(
         \\let y = 2
         \\const map = {1: 2, y}
         \\map["foo"] = "bar"
@@ -387,7 +387,7 @@ test "map" {
     ,
         \\{1: 2, "y": 2, "foo": "bar"}
     );
-    expectOutput(
+    try expectOutput(
         \\let y = 2
         \\const map = {1: 2, x: y}
         \\const {x} = map
@@ -399,13 +399,13 @@ test "map" {
 }
 
 test "property access of list" {
-    expectOutput(
+    try expectOutput(
         \\const list = [1, true, "hello"]
         \\return list.len
     ,
         \\3
     );
-    expectOutput(
+    try expectOutput(
         \\let y = [1,2,3]
         \\y[-1] = 4
         \\y["len"]
@@ -416,7 +416,7 @@ test "property access of list" {
 }
 
 test "string for iter" {
-    expectOutput(
+    try expectOutput(
         \\let sum = 0
         \\for (let c in "hellö wörld")
         \\    if (c == "h") sum += 1
@@ -433,7 +433,7 @@ test "string for iter" {
 }
 
 test "for loops" {
-    expectOutput(
+    try expectOutput(
         \\let sum = 0
         \\for (let x in [1, 2, 3])
         \\    sum += x
@@ -442,7 +442,7 @@ test "for loops" {
     ,
         \\6
     );
-    expectOutput(
+    try expectOutput(
         \\let sum = 0
         \\for (let (x,y) in [(1, 2), (2, 3), (5, 6)])
         \\    sum += x * y
@@ -454,7 +454,7 @@ test "for loops" {
 }
 
 test "error destructure" {
-    expectOutput(
+    try expectOutput(
         \\const err = fn() error(2)
         \\
         \\let error(y) = err()
@@ -465,7 +465,7 @@ test "error destructure" {
 }
 
 test "while let" {
-    expectOutput(
+    try expectOutput(
         \\const getSome = fn(val) if (val != 0) val - 1
         \\
         \\let val = 10
@@ -478,7 +478,7 @@ test "while let" {
 }
 
 test "if let" {
-    expectOutput(
+    try expectOutput(
         \\const maybeInc = fn(val)
         \\    if (let y = val)
         \\        return y + 4
@@ -491,7 +491,7 @@ test "if let" {
 }
 
 test "fibonacci" {
-    expectOutput(
+    try expectOutput(
         \\const fib = fn(n)
         \\    if (n < 2) return n
         \\    return fib(n - 1) + fib(n-2)
@@ -503,7 +503,7 @@ test "fibonacci" {
 }
 
 test "const value not modified by function" {
-    expectOutput(
+    try expectOutput(
         \\const x = 2
         \\const inc = fn(n) n += 1
         \\inc(x)
@@ -514,7 +514,7 @@ test "const value not modified by function" {
 }
 
 test "in" {
-    expectOutput(
+    try expectOutput(
         \\let y = [1, 2, 3]
         \\if (not true in y)
         \\    y[-2] = false
@@ -525,7 +525,7 @@ test "in" {
 }
 
 test "get/set" {
-    expectOutput(
+    try expectOutput(
         \\let y = [1, 2, 3]
         \\y[-2] = true
         \\return y[1]
@@ -535,14 +535,14 @@ test "get/set" {
 }
 
 test "mixed num and int" {
-    expectOutput(
+    try expectOutput(
         \\let y = 2
         \\y /= 5
         \\return y
     ,
         \\0.4
     );
-    expectOutput(
+    try expectOutput(
         \\let y = 2
         \\y **= 0.5
         \\return y
@@ -552,7 +552,7 @@ test "mixed num and int" {
 }
 
 test "copy on assign" {
-    expectOutput(
+    try expectOutput(
         \\const x = 2
         \\let y = x
         \\y += 2
@@ -560,7 +560,7 @@ test "copy on assign" {
     ,
         \\2
     );
-    expectOutput(
+    try expectOutput(
         \\let y = 2
         \\const inc = fn (a) a+=2
         \\inc(y)
@@ -571,7 +571,7 @@ test "copy on assign" {
 }
 
 test "strings" {
-    expectOutput(
+    try expectOutput(
         \\const a = "hello"
         \\return if (a == "world") 2 as str else 1.5 as str
     ,
@@ -580,7 +580,7 @@ test "strings" {
 }
 
 test "comparison" {
-    expectOutput(
+    try expectOutput(
         \\let a = 0
         \\while (a != 1000)
         \\    a += 1
@@ -591,7 +591,7 @@ test "comparison" {
 }
 
 test "while loop" {
-    expectOutput(
+    try expectOutput(
         \\const cond = true
         \\while (cond)
         \\    if (not cond)
@@ -606,7 +606,7 @@ test "while loop" {
 }
 
 test "subscript" {
-    expectOutput(
+    try expectOutput(
         \\const y = (1, 2)
         \\return y[-1]
     ,
@@ -615,7 +615,7 @@ test "subscript" {
 }
 
 test "assert" {
-    expectOutput(
+    try expectOutput(
         \\const assert = fn (ok) if (not ok) error(false)
         \\return assert(not false)
     ,
@@ -624,14 +624,14 @@ test "assert" {
 }
 
 test "functions" {
-    expectOutput(
+    try expectOutput(
         \\const add = fn ((a,b)) a + b
         \\const tuplify = fn (a,b) (a,b)
         \\return add(tuplify(1, 2))
     ,
         \\3
     );
-    expectOutput(
+    try expectOutput(
         \\const add = fn (a,b) a + b
         \\const sub = fn (a,b) a - b
         \\return sub(add(3, 4), add(1,2))
@@ -641,23 +641,23 @@ test "functions" {
 }
 
 test "type casting" {
-    expectOutput(
+    try expectOutput(
         \\return 1 as none
     ,
         \\()
     );
-    expectOutput(
+    try expectOutput(
         \\return 1 as bool
     ,
         \\true
     );
-    expectOutput(
+    try expectOutput(
         \\let y = 2.5
         \\return y as int
     ,
         \\2
     );
-    expectOutput(
+    try expectOutput(
         \\let x = 2.5 as int
         \\let y = x as num
         \\return y
@@ -667,17 +667,17 @@ test "type casting" {
 }
 
 test "type checking" {
-    expectOutput(
+    try expectOutput(
         \\return 1 is int
     ,
         \\true
     );
-    expectOutput(
+    try expectOutput(
         \\return 1 is num
     ,
         \\false
     );
-    expectOutput(
+    try expectOutput(
         \\return (1,) is tuple
     ,
         \\true
@@ -686,7 +686,7 @@ test "type checking" {
 
 test "tuple destructuring" {
     // TODO should destructuring different sized tuples be an error?
-    expectOutput(
+    try expectOutput(
         \\let (a, b, _, c) = (1, 2, 3, 4, 5)
         \\return (a + b) * c
     ,
@@ -695,7 +695,7 @@ test "tuple destructuring" {
 }
 
 test "tuple" {
-    expectOutput(
+    try expectOutput(
         \\return (1, 2, 3, 4, 22.400)
     ,
         \\(1, 2, 3, 4, 22.4)
@@ -703,7 +703,7 @@ test "tuple" {
 }
 
 test "bool if" {
-    expectOutput(
+    try expectOutput(
         \\const x = not false
         \\return 3 + if (not x) 2 else if (x) 4 else 9
     ,
@@ -712,7 +712,7 @@ test "bool if" {
 }
 
 test "assignment" {
-    expectOutput(
+    try expectOutput(
         \\let x = 2
         \\let y = -3
         \\x **= -y
@@ -723,7 +723,7 @@ test "assignment" {
 }
 
 test "basic math" {
-    expectOutput(
+    try expectOutput(
         \\let x = 2
         \\let y = x * 5
         \\let z = 90
@@ -734,13 +734,13 @@ test "basic math" {
 }
 
 test "basic variables" {
-    expectOutput(
+    try expectOutput(
         \\let x = 12
         \\return x
     ,
         \\12
     );
-    expectOutput(
+    try expectOutput(
         \\let x = true
         \\return not x
     ,
@@ -749,17 +749,17 @@ test "basic variables" {
 }
 
 test "number literals" {
-    expectOutput(
+    try expectOutput(
         \\return 12
     ,
         \\12
     );
-    expectOutput(
+    try expectOutput(
         \\return 0x12
     ,
         \\18
     );
-    expectOutput(
+    try expectOutput(
         \\return 0o12
     ,
         \\10
@@ -767,17 +767,17 @@ test "number literals" {
 }
 
 test "constant values" {
-    expectOutput(
+    try expectOutput(
         \\return true
     ,
         \\true
     );
-    expectOutput(
+    try expectOutput(
         \\return not true
     ,
         \\false
     );
-    expectOutput(
+    try expectOutput(
         \\return -12
     ,
         \\-12
@@ -791,7 +791,7 @@ const testing = std.testing;
 const bog = @import("bog");
 const Vm = bog.Vm;
 
-fn expectCallOutput(source: []const u8, args: anytype, expected: []const u8) void {
+fn expectCallOutput(source: []const u8, args: anytype, expected: []const u8) !void {
     var vm = Vm.init(std.testing.allocator, .{});
     defer vm.deinit();
     var module: *bog.Module = undefined;
@@ -814,10 +814,10 @@ fn expectCallOutput(source: []const u8, args: anytype, expected: []const u8) voi
     var out_buf = std.ArrayList(u8).init(std.testing.allocator);
     defer out_buf.deinit();
     call_res.dump(out_buf.writer(), 2) catch @panic("test failure");
-    testing.expectEqualStrings(expected, out_buf.items);
+    try testing.expectEqualStrings(expected, out_buf.items);
 }
 
-fn expectOutput(source: []const u8, expected: []const u8) void {
+fn expectOutput(source: []const u8, expected: []const u8) !void {
     var vm = Vm.init(std.testing.allocator, .{});
     defer vm.deinit();
     vm.addStd() catch unreachable;
@@ -834,7 +834,7 @@ fn expectOutput(source: []const u8, expected: []const u8) void {
     var out_buf = std.ArrayList(u8).init(std.testing.allocator);
     defer out_buf.deinit();
     res.dump(out_buf.writer(), 2) catch @panic("test failure");
-    testing.expectEqualStrings(expected, out_buf.items);
+    try testing.expectEqualStrings(expected, out_buf.items);
 }
 
 fn run(mp: **bog.Module, source: []const u8, vm: *Vm) !*bog.Value {

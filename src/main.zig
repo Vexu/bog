@@ -107,8 +107,7 @@ fn run(gpa: *std.mem.Allocator, args: [][]const u8) !void {
     const res_with_err = (if (module) |*some| blk: {
         vm.ip = some.entry;
         break :blk vm.exec(some);
-    } else
-        vm.run(source));
+    } else vm.run(source));
     const res = res_with_err catch |e| switch (e) {
         error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
             vm.errors.render(source, std.io.getStdErr().writer()) catch {};
@@ -156,7 +155,7 @@ fn fmt(gpa: *std.mem.Allocator, args: [][]const u8) !void {
 }
 
 const FmtError = std.mem.Allocator.Error || std.fs.File.OpenError || std.fs.File.Writer.Error ||
-    std.fs.Dir.OpenError || std.fs.File.GetPosError || std.fs.Dir.Iterator.Error ||
+    std.fs.Dir.OpenError || std.fs.File.GetSeekPosError || std.fs.Dir.Iterator.Error ||
     std.fs.File.Reader.Error || error{EndOfStream};
 
 fn fmtFile(gpa: *std.mem.Allocator, name: []const u8) FmtError!bool {

@@ -52,8 +52,9 @@ pub fn ln(vm: *Vm, val: Value) !*Value {
 pub fn sqrt(vm: *Vm, val: Value) !*Value {
     return switch (val) {
         .int => |i| {
+            _ = i;
             const res = try vm.gc.alloc();
-            res.* = Value{ .int = std.math.sqrt(i) };
+            res.* = Value{ .int = std.math.sqrt(@intCast(u64, i)) };
             return res;
         },
         .num => |n| {

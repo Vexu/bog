@@ -5,7 +5,7 @@ const Allocator = mem.Allocator;
 const bog = @import("bog.zig");
 const Token = bog.Token;
 const TokenIndex = Token.Index;
-const TokenId = @TagType(Token.Id);
+const TokenId = std.meta.Tag(Token.Id);
 const Tree = bog.Tree;
 const Node = bog.Node;
 const NodeList = std.ArrayList(*Node);
@@ -836,6 +836,7 @@ pub const Parser = struct {
 
     /// expr (":" expr)?
     fn mapItem(parser: *Parser, skip_nl: bool, _: bool, level: u16) Error!*Node {
+        _ = skip_nl;
         var key: ?*Node = null;
         var value = try parser.expr(true, false, level);
         var colon: ?TokenIndex = null;
@@ -979,6 +980,7 @@ pub const Parser = struct {
 
     /// match : "match" "(" expr ")" (NL match_case)+ NL
     fn matchExpr(parser: *Parser, skip_nl: bool, level: u16) Error!?*Node {
+        _ = skip_nl;
         const tok = parser.eatToken(.Keyword_match, true) orelse return null;
         _ = try parser.expectToken(.LParen, true);
         const cond = try parser.expr(true, true, level);

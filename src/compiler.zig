@@ -577,8 +577,7 @@ pub const Compiler = struct {
         fn toVal(res: Result) Value {
             return if (res != .rt)
                 .empty
-            else
-                .{ .rt = res.rt };
+            else .{ .rt = res.rt };
         }
     };
 
@@ -745,9 +744,20 @@ pub const Compiler = struct {
         const should_discard = switch (last.id) {
             .Block => true,
             .Infix => switch (@fieldParentPtr(Node.Infix, "base", last).op) {
-                .assign, .add_assign, .sub_assign, .mul_assign, .pow_assign, // -
-                .div_assign, .div_floor_assign, .mod_assign, .l_shift_assign, // -
-                .r_shift_assign, .bit_and_assign, .bit_or_assign, .bit_x_or_assign => true,
+                .assign,
+                .add_assign,
+                .sub_assign,
+                .mul_assign,
+                .pow_assign, // -
+                .div_assign,
+                .div_floor_assign,
+                .mod_assign,
+                .l_shift_assign, // -
+                .r_shift_assign,
+                .bit_and_assign,
+                .bit_or_assign,
+                .bit_x_or_assign,
+                => true,
                 else => false,
             },
             else => false,
@@ -814,10 +824,13 @@ pub const Compiler = struct {
             // jump past if_body if cond == .none
             if_skip = try self.emitJump(.jump_none, cond_reg);
 
-            const lval_res = try self.genLval(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let)
-                .{ .mut = &Value{ .rt = cond_reg } }
-            else
-                .{ .constant = &Value{ .rt = cond_reg } });
+            const lval_res = try self.genLval(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let) .{
+                .mut = &Value{ .rt = cond_reg },
+            } else .{
+                .constant = &Value{ .rt = cond_reg },
+            });
+
+            _ = lval_res;
         } else if (!cond_val.isRt()) {
             const bool_val = try cond_val.getBool(self, node.cond.firstToken());
 
@@ -952,10 +965,11 @@ pub const Compiler = struct {
             // jump past exit loop if cond == .none
             cond_jump = try self.emitJump(.jump_none, cond_reg);
 
-            try self.genLval(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let)
-                .{ .mut = &Value{ .rt = cond_reg } }
-            else
-                .{ .constant = &Value{ .rt = cond_reg } });
+            try self.genLval(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let) .{
+                .mut = &Value{ .rt = cond_reg },
+            } else .{
+                .constant = &Value{ .rt = cond_reg },
+            });
         } else if (cond_val.isRt()) {
             cond_jump = try self.emitJump(.jump_false, cond_val.getRt());
         } else {
@@ -1043,10 +1057,11 @@ pub const Compiler = struct {
         try self.func.code.append(.{ .bare = 0 });
 
         if (node.capture != null) {
-            try self.genLval(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let)
-                .{ .mut = &Value{ .rt = iter_val_reg } }
-            else
-                .{ .constant = &Value{ .rt = iter_val_reg } });
+            try self.genLval(node.capture.?, if (self.tokens[node.let_const.?].id == .Keyword_let) .{
+                .mut = &Value{ .rt = iter_val_reg },
+            } else .{
+                .constant = &Value{ .rt = iter_val_reg },
+            });
         }
 
         switch (sub_res) {
@@ -1573,7 +1588,7 @@ pub const Compiler = struct {
             },
             .equal, .not_equal => blk: {
                 const eql = switch (lhs_val) {
-                    .none => |a_val| switch (rhs_val) {
+                    .none => switch (rhs_val) {
                         .none => true,
                         else => false,
                     },
@@ -1695,12 +1710,14 @@ pub const Compiler = struct {
     }
 
     fn genDecl(self: *Compiler, node: *Node.Decl, res: Result) Error!Value {
+        _ = res;
         const rhs_val = try self.genNodeNonEmpty(node.value, .value);
 
-        try self.genLval(node.capture, if (self.tokens[node.let_const].id == .Keyword_let)
-            .{ .mut = &rhs_val }
-        else
-            .{ .constant = &rhs_val });
+        try self.genLval(node.capture, if (self.tokens[node.let_const].id == .Keyword_let) .{
+            .mut = &rhs_val,
+        } else .{
+            .constant = &rhs_val,
+        });
         return Value.empty;
     }
 
@@ -1714,6 +1731,7 @@ pub const Compiler = struct {
     }
 
     fn genThis(self: *Compiler, node: *Node.SingleToken, res: Result) Error!Value {
+        _ = node;
         const sub_res = try res.toRt(self);
         try self.emitSingle(.load_this_single, sub_res.rt);
         return sub_res.toVal();
@@ -1950,10 +1968,11 @@ pub const Compiler = struct {
                 if (catch_node.let_const) |tok| {
                     seen_catch_all = true;
 
-                    try self.genLval(some, if (self.tokens[tok].id == .Keyword_let)
-                        .{ .mut = &Value{ .rt = try_scope.err_reg } }
-                    else
-                        .{ .constant = &Value{ .rt = try_scope.err_reg } });
+                    try self.genLval(some, if (self.tokens[tok].id == .Keyword_let) .{
+                        .mut = &Value{ .rt = try_scope.err_reg },
+                    } else .{
+                        .constant = &Value{ .rt = try_scope.err_reg },
+                    });
                 } else {
                     _ = try self.genNodeNonEmpty(some, .{ .rt = capture_reg });
                     // if not equal to the error value jump over this handler
@@ -2028,10 +2047,11 @@ pub const Compiler = struct {
                 seen_catch_all = true;
                 expr = case.expr;
 
-                try self.genLval(case.capture, if (self.tokens[case.let_const].id == .Keyword_let)
-                    .{ .mut = &Value{ .rt = cond_reg } }
-                else
-                    .{ .constant = &Value{ .rt = cond_reg } });
+                try self.genLval(case.capture, if (self.tokens[case.let_const].id == .Keyword_let) .{
+                    .mut = &Value{ .rt = cond_reg },
+                } else .{
+                    .constant = &Value{ .rt = cond_reg },
+                });
             } else if (uncasted_case.cast(.MatchCase)) |case| {
                 expr = case.expr;
 
@@ -2405,6 +2425,7 @@ pub const Compiler = struct {
     }
 
     fn getLastNode(self: *Compiler, first_node: *Node) *Node {
+        _ = self;
         var node = first_node;
         while (true) switch (node.id) {
             .Grouped => node = @fieldParentPtr(Node.Grouped, "base", node).expr,
