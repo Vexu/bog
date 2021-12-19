@@ -316,7 +316,7 @@ pub const Token = struct {
     }
 };
 
-pub fn tokenize(allocator: *mem.Allocator, source: []const u8, errors: *Errors) Tokenizer.Error![]const Token {
+pub fn tokenize(allocator: mem.Allocator, source: []const u8, errors: *Errors) Tokenizer.Error![]const Token {
     // estimate one token per 8 bytes to reduce allocation in the beginning
     const estimated = source.len / 8;
     var tokenizer = Tokenizer{

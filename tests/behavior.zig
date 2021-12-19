@@ -19,7 +19,7 @@ test "continue" {
 }
 
 test "std.gc" {
-    if (std.builtin.os.tag == .windows) {
+    if (@import("builtin").os.tag == .windows) {
         // TODO this gives a different result on windows
         return error.SkipZigTest;
     }

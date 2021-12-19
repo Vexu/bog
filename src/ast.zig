@@ -13,7 +13,7 @@ pub const Tree = struct {
     source: []const u8,
 
     arena: std.heap.ArenaAllocator.State,
-    gpa: *Allocator,
+    gpa: Allocator,
 
     pub fn deinit(self: *Tree) void {
         self.gpa.free(self.tokens);

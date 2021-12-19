@@ -5,7 +5,7 @@ const bog = @import("bog.zig");
 const Vm = bog.Vm;
 const Errors = bog.Errors;
 
-pub fn run(gpa: *Allocator, reader: anytype, writer: anytype) !void {
+pub fn run(gpa: Allocator, reader: anytype, writer: anytype) !void {
     var vm = Vm.init(gpa, .{ .repl = true, .import_files = true });
     defer vm.deinit();
     var arena = std.heap.ArenaAllocator.init(gpa);
@@ -48,7 +48,7 @@ pub const Repl = struct {
     const parse = @import("parser.zig").parseRepl;
     const compile = @import("compiler.zig").compileRepl;
 
-    fn init(gpa: *Allocator, vm: *Vm, mod: *bog.Compiler.Fn, arena: *std.heap.ArenaAllocator) !Repl {
+    fn init(gpa: Allocator, vm: *Vm, mod: *bog.Compiler.Fn, arena: *std.heap.ArenaAllocator) !Repl {
         const buffer = try ArrayList(u8).initCapacity(gpa, std.mem.page_size);
         errdefer buffer.deinit();
         try vm.addStd();
@@ -73,7 +73,7 @@ pub const Repl = struct {
                 .gpa = gpa,
                 .scopes = scopes,
                 .func = mod,
-                .arena = &arena.allocator,
+                .arena = arena.allocator(),
                 .module_code = bog.Compiler.Code.init(gpa),
                 .strings = std.ArrayList(u8).init(gpa),
                 .string_interner = std.StringHashMap(u32).init(gpa),

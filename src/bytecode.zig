@@ -241,7 +241,7 @@ pub const Module = struct {
     entry: u32,
     // debug_info,
 
-    pub fn deinit(module: *Module, alloc: *std.mem.Allocator) void {
+    pub fn deinit(module: *Module, alloc: std.mem.Allocator) void {
         alloc.free(module.name);
         alloc.free(module.code);
         alloc.free(module.strings);
@@ -354,10 +354,10 @@ pub const Module = struct {
     }
 
     /// Pretty prints debug info about the module.
-    pub fn dump(module: Module, allocator: *Allocator, writer: anytype) (@TypeOf(writer).Error || Allocator.Error)!void {
+    pub fn dump(module: Module, allocator: Allocator, writer: anytype) (@TypeOf(writer).Error || Allocator.Error)!void {
         var arena_allocator = std.heap.ArenaAllocator.init(allocator);
         defer arena_allocator.deinit();
-        const arena = &arena_allocator.allocator;
+        const arena = arena_allocator.allocator();
 
         var jumps = try module.mapJumpTargets(arena);
         var ip: usize = 0;
@@ -537,7 +537,7 @@ pub const Module = struct {
 
     const JumpMap = std.AutoHashMap(usize, []const u8);
 
-    fn mapJumpTargets(module: Module, arena: *Allocator) Allocator.Error!JumpMap {
+    fn mapJumpTargets(module: Module, arena: Allocator) Allocator.Error!JumpMap {
         var map = JumpMap.init(arena);
         var ip: usize = 0;
         var mangle: u32 = 0;

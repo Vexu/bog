@@ -48,13 +48,13 @@ pub const Builder = struct {
     }
 };
 
-pub fn builder(allocator: *Allocator) Builder {
+pub fn builder(allocator: Allocator) Builder {
     return Builder{
         .inner = std.ArrayList(u8).init(allocator),
     };
 }
 
-pub fn init(allocator: *Allocator, comptime fmt: []const u8, args: anytype) !String {
+pub fn init(allocator: Allocator, comptime fmt: []const u8, args: anytype) !String {
     var b = builder(allocator);
     errdefer b.cancel();
 
@@ -62,7 +62,7 @@ pub fn init(allocator: *Allocator, comptime fmt: []const u8, args: anytype) !Str
     return b.finish();
 }
 
-pub fn deinit(str: *String, allocator: *Allocator) void {
+pub fn deinit(str: *String, allocator: Allocator) void {
     if (str.capacity != 0) {
         allocator.free(str.data);
     }
@@ -186,7 +186,7 @@ pub fn in(str: *const String, val: *const Value) bool {
     return mem.indexOf(u8, str.data, val.str.data) != null;
 }
 
-pub fn append(str: *String, allocator: *Allocator, data: []const u8) !void {
+pub fn append(str: *String, allocator: Allocator, data: []const u8) !void {
     var b = builder(allocator);
     errdefer b.cancel();
 
@@ -200,7 +200,7 @@ pub fn append(str: *String, allocator: *Allocator, data: []const u8) !void {
 pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
     var b = builder(vm.gc.gpa);
     errdefer b.cancel();
-    try b.inner.ensureCapacity(str.data.len);
+    try b.inner.ensureTotalCapacity(str.data.len);
 
     const w = b.writer();
     var state: enum {
@@ -276,7 +276,7 @@ pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
 pub fn join(str: String, vm: *Vm, args: []const *Value) !*Value {
     var b = builder(vm.gc.gpa);
     errdefer b.cancel();
-    try b.inner.ensureCapacity(args.len * str.data.len);
+    try b.inner.ensureTotalCapacity(args.len * str.data.len);
 
     for (args) |arg, i| {
         if (i != 0) {

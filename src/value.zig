@@ -186,7 +186,7 @@ pub const Value = union(Type) {
 
     /// Frees any extra memory allocated by value.
     /// Does not free values recursively.
-    pub fn deinit(value: *Value, allocator: *Allocator) void {
+    pub fn deinit(value: *Value, allocator: Allocator) void {
         switch (value.*) {
             .bool, .none => return,
             .int, .num, .native, .tagged, .range, .iterator, .err => {},
@@ -649,7 +649,7 @@ pub const Value = union(Type) {
                         if (decl.is_pub) pub_decls += 1;
                     }
 
-                    try map.ensureCapacity(vm.gc.gpa, pub_decls);
+                    try map.ensureTotalCapacity(vm.gc.gpa, pub_decls);
 
                     inline for (info.decls) |decl| {
                         if (!decl.is_pub) continue;

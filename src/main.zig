@@ -8,7 +8,7 @@ const is_debug = @import("builtin").mode == .Debug;
 var state = std.heap.GeneralPurposeAllocator(.{}){};
 
 pub fn main() !void {
-    const gpa = &state.allocator;
+    const gpa = state.allocator();
 
     const args = try process.argsAlloc(gpa);
     defer process.argsFree(gpa, args);
@@ -61,7 +61,7 @@ fn help() !void {
     process.exit(0);
 }
 
-fn run(gpa: *std.mem.Allocator, args: [][]const u8) !void {
+fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
     std.debug.assert(args.len > 0);
     const file_name = args[0];
 
@@ -76,7 +76,7 @@ fn run(gpa: *std.mem.Allocator, args: [][]const u8) !void {
             ret.* = .{ .list = .{} };
             var list = &ret.list;
             errdefer list.deinit(_vm.gc.gpa);
-            try list.ensureCapacity(_vm.gc.gpa, _args.len);
+            try list.ensureTotalCapacity(_vm.gc.gpa, _args.len);
 
             for (_args) |arg| {
                 const str = try _vm.gc.alloc();
@@ -144,7 +144,7 @@ const usage_fmt =
     \\
 ;
 
-fn fmt(gpa: *std.mem.Allocator, args: [][]const u8) !void {
+fn fmt(gpa: std.mem.Allocator, args: [][]const u8) !void {
     if (args.len == 0) fatal("expected at least one file", .{});
 
     var any_err = false;
@@ -158,7 +158,7 @@ const FmtError = std.mem.Allocator.Error || std.fs.File.OpenError || std.fs.File
     std.fs.Dir.OpenError || std.fs.File.GetSeekPosError || std.fs.Dir.Iterator.Error ||
     std.fs.File.Reader.Error || error{EndOfStream};
 
-fn fmtFile(gpa: *std.mem.Allocator, name: []const u8) FmtError!bool {
+fn fmtFile(gpa: std.mem.Allocator, name: []const u8) FmtError!bool {
     const source = std.fs.cwd().readFileAlloc(gpa, name, 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.IsDir => {
@@ -220,7 +220,7 @@ const usage_debug =
     \\
 ;
 
-fn debugDump(gpa: *std.mem.Allocator, args: [][]const u8) !void {
+fn debugDump(gpa: std.mem.Allocator, args: [][]const u8) !void {
     const file_name = getFileName(usage_debug, args);
 
     const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
@@ -246,7 +246,7 @@ fn debugDump(gpa: *std.mem.Allocator, args: [][]const u8) !void {
     try module.dump(gpa, std.io.getStdOut().writer());
 }
 
-fn debugTokens(gpa: *std.mem.Allocator, args: [][]const u8) !void {
+fn debugTokens(gpa: std.mem.Allocator, args: [][]const u8) !void {
     const file_name = getFileName(usage_debug, args);
 
     const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
@@ -284,7 +284,7 @@ const usage_debug_write =
     \\
 ;
 
-fn debugWrite(gpa: *std.mem.Allocator, args: [][]const u8) !void {
+fn debugWrite(gpa: std.mem.Allocator, args: [][]const u8) !void {
     if (args.len != 2) {
         fatal("{s}", .{usage_debug_write});
     }
@@ -316,7 +316,7 @@ fn debugWrite(gpa: *std.mem.Allocator, args: [][]const u8) !void {
     try module.write(file.writer());
 }
 
-fn debugRead(gpa: *std.mem.Allocator, args: [][]const u8) !void {
+fn debugRead(gpa: std.mem.Allocator, args: [][]const u8) !void {
     const file_name = getFileName(usage_debug, args);
 
     const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {

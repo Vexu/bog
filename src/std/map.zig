@@ -47,7 +47,7 @@ pub fn entries(vm: *Vm, map: *const Value.Map) !*Value {
     while (iter.next()) |e| : (i += 1) {
         var entry = try vm.gc.alloc();
         entry.* = .{ .map = .{} };
-        try entry.map.ensureCapacity(vm.gc.gpa, 2);
+        try entry.map.ensureTotalCapacity(vm.gc.gpa, 2);
 
         const val_str = Value.string("value");
         const key_str = Value.string("key");

@@ -11,7 +11,7 @@ const Node = bog.Node;
 const NodeList = std.ArrayList(*Node);
 
 /// root : (stmt NL)* EOF
-pub fn parse(gpa: *Allocator, source: []const u8, errors: *bog.Errors) (Parser.Error || bog.Tokenizer.Error)!*Tree {
+pub fn parse(gpa: Allocator, source: []const u8, errors: *bog.Errors) (Parser.Error || bog.Tokenizer.Error)!*Tree {
     const tokens = try bog.tokenize(gpa, source, errors);
     errdefer gpa.free(tokens);
 
@@ -19,7 +19,7 @@ pub fn parse(gpa: *Allocator, source: []const u8, errors: *bog.Errors) (Parser.E
     errdefer arena.deinit();
 
     var parser = Parser{
-        .arena = &arena.allocator,
+        .arena = arena.allocator(),
         .gpa = gpa,
         .errors = errors,
         .tokens = tokens,
@@ -71,8 +71,8 @@ pub fn parseRepl(repl: *@import("repl.zig").Repl) Parser.Error!?*Node {
 }
 
 pub const Parser = struct {
-    arena: *Allocator,
-    gpa: *Allocator,
+    arena: Allocator,
+    gpa: Allocator,
     errors: *bog.Errors,
     tokens: []const Token,
     tok_index: TokenIndex = 0,

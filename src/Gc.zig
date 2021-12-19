@@ -91,7 +91,7 @@ const Gc = @This();
 
 pages: std.ArrayListUnmanaged(*Page) = .{},
 stack: std.ArrayListUnmanaged(?*Value) = .{},
-gpa: *Allocator,
+gpa: Allocator,
 page_limit: u32,
 stack_protect_start: usize = 0,
 
@@ -207,7 +207,7 @@ pub fn collect(gc: *Gc) usize {
     return freed;
 }
 
-pub fn init(allocator: *Allocator, page_limit: u32) Gc {
+pub fn init(allocator: Allocator, page_limit: u32) Gc {
     std.debug.assert(page_limit >= 1);
     return .{
         .gpa = allocator,
@@ -300,7 +300,7 @@ pub fn stackGet(gc: *Gc, index: usize) !*Value {
 
 /// Only valid until next `stackAlloc` call.
 pub fn stackRef(gc: *Gc, index: usize) !*?*Value {
-    try gc.stack.ensureCapacity(gc.gpa, index + 1);
+    try gc.stack.ensureTotalCapacity(gc.gpa, index + 1);
     while (index >= gc.stack.items.len) {
         gc.stack.appendAssumeCapacity(null);
     }
@@ -381,7 +381,7 @@ test "major collection" {
 }
 
 test "stack protect" {
-    if (std.builtin.os.tag == .windows) {
+    if (@import("builtin").os.tag == .windows) {
         // TODO @frameAddress returns an address after &val1 on windows?
         return error.SkipZigTest;
     }

@@ -12,13 +12,13 @@ const util = @import("util.zig");
 
 pub const max_params = 32;
 
-pub fn compile(gpa: *Allocator, source: []const u8, errors: *Errors) (Compiler.Error || bog.Parser.Error || bog.Tokenizer.Error)!*bog.Module {
+pub fn compile(gpa: Allocator, source: []const u8, errors: *Errors) (Compiler.Error || bog.Parser.Error || bog.Tokenizer.Error)!*bog.Module {
     var tree = try bog.parse(gpa, source, errors);
     defer tree.deinit();
 
     var arena_state = std.heap.ArenaAllocator.init(gpa);
     defer arena_state.deinit();
-    const arena = &arena_state.allocator;
+    const arena = arena_state.allocator();
 
     var module = Compiler.Fn{
         .captures = undefined,
@@ -98,8 +98,8 @@ pub const Compiler = struct {
     tokens: []const bog.Token,
     source: []const u8,
     errors: *Errors,
-    gpa: *Allocator,
-    arena: *Allocator,
+    gpa: Allocator,
+    arena: Allocator,
     scopes: std.ArrayList(Scope),
     func: *Fn,
     module_code: Code,
@@ -118,8 +118,9 @@ pub const Compiler = struct {
     pub const Fn = struct {
         code: Code,
         captures: std.ArrayList(Symbol),
-        regs: std.PackedIntArray(u1, 256) = .{
+        regs: std.PackedIntArray(u1, 256) = std.PackedIntArray(u1, 256){
             .bytes = [_]u8{0} ** 32,
+            .len = 256,
         },
         // index of first free register
         free_index: u8 = 0,
@@ -1862,7 +1863,7 @@ pub const Compiler = struct {
             if (slice[0] == ':') slice = slice[1..];
             if (self.tokens[str].id == .FormatEnd) slice = slice[0 .. slice.len - 1];
 
-            try buf.ensureCapacity(buf.capacity + slice.len);
+            try buf.ensureUnusedCapacity(slice.len);
             buf.expandToCapacity();
             i += try self.parseStrExtra(str, slice, buf.items[i..]);
         }

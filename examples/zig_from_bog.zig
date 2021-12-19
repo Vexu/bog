@@ -7,7 +7,7 @@ pub fn pow(val: i64) i64 {
 
 pub fn main() !void {
     var state = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = &state.allocator;
+    const allocator = state.allocator();
 
     const source = try std.fs.cwd().readFileAlloc(allocator, "examples/zig_from_bog.bog", 1024);
     defer allocator.free(source);

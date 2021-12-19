@@ -64,7 +64,7 @@ pub const Errors = struct {
         kind: Kind,
     });
 
-    pub fn init(alloc: *Allocator) Errors {
+    pub fn init(alloc: Allocator) Errors {
         return .{ .list = List.init(alloc) };
     }
 

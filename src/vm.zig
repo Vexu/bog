@@ -69,7 +69,7 @@ pub const Vm = struct {
         MalformedByteCode,
     } || Allocator.Error;
 
-    pub fn init(allocator: *Allocator, options: Options) Vm {
+    pub fn init(allocator: Allocator, options: Options) Vm {
         return .{
             .ip = 0,
             .sp = 0,
@@ -586,7 +586,7 @@ pub const Vm = struct {
                         inst.off.off;
 
                     res.* = .{ .map = .{} };
-                    try res.map.ensureCapacity(vm.gc.gpa, size);
+                    try res.map.ensureTotalCapacity(vm.gc.gpa, size);
                 },
                 .build_error_double => {
                     const res = try vm.getNewVal(inst.double.res);
@@ -856,7 +856,7 @@ pub const Vm = struct {
             defer vm.gc.gpa.free(source);
             const mod = bog.compile(vm.gc.gpa, source, &vm.errors) catch
                 return vm.fatal("import failed");
-            mod.name = try mem.dupe(vm.gc.gpa, u8, id);
+            mod.name = try vm.gc.gpa.dupe(u8, id);
             _ = try vm.imported_modules.put(vm.gc.gpa, id, mod);
             break :blk mod;
         } else if (mem.endsWith(u8, id, bog.bytecode_extension)) blk: {
@@ -873,9 +873,9 @@ pub const Vm = struct {
 
             const mod = try vm.gc.gpa.create(Module);
             mod.* = .{
-                .name = try mem.dupe(vm.gc.gpa, u8, id),
-                .code = try mem.dupe(vm.gc.gpa, bog.Instruction, read_module.code),
-                .strings = try mem.dupe(vm.gc.gpa, u8, read_module.strings),
+                .name = try vm.gc.gpa.dupe(u8, id),
+                .code = try vm.gc.gpa.dupe(bog.Instruction, read_module.code),
+                .strings = try vm.gc.gpa.dupe(u8, read_module.strings),
                 .entry = read_module.entry,
             };
             _ = try vm.imported_modules.put(vm.gc.gpa, id, mod);
