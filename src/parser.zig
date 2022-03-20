@@ -7,6 +7,8 @@ const Token = bog.Token;
 const Tree = bog.Tree;
 const Node = bog.Node;
 
+const null_node: Node.Index = 0;
+
 /// root : (stmt NL)* EOF
 pub fn parse(gpa: Allocator, source: []const u8, errors: *bog.Errors) (Parser.Error || bog.Tokenizer.Error)!Tree {
     var tokens = try bog.tokenize(gpa, source, errors);
@@ -80,7 +82,7 @@ pub const Parser = struct {
             .token = token,
             .data = .{ .un = op },
         });
-        return @intToEnum(Node.Index, index);
+        return @intCast(Node.Index, index);
     }
 
     fn addBin(p: *Parser, id: Node.Id, token: Token.Index, lhs: Node.Index, rhs: Node.Index) !Node.Index {
@@ -90,7 +92,7 @@ pub const Parser = struct {
             .token = token,
             .data = .{ .bin = .{ .lhs = lhs, .rhs = rhs } },
         });
-        return @intToEnum(Node.Index, index);
+        return @intCast(Node.Index, index);
     }
 
     fn addTyBin(p: *Parser, id: Node.Id, token: Token.Index, lhs: Node.Index, ty_name: Token.Index) !Node.Index {
@@ -100,7 +102,7 @@ pub const Parser = struct {
             .token = token,
             .data = .{ .ty_bin = .{ .lhs = lhs, .rhs = ty_name } },
         });
-        return @intToEnum(Node.Index, index);
+        return @intCast(Node.Index, index);
     }
 
     fn addList(p: *Parser, id: Node.Id, token: Token.Index, nodes: []const Node.Index) Allocator.Error!Node.Index {
@@ -113,7 +115,7 @@ pub const Parser = struct {
             .token = token,
             .data = .{ .range = .{ .start = start, .end = @intCast(u32, p.extra.items.len) } },
         });
-        return @intToEnum(Node.Index, index);
+        return @intCast(Node.Index, index);
     }
 
     fn addCond(p: *Parser, id: Node.Id, token: Token.Index, cond: Node.Index, nodes: []const Node.Index) Allocator.Error!Node.Index {
@@ -126,7 +128,7 @@ pub const Parser = struct {
             .token = token,
             .data = .{ .cond = .{ .cond = cond, .extra = start } },
         });
-        return @intToEnum(Node.Index, index);
+        return @intCast(Node.Index, index);
     }
 
     /// decl : "let" destructuring "=" block_or_expr
@@ -153,25 +155,25 @@ pub const Parser = struct {
             // not a range
             if (colon_1 == null) return start;
             break :start start;
-        } else .none;
+        } else null_node;
 
         var colon_2 = p.eatToken(.colon, skip_nl);
         const end = if (colon_2 == null) end: {
             const end = try p.destructuringInner(skip_nl, level);
             colon_2 = p.eatToken(.colon, skip_nl);
             break :end end;
-        } else .none;
+        } else null_node;
 
         const step = if (colon_2 != null)
             try p.destructuringInner(skip_nl, level)
         else
-            .none;
+            null_node;
 
-        if (start != .none and end != .none and step != .none) {
+        if (start != null_node and end != null_node and step != null_node) {
             return p.addCond(.range_dest, colon_1.?, start, &.{ end, step });
-        } else if (start == .none) {
+        } else if (start == null_node) {
             return p.addBin(.range_dest_start, colon_1.?, end, step);
-        } else if (end == .none) {
+        } else if (end == null_node) {
             return p.addBin(.range_dest_end, colon_1.?, start, step);
         } else {
             return p.addBin(.range_dest_step, colon_1.?, start, end);
@@ -183,13 +185,13 @@ pub const Parser = struct {
             .keyword_mut => {
                 _ = p.nextToken(.skip_nl);
                 const ident = try p.expectToken(.identifier, skip_nl);
-                return p.addUn(.ident_dest, ident, .none);
+                return p.addUn(.ident_dest, ident, null_node);
             },
-            .identifier => return p.addUn(.ident_dest, p.nextToken(skip_nl), .none),
-            .underscore => return p.addUn(.discard_dest, p.nextToken(skip_nl), .none),
+            .identifier => return p.addUn(.ident_dest, p.nextToken(skip_nl), null_node),
+            .underscore => return p.addUn(.discard_dest, p.nextToken(skip_nl), null_node),
             .keyword_error => {
                 const err_tok = p.nextToken(skip_nl);
-                const init = (try p.compoundDestructuring(skip_nl, level)) orelse .none;
+                const init = (try p.compoundDestructuring(skip_nl, level)) orelse null_node;
                 return p.addUn(.error_dest, err_tok, init);
             },
             .l_paren, .l_bracket, .l_brace => {
@@ -209,24 +211,24 @@ pub const Parser = struct {
         if (p.eatToken(.l_brace, .skip_nl)) |tok| {
             const elems = try p.listParser(skip_nl, level, mapItem, .r_brace, null);
             return switch (elems.len) {
-                0 => try p.addBin(.map_dest_two, tok, .none, .none),
-                1 => try p.addBin(.map_dest_two, tok, elems[0], .none),
+                0 => try p.addBin(.map_dest_two, tok, null_node, null_node),
+                1 => try p.addBin(.map_dest_two, tok, elems[0], null_node),
                 2 => try p.addBin(.map_dest_two, tok, elems[0], elems[1]),
                 else => try p.addList(.map_dest, tok, elems),
             };
         } else if (p.eatToken(.l_bracket, .skip_nl)) |tok| {
             const elems = try p.listParser(skip_nl, level, destructuring, .r_bracket, null);
             return switch (elems.len) {
-                0 => try p.addBin(.list_dest_two, tok, .none, .none),
-                1 => try p.addBin(.list_dest_two, tok, elems[0], .none),
+                0 => try p.addBin(.list_dest_two, tok, null_node, null_node),
+                1 => try p.addBin(.list_dest_two, tok, elems[0], null_node),
                 2 => try p.addBin(.list_dest_two, tok, elems[0], elems[1]),
                 else => try p.addList(.list_dest, tok, elems),
             };
         } else if (p.eatToken(.l_paren, .keep_nl)) |tok| {
             const elems = try p.listParser(skip_nl, level, destructuring, .r_paren, null);
             return switch (elems.len) {
-                0 => try p.addBin(.tuple_dest_two, tok, .none, .none),
-                1 => try p.addBin(.tuple_dest_two, tok, elems[0], .none),
+                0 => try p.addBin(.tuple_dest_two, tok, null_node, null_node),
+                1 => try p.addBin(.tuple_dest_two, tok, elems[0], null_node),
                 2 => try p.addBin(.tuple_dest_two, tok, elems[0], elems[1]),
                 else => try p.addList(.tuple_dest, tok, elems),
             };
@@ -248,7 +250,7 @@ pub const Parser = struct {
 
         return switch (params.len) {
             0 => unreachable, // body is always added to the list
-            1 => try p.addBin(.fn_expr_one, fn_tok, .none, body),
+            1 => try p.addBin(.fn_expr_one, fn_tok, null_node, body),
             2 => try p.addBin(.fn_expr_one, fn_tok, params[0], body),
             else => try p.addList(.fn_expr, fn_tok, params),
         };
@@ -339,8 +341,8 @@ pub const Parser = struct {
 
         const stmts = p.node_buf.items[node_buf_top..];
         switch (stmts.len) {
-            0 => return try p.addBin(.block_stmt_two, nl, .none, .none),
-            1 => return try p.addBin(.block_stmt_two, nl, stmts[0], .none),
+            0 => unreachable,
+            1 => return try p.addBin(.block_stmt_two, nl, stmts[0], null_node),
             2 => return try p.addBin(.block_stmt_two, nl, stmts[0], stmts[1]),
             else => return try p.addList(.block_stmt, nl, stmts),
         }
@@ -376,7 +378,7 @@ pub const Parser = struct {
         })
             try p.blockOrExpr(skip_nl, level)
         else
-            .none;
+            null_node;
 
         return try p.addUn(id, tok, op);
     }
@@ -452,9 +454,9 @@ pub const Parser = struct {
             // not a range
             if (colon_1 == null) return start;
             break :start start;
-        } else .none;
+        } else null_node;
 
-        var end: Node.Index = .none;
+        var end: Node.Index = null_node;
         var colon_2 = p.eatToken(.colon, skip_nl);
         if (colon_2 == null) {
             switch (p.tok_ids[p.tok_i]) {
@@ -464,13 +466,13 @@ pub const Parser = struct {
             colon_2 = p.eatToken(.colon, skip_nl);
         }
 
-        const step = if (colon_2 != null) try p.bitExpr(skip_nl, level) else .none;
+        const step = if (colon_2 != null) try p.bitExpr(skip_nl, level) else null_node;
 
-        if (start != .none and end != .none and step != .none) {
+        if (start != null_node and end != null_node and step != null_node) {
             return p.addCond(.range_expr, colon_1.?, start, &.{ end, step });
-        } else if (start == .none) {
+        } else if (start == null_node) {
             return p.addBin(.range_expr_start, colon_1.?, end, step);
-        } else if (end == .none) {
+        } else if (end == null_node) {
             return p.addBin(.range_expr_end, colon_1.?, start, step);
         } else {
             return p.addBin(.range_expr_step, colon_1.?, start, end);
@@ -650,7 +652,7 @@ pub const Parser = struct {
                 const args = try p.listParser(skip_nl, level, expr, .r_paren, lhs);
                 switch (args.len) {
                     0 => unreachable, // we pass lhs as first
-                    1 => lhs = try p.addBin(.call_expr_one, tok, lhs, .none),
+                    1 => lhs = try p.addBin(.call_expr_one, tok, lhs, null_node),
                     2 => lhs = try p.addBin(.call_expr_one, tok, lhs, args[1]),
                     else => lhs = try p.addList(.call_expr, tok, args),
                 }
@@ -684,14 +686,14 @@ pub const Parser = struct {
     fn primaryExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
         const tok = p.nextToken(skip_nl);
         switch (p.tok_ids[tok]) {
-            .identifier => return p.addUn(.decl_ref_expr, tok, .none),
-            .string => return p.addUn(.string_expr, tok, .none),
-            .number => return p.addUn(.num_expr, tok, .none),
-            .integer => return p.addUn(.int_expr, tok, .none),
-            .keyword_true => return p.addUn(.true_expr, tok, .none),
-            .keyword_false => return p.addUn(.false_expr, tok, .none),
-            .keyword_null => return p.addUn(.null_expr, tok, .none),
-            .keyword_this => return p.addUn(.this_expr, tok, .none),
+            .identifier => return p.addUn(.decl_ref_expr, tok, null_node),
+            .string => return p.addUn(.string_expr, tok, null_node),
+            .number => return p.addUn(.num_expr, tok, null_node),
+            .integer => return p.addUn(.int_expr, tok, null_node),
+            .keyword_true => return p.addUn(.true_expr, tok, null_node),
+            .keyword_false => return p.addUn(.false_expr, tok, null_node),
+            .keyword_null => return p.addUn(.null_expr, tok, null_node),
+            .keyword_this => return p.addUn(.this_expr, tok, null_node),
             .keyword_error => {
                 p.skipNl();
                 const init = (try p.initializer(skip_nl, level)) orelse
@@ -710,7 +712,7 @@ pub const Parser = struct {
                 _ = try p.expectToken(.l_paren, .skip_nl);
                 const str = try p.expectToken(.string, .skip_nl);
                 _ = try p.expectToken(.r_paren, skip_nl);
-                return p.addUn(.import_expr, str, .none);
+                return p.addUn(.import_expr, str, null_node);
             },
             else => {
                 p.tok_i = tok;
@@ -757,7 +759,7 @@ pub const Parser = struct {
             .token = first,
             .data = .{ .format = .{ .fmt_start = fmt_start, .args_start = args_start } },
         });
-        return @intToEnum(Node.Index, index);
+        return @intCast(Node.Index, index);
     }
 
     /// initializer
@@ -769,16 +771,16 @@ pub const Parser = struct {
         if (p.eatToken(.l_brace, .skip_nl)) |tok| {
             const elems = try p.listParser(skip_nl, level, mapItem, .r_brace, null);
             switch (elems.len) {
-                0 => return try p.addBin(.map_expr_two, tok, .none, .none),
-                1 => return try p.addBin(.map_expr_two, tok, elems[0], .none),
+                0 => return try p.addBin(.map_expr_two, tok, null_node, null_node),
+                1 => return try p.addBin(.map_expr_two, tok, elems[0], null_node),
                 2 => return try p.addBin(.map_expr_two, tok, elems[0], elems[1]),
                 else => return try p.addList(.map_expr, tok, elems),
             }
         } else if (p.eatToken(.l_bracket, .skip_nl)) |tok| {
             const elems = try p.listParser(skip_nl, level, expr, .r_bracket, null);
             switch (elems.len) {
-                0 => return try p.addBin(.list_expr_two, tok, .none, .none),
-                1 => return try p.addBin(.list_expr_two, tok, elems[0], .none),
+                0 => return try p.addBin(.list_expr_two, tok, null_node, null_node),
+                1 => return try p.addBin(.list_expr_two, tok, elems[0], null_node),
                 2 => return try p.addBin(.list_expr_two, tok, elems[0], elems[1]),
                 else => return try p.addList(.list_expr, tok, elems),
             }
@@ -796,8 +798,8 @@ pub const Parser = struct {
 
             const elems = try p.listParser(skip_nl, level, expr, .r_paren, first);
             switch (elems.len) {
-                0 => return try p.addBin(.tuple_expr_two, tok, .none, .none),
-                1 => return try p.addBin(.tuple_expr_two, tok, elems[0], .none),
+                0 => return try p.addBin(.tuple_expr_two, tok, null_node, null_node),
+                1 => return try p.addBin(.tuple_expr_two, tok, elems[0], null_node),
                 2 => return try p.addBin(.tuple_expr_two, tok, elems[0], elems[1]),
                 else => return try p.addList(.tuple_expr, tok, elems),
             }
@@ -807,7 +809,7 @@ pub const Parser = struct {
     /// expr ("=" expr)?
     fn mapItem(p: *Parser, _: SkipNl, level: u8) Error!Node.Index {
         var tok = p.tok_i;
-        var key: Node.Index = .none;
+        var key: Node.Index = null_node;
         var value = try p.expr(.skip_nl, level);
         if (p.eatToken(.equal, .skip_nl)) |eq| {
             tok = eq;
@@ -848,18 +850,18 @@ pub const Parser = struct {
     fn ifExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!?Node.Index {
         const tok = p.eatToken(.keyword_if, .skip_nl) orelse return null;
         const let = p.eatToken(.keyword_let, .skip_nl);
-        const dest = if (let) |_| try p.destructuring(.skip_nl, level) else .none;
+        const dest = if (let) |_| try p.destructuring(.skip_nl, level) else null_node;
         if (let) |_| _ = try p.expectToken(.equal, .skip_nl);
         const cond = try p.expr(.keep_nl, level);
         const then_body = try p.blockOrExpr(skip_nl, level);
         const @"else" = p.eatTokenNoNl(.keyword_else);
-        const else_body = if (@"else") |_| try p.blockOrExpr(skip_nl, level) else .none;
+        const else_body = if (@"else") |_| try p.blockOrExpr(skip_nl, level) else null_node;
 
-        if (dest == .none and else_body == .none) {
+        if (dest == null_node and else_body == null_node) {
             return try p.addBin(.if_expr, tok, cond, then_body);
-        } else if (dest == .none) {
+        } else if (dest == null_node) {
             return try p.addCond(.if_else_expr, tok, cond, &.{ then_body, else_body });
-        } else if (else_body == .none) {
+        } else if (else_body == null_node) {
             return try p.addCond(.if_let_expr, tok, cond, &.{ dest, then_body });
         } else {
             return try p.addCond(.if_let_else_expr, tok, cond, &.{ dest, then_body, else_body });
@@ -870,12 +872,12 @@ pub const Parser = struct {
     fn whileExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!?Node.Index {
         const tok = p.eatToken(.keyword_while, .skip_nl) orelse return null;
         const let = p.eatToken(.keyword_let, .skip_nl);
-        const dest = if (let) |_| try p.destructuring(.skip_nl, level) else .none;
+        const dest = if (let) |_| try p.destructuring(.skip_nl, level) else null_node;
         if (let) |_| _ = try p.expectToken(.equal, .skip_nl);
         const cond = try p.expr(.keep_nl, level);
         const body = try p.blockOrExpr(skip_nl, level);
 
-        if (dest == .none) {
+        if (dest == null_node) {
             return try p.addBin(.while_expr, tok, cond, body);
         } else {
             return try p.addCond(.while_let_expr, tok, cond, &.{ dest, body });
@@ -886,12 +888,12 @@ pub const Parser = struct {
     fn forExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!?Node.Index {
         const tok = p.eatToken(.keyword_for, .skip_nl) orelse return null;
         const let = p.eatToken(.keyword_let, .skip_nl);
-        const dest = if (let) |_| try p.destructuring(.skip_nl, level) else .none;
+        const dest = if (let) |_| try p.destructuring(.skip_nl, level) else null_node;
         if (let) |_| _ = try p.expectToken(.keyword_in, .skip_nl);
         const cond = try p.expr(.keep_nl, level);
         const body = try p.blockOrExpr(skip_nl, level);
 
-        if (dest == .none) {
+        if (dest == null_node) {
             return try p.addBin(.for_expr, tok, cond, body);
         } else {
             return try p.addCond(.for_let_expr, tok, cond, &.{ dest, body });
@@ -989,7 +991,7 @@ pub const Parser = struct {
         const catches = p.node_buf.items[node_buf_top..];
         switch (catches.len) {
             0 => unreachable,
-            1 => return try p.addBin(.try_one_expr, tok, body, .none),
+            1 => return try p.addBin(.try_one_expr, tok, body, null_node),
             2 => return try p.addBin(.try_one_expr, tok, body, catches[1]),
             else => return try p.addList(.try_expr, tok, catches),
         }

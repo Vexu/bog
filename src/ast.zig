@@ -63,7 +63,7 @@ pub const Node = struct {
 
     pub const List = std.MultiArrayList(Node);
 
-    pub const Index = enum(u32) { none = 0, _ };
+    pub const Index = u32;
 
     pub const Id = enum(u8) {
         /// let lhs = rhs
@@ -102,9 +102,9 @@ pub const Node = struct {
 
         // statements
 
-        /// NL lhs NL rhs NL, lhs and rhs may be omitted
-        block_stmt,
         /// NL extra[start..end] NL
+        block_stmt,
+        /// NL lhs NL rhs NL, rhs may be omitted
         block_stmt_two,
 
         // assignment expressions
@@ -146,7 +146,7 @@ pub const Node = struct {
         continue_expr,
         /// throw un
         throw_expr,
-        /// fn (extra[start..end-1]) extra[end-1]
+        /// fn (extra[start..end-1]) extra[end]
         fn_expr,
         /// fn (lhs) rhs, lhs may be omitted
         fn_expr_one,
