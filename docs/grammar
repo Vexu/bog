@@ -7,13 +7,12 @@ decl_or_export
 decl
     : import STRING import_suffix?
     | "let" destructuring "=" block_or_expr
-    | "type" IDENTIFIER "=" type
-    | "fn" IDENTIFIER "(" (destructuring ",")* destructuring? ")" (":" type)? block_or_expr
+    | "fn" IDENTIFIER "(" (destructuring ",")* destructuring? ")" block_or_expr
 
 import_suffix : IDENTIFIER ("." IDENTIFIER)* ("," IDENTIFIER ("." IDENTIFIER)*)*
 
 destructuring
-    : "mut"? IDENTIFIER (":" type)?
+    : "mut"? IDENTIFIER
     | "_"
     | IDENTIFIER compound_destructuring
     | "error" compound_destructuring
@@ -25,27 +24,6 @@ compound_destructuring
     | "(" destructuring ("," destructuring)* ","? ")"
     | "[" destructuring ("," destructuring)* ","? "]"
     | "{" destructuring ("," destructuring)* ","? "}"
-
-type
-    : "any"
-    | "never"
-    | "none"
-    | "int"
-    | "num"
-    | "bool"
-    | "str"
-    | "range"
-    | "unique" type
-    | type ("|" type)+
-    | "fn" "(" type ("," type)* ","? ")" (":" type)?
-    | "error" compound_type
-    | "enum" IDENTIFIER compound_type ("," IDENTIFIER compound_type)*
-    
-compound_type
-    : "(" type ")"
-    | "(" type ("," type)* "," ")"
-    | "[" type "]"
-    | "{" type "=" type "}"
 
 stmt
     : decl
@@ -64,7 +42,7 @@ expr
 
 jump_expr : "return" block_or_expr? | "break" | "continue" | "throw" block_or_expr
 
-lambda : "fn" "(" (destructuring ",")* destructuring? ")" (":" type)? block_or_expr
+lambda : "fn" "(" (destructuring ",")* destructuring? ")" block_or_expr
 
 bool_expr
     : "not" comparison_expr
@@ -73,7 +51,9 @@ bool_expr
 
 comparison_expr
     : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in") range_expr)?
-    | range_expr ("is" type)?
+    | range_expr ("is" type_name)?
+
+type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
 
 range_expr : bit_expr? (":" bit_expr? (":" bit_expr)?)?
 
@@ -85,7 +65,7 @@ add_expr : mul_expr (("-" | "+") mul_expr)*
 
 mul_expr : cast_expr (("*" | "/" | "//" | "%") cast_expr)*
 
-cast_expr : prefix_expr ("as" type)?
+cast_expr : prefix_expr ("as" type_name)?
 
 prefix_expr : ("-" | "+" | "~")? power_expr
 

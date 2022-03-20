@@ -8,7 +8,7 @@ const Tree = bog.Tree;
 const Node = bog.Node;
 
 /// file : (decl_or_export NL)* EOF
-pub fn parse(gpa: *Allocator, source: []const u8, errors: *bog.Errors) (Parser.Error || bog.Tokenizer.Error)!Tree {
+pub fn parse(gpa: Allocator, source: []const u8, errors: *bog.Errors) (Parser.Error || bog.Tokenizer.Error)!Tree {
     var tokens = try bog.tokenize(gpa, source, errors);
     errdefer tokens.deinit(gpa);
 
@@ -49,7 +49,7 @@ pub fn parse(gpa: *Allocator, source: []const u8, errors: *bog.Errors) (Parser.E
 pub fn parseRepl(repl: *@import("repl.zig").Repl) Parser.Error!?Node.Index {
     var parser = Parser{
         .errors = &repl.vm.errors,
-        .tok_ids = rep.tokenizer.tokens.items(.id),
+        .tok_ids = repl.tokenizer.tokens.items(.id),
         .tok_i = repl.tok_i,
     };
     defer repl.tok_i = @intCast(u32, parser.tok_ids.len - 1);
@@ -93,6 +93,16 @@ pub const Parser = struct {
         return @intToEnum(Node.Index, index);
     }
 
+    fn addTyBin(p: *Parser, id: Node.Id, token: Token.Index, lhs: Node.Index, ty_name: Token.Index) !Node.Index {
+        const index = p.nodes.len;
+        try p.nodes.append(p.extra.allocator, .{
+            .id = id,
+            .token = token,
+            .data = .{ .ty_bin = .{ .lhs = lhs, .rhs = ty_name } },
+        });
+        return @intToEnum(Node.Index, index);
+    }
+
     fn addList(p: *Parser, id: Node.Id, token: Token.Index, nodes: []const Node.Index) Allocator.Error!Node.Index {
         const start = @intCast(u32, p.extra.items.len);
         try p.extra.appendSlice(nodes);
@@ -124,19 +134,18 @@ pub const Parser = struct {
     ///     | decl
     fn declOrExport(p: *Parser) Error!Node.Index {
         const export_tok = p.eatToken(.keyword_export, .skip_nl);
-        const decl = (try p.decl(0)) orelse
+        const decl_node = (try p.decl(0)) orelse
             return p.reportErr("expected a declaration", p.tok_i);
         if (export_tok) |some| {
-            return p.addUn(.export_decl, some, decl);
+            return p.addUn(.export_decl, some, decl_node);
         }
-        return decl;
+        return decl_node;
     }
 
     /// decl
     ///     : import STRING import_suffix?
     ///     | "let" destructuring "=" block_or_expr
-    ///     | "type" IDENTIFIER "=" type
-    ///     | "fn" IDENTIFIER "(" (destructuring ",")* destructuring? ")" (":" type)? block_or_expr
+    ///     | "fn" IDENTIFIER "(" (destructuring ",")* destructuring? ")" block_or_expr
     fn decl(p: *Parser, level: u8) Error!?Node.Index {
         switch (p.tok_ids[p.tok_i]) {
             .keyword_import => {
@@ -150,13 +159,6 @@ pub const Parser = struct {
                 const init = try p.blockOrExpr(.keep_nl, level);
                 return try p.addBin(.let_decl, let_tok, dest, init);
             },
-            .keyword_type => {
-                p.tok_i += 1;
-                const name = try p.expectToken(.identifier, .skip_nl);
-                _ = try p.expectToken(.equal, .keep_nl);
-                const init = try p.Type(.skip_nl, level);
-                return try p.addUn(.type_decl, name, init);
-            },
             .keyword_fn => {
                 @panic("TODO fn decl");
             },
@@ -165,7 +167,7 @@ pub const Parser = struct {
     }
 
     /// destructuring
-    ///     : "mut"? IDENTIFIER (":" type)?
+    ///     : "mut"? IDENTIFIER
     ///     | "_"
     ///     | IDENTIFIER compound_destructuring
     ///     | "error" compound_destructuring
@@ -186,38 +188,6 @@ pub const Parser = struct {
         _ = p;
         _ = level;
         @panic("TODO compoundDestructuring");
-    }
-
-    // type
-    //     : "any"
-    //     | "never"
-    //     | "none"
-    //     | "int"
-    //     | "num"
-    //     | "bool"
-    //     | "str"
-    //     | "range"
-    //     | type ("|" type)+
-    //     | "fn" "(" type ("," type)* ","? ")" (":" type)?
-    //     | "error" compound_type
-    //     | "enum" IDENTIFIER compound_type ("," IDENTIFIER compound_type)*
-    fn Type(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
-        _ = p;
-        _ = skip_nl;
-        _ = level;
-        @panic("TODO type");
-    }
-
-    /// compound_type
-    ///     : "(" type ")"
-    ///     | "(" type ("," type)* "," ")"
-    ///     | "[" type "]"
-    ///     | "{" type "=" type "}"
-    fn compoundType(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
-        _ = p;
-        _ = skip_nl;
-        _ = level;
-        @panic("TODO compoundType");
     }
 
     /// stmt
@@ -384,7 +354,7 @@ pub const Parser = struct {
 
     /// comparison_expr
     ///     : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in") range_expr)?
-    ///     | range_expr ("is" type)?
+    ///     | range_expr ("is" type_name)?
     fn comparisonExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
         const lhs = try p.rangeExpr(skip_nl, level);
 
@@ -401,12 +371,20 @@ pub const Parser = struct {
             .equal_equal => return p.addBin(.equal_expr, tok, lhs, try p.rangeExpr(skip_nl, level)),
             .bang_equal => return p.addBin(.not_equal_expr, tok, lhs, try p.rangeExpr(skip_nl, level)),
             .keyword_in => return p.addBin(.in_expr, tok, lhs, try p.rangeExpr(skip_nl, level)),
-            .keyword_is => return p.addBin(.is_expr, tok, lhs, try p.Type(skip_nl, level)),
+            .keyword_is => return p.addTyBin(.is_expr, tok, lhs, try p.typeName(skip_nl)),
             else => {
                 p.tok_i = start;
                 return lhs;
             },
         }
+    }
+
+    /// type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
+    fn typeName(p: *Parser, skip_nl: SkipNl) Error!Token.Index {
+        return p.eatToken(.keyword_error, skip_nl) orelse
+            p.eatToken(.keyword_fn, skip_nl) orelse
+            p.eatToken(.identifier, skip_nl) orelse
+            p.reportErr("expected type name", p.tok_i);
     }
 
     /// range_expr : bit_expr? (":" bit_expr? (":" bit_expr)?)?
@@ -559,13 +537,13 @@ pub const Parser = struct {
         return lhs;
     }
 
-    /// cast_expr : prefix_expr ("as" type)?
+    /// cast_expr : prefix_expr ("as" type_name)?
     fn castExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
         var lhs = try p.prefixExpr(skip_nl, level);
 
         if (p.eatTokenNoNl(.keyword_as)) |tok| {
             p.skipNl();
-            lhs = try p.addBin(.as_expr, tok, lhs, try p.Type(skip_nl, level));
+            lhs = try p.addTyBin(.as_expr, tok, lhs, try p.typeName(skip_nl));
         }
 
         return lhs;

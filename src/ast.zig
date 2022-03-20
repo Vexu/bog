@@ -89,31 +89,6 @@ pub const Node = struct {
         mut_ident_dest,
         /// _
         discard_dest,
-        /// token un
-        enum_dest,
-
-        // types
-
-        /// any
-        any_type,
-        /// never
-        never_type,
-        /// none
-        none_type,
-        /// int
-        int_type,
-        /// num
-        num_type,
-        /// bool
-        bool_type,
-        /// str
-        str_type,
-        /// range[start] | range[start + 1] | ... | range[end]
-        union_type,
-        /// lhs | rhs
-        union_type_two,
-        /// enum 
-        enum_type,
 
         // statements
 
