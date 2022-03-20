@@ -991,8 +991,8 @@ pub const Parser = struct {
         const catches = p.node_buf.items[node_buf_top..];
         switch (catches.len) {
             0 => unreachable,
-            1 => return try p.addBin(.try_one_expr, tok, body, null_node),
-            2 => return try p.addBin(.try_one_expr, tok, body, catches[1]),
+            1 => return try p.addBin(.try_expr_one, tok, body, null_node),
+            2 => return try p.addBin(.try_expr_one, tok, body, catches[1]),
             else => return try p.addList(.try_expr, tok, catches),
         }
     }

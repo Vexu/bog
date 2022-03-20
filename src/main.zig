@@ -201,15 +201,13 @@ fn fmtFile(gpa: std.mem.Allocator, name: []const u8) FmtError!bool {
     };
     defer tree.deinit(gpa);
 
-    if (true) {
-        @panic("TODO render tree");
-    }
-
     const file = try std.fs.cwd().createFile(name, .{});
     defer file.close();
 
     // TODO add check mode
-    _ = try tree.render(file.writer());
+    var buf_writer = std.io.bufferedWriter(file.writer());
+    _ = try tree.render(buf_writer.writer());
+    try buf_writer.flush();
     return false;
 }
 

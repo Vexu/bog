@@ -10,9 +10,8 @@ const parser = @import("parser.zig");
 pub const Parser = parser.Parser;
 pub const parse = parser.parse;
 
-const ast = @import("ast.zig");
-pub const Tree = ast.Tree;
-pub const Node = ast.Node;
+pub const Tree = @import("Tree.zig");
+pub const Node = Tree.Node;
 
 const compiler = @import("compiler.zig");
 pub const Compiler = compiler.Compiler;
