@@ -32,6 +32,10 @@ pub const Node = struct {
             lhs: Index,
             rhs: Index,
         },
+        ty_bin: struct {
+            lhs: Index,
+            rhs: Token.Index,
+        },
         range: struct {
             start: u32,
             end: u32,
@@ -83,12 +87,34 @@ pub const Node = struct {
 
         // destructuring
 
-        /// token: un, un may be omitted
+        /// token
         ident_dest,
-        /// mut token: un, un may be omitted
+        /// mut token
         mut_ident_dest,
         /// _
         discard_dest,
+        /// error un, un may be omitted
+        error_dest,
+        /// ( extra[start..end])
+        tuple_dest,
+        /// (lhr, rhs) rhs may be omitted
+        tuple_dest_two,
+        /// [extra[start..end]]
+        list_dest,
+        /// [lhs, rhs] both may be omitted
+        list_dest_two,
+        /// { extra[start..end] }
+        map_dest,
+        /// { lhs, rhs } both may be omitted
+        map_dest_two,
+        /// cond : extra[0] : extra[1]
+        range_dest,
+        /// : lhs : rhs
+        range_dest_start,
+        /// lhs : : rhs
+        range_dest_end,
+        /// lhs : rhs :
+        range_dest_step,
 
         // statements
 
@@ -180,6 +206,8 @@ pub const Node = struct {
         error_expr,
         /// @token un, un may be omitted
         enum_expr,
+        /// import(token)
+        import_expr,
         /// lhs[rhs]
         array_access_expr,
         /// lhs.token
@@ -266,9 +294,9 @@ pub const Node = struct {
         not_equal_expr,
         /// lhs in rhs
         in_expr,
-        /// lhs is rhs
+        /// lhs is type name
         is_expr,
-        /// lhs as rhs
+        /// lhs as type name
         as_expr,
         /// lhs & rhs
         bit_and_expr,

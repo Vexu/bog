@@ -5,11 +5,8 @@ decl_or_export
     | decl
 
 decl
-    : import STRING import_suffix?
-    | "let" destructuring "=" block_or_expr
+    : "let" destructuring "=" block_or_expr
     | "fn" IDENTIFIER "(" (destructuring ",")* destructuring? ")" block_or_expr
-
-import_suffix : IDENTIFIER ("." IDENTIFIER)* ("," IDENTIFIER ("." IDENTIFIER)*)*
 
 destructuring
     : "mut"? IDENTIFIER
@@ -88,6 +85,7 @@ primary_expr
     | initializer
     | "error" initializer?
     | "@" IDENTIFIER initializer?
+    | "import" "(" STRING ")"
     | if
     | while
     | for
