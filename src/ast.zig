@@ -76,13 +76,9 @@ pub const Node = struct {
         let_decl,
         /// type token = un
         type_decl,
-        /// fn token(extra[start..end-2]): extra[end-1] extra[end-2]
-        fn_decl,
         /// fn token(extra[start..end-1]) extra[end-1]
-        fn_decl_ret,
-        /// fn token(): lhs rhs
-        fn_decl_zero,
-        /// fn token(lhs) rhs
+        fn_decl,
+        /// fn token(lhs) rhs, lhs may be omitted
         fn_decl_one,
 
         // destructuring
@@ -162,13 +158,9 @@ pub const Node = struct {
         continue_expr,
         /// throw un
         throw_expr,
-        /// fn(extra[start..end-2]): extra[end-1] extra[end-2]
+        /// fn (extra[start..end-1]) extra[end-1]
         lambda_expr,
-        /// fn(extra[start..end-1]) extra[end-1]
-        lambda_expr_ret,
-        /// fn(): lhs rhs
-        lambda_expr_zero,
-        /// fn(lhs) rhs
+        /// fn (lhs) rhs, lhs may be omitted
         lambda_expr_one,
         /// ( data.un )
         paren_expr,

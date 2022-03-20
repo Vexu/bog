@@ -155,9 +155,7 @@ pub const Parser = struct {
                 const init = try p.blockOrExpr(.keep_nl, level);
                 return try p.addBin(.let_decl, let_tok, dest, init);
             },
-            .keyword_fn => {
-                @panic("TODO fn decl");
-            },
+            .keyword_fn => return try p.func(.keep_nl, level, true),
             else => return null,
         }
     }
@@ -257,6 +255,38 @@ pub const Parser = struct {
         } else return null;
     }
 
+    /// func: "fn" IDENTIFIER? "(" (destructuring ",")* destructuring? ")" block_or_expr
+    fn func(p: *Parser, skip_nl: SkipNl, level: u8, identifier: bool) Error!?Node.Index {
+        var tok = p.eatToken(.keyword_fn, .skip_nl) orelse return null;
+        if (identifier) tok = try p.expectToken(.identifier, .skip_nl);
+
+        _ = try p.expectToken(.l_paren, .skip_nl);
+
+        const node_buf_top = p.node_buf.items.len;
+        defer p.node_buf.items.len = node_buf_top;
+        const params = try p.listParser(.keep_nl, level, destructuring, .r_paren, null);
+        p.node_buf.items.len += params.len;
+
+        const body = try p.blockOrExpr(skip_nl, level);
+        try p.node_buf.append(body);
+
+        if (identifier) {
+            return switch (params.len) {
+                0 => unreachable, // body is always added to the list
+                1 => try p.addBin(.fn_decl_one, tok, .none, body),
+                2 => try p.addBin(.fn_decl_one, tok, params[0], body),
+                else => try p.addList(.fn_decl, tok, params),
+            };
+        } else {
+            return switch (params.len) {
+                0 => unreachable, // body is always added to the list
+                1 => try p.addBin(.lambda_expr_one, tok, .none, body),
+                2 => try p.addBin(.lambda_expr_one, tok, params[0], body),
+                else => try p.addList(.lambda_expr, tok, params),
+            };
+        }
+    }
+
     /// stmt
     ///     : decl
     ///     | assign_expr
@@ -353,9 +383,10 @@ pub const Parser = struct {
     ///     : jump_expr
     ///     | lambda
     ///     | bool_expr
+    /// lambda : "fn" "(" (bool_expr ",")* bool_expr? ")" block_or_expr
     fn expr(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
         if (try p.jumpExpr(skip_nl, level)) |node| return node;
-        if (try p.lambda(skip_nl, level)) |node| return node;
+        if (try p.func(skip_nl, level, false)) |node| return node;
         return p.boolExpr(skip_nl, level);
     }
 
@@ -382,14 +413,6 @@ pub const Parser = struct {
             .none;
 
         return try p.addUn(id, tok, op);
-    }
-
-    /// lambda : "fn" "(" (bool_expr ",")* bool_expr? ")" block_or_expr
-    fn lambda(p: *Parser, skip_nl: SkipNl, level: u8) Error!?Node.Index {
-        _ = p;
-        _ = skip_nl;
-        _ = level;
-        @panic("TODO lambda");
     }
 
     /// bool_expr
