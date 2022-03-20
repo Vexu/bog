@@ -7,7 +7,7 @@ const Token = bog.Token;
 const Tree = bog.Tree;
 const Node = bog.Node;
 
-/// file : (decl_or_export NL)* EOF
+/// root : (stmt NL)* EOF
 pub fn parse(gpa: Allocator, source: []const u8, errors: *bog.Errors) (Parser.Error || bog.Tokenizer.Error)!Tree {
     var tokens = try bog.tokenize(gpa, source, errors);
     errdefer tokens.deinit(gpa);
@@ -30,7 +30,7 @@ pub fn parse(gpa: Allocator, source: []const u8, errors: *bog.Errors) (Parser.Er
     while (true) {
         _ = try parser.eatIndent(0);
         if (parser.eatToken(.eof, .keep_nl)) |_| break;
-        try parser.node_buf.append(try parser.declOrExport());
+        try parser.node_buf.append(try parser.stmt(0));
         _ = parser.eatToken(.nl, .keep_nl) orelse {
             _ = try parser.expectToken(.eof, .keep_nl);
             break;
@@ -38,7 +38,7 @@ pub fn parse(gpa: Allocator, source: []const u8, errors: *bog.Errors) (Parser.Er
     }
 
     return Tree{
-        .root_decls = parser.node_buf.toOwnedSlice(),
+        .root_nodes = parser.node_buf.toOwnedSlice(),
         .tokens = tokens,
         .extra = parser.extra.toOwnedSlice(),
         .nodes = parser.nodes,
@@ -129,35 +129,13 @@ pub const Parser = struct {
         return @intToEnum(Node.Index, index);
     }
 
-    /// decl_or_export
-    ///     : "export" decl
-    ///     | decl
-    fn declOrExport(p: *Parser) Error!Node.Index {
-        const export_tok = p.eatToken(.keyword_export, .skip_nl);
-        const decl_node = (try p.decl(0)) orelse
-            return p.reportErr("expected a declaration", p.tok_i);
-        if (export_tok) |some| {
-            return p.addUn(.export_decl, some, decl_node);
-        }
-        return decl_node;
-    }
-
-    /// decl
-    ///     : "let" destructuring "=" block_or_expr
-    ///     | "fn" IDENTIFIER "(" (destructuring ",")* destructuring? ")" block_or_expr
+    /// decl : "let" destructuring "=" block_or_expr
     fn decl(p: *Parser, level: u8) Error!?Node.Index {
-        switch (p.tok_ids[p.tok_i]) {
-            .keyword_let => {
-                const let_tok = p.tok_i;
-                p.tok_i += 1;
-                const dest = try p.destructuring(.skip_nl, level);
-                _ = try p.expectToken(.equal, .keep_nl);
-                const init = try p.blockOrExpr(.keep_nl, level);
-                return try p.addBin(.let_decl, let_tok, dest, init);
-            },
-            .keyword_fn => return try p.func(.keep_nl, level, true),
-            else => return null,
-        }
+        const let_tok = p.eatToken(.keyword_let, .skip_nl) orelse return null;
+        const dest = try p.destructuring(.skip_nl, level);
+        _ = try p.expectToken(.equal, .keep_nl);
+        const init = try p.blockOrExpr(.keep_nl, level);
+        return try p.addBin(.decl, let_tok, dest, init);
     }
 
     /// destructuring
@@ -255,11 +233,9 @@ pub const Parser = struct {
         } else return null;
     }
 
-    /// func: "fn" IDENTIFIER? "(" (destructuring ",")* destructuring? ")" block_or_expr
-    fn func(p: *Parser, skip_nl: SkipNl, level: u8, identifier: bool) Error!?Node.Index {
-        var tok = p.eatToken(.keyword_fn, .skip_nl) orelse return null;
-        if (identifier) tok = try p.expectToken(.identifier, .skip_nl);
-
+    /// fn: "fn" "(" (destructuring ",")* destructuring? ")" block_or_expr
+    fn func(p: *Parser, skip_nl: SkipNl, level: u8) Error!?Node.Index {
+        const fn_tok = p.eatToken(.keyword_fn, .skip_nl) orelse return null;
         _ = try p.expectToken(.l_paren, .skip_nl);
 
         const node_buf_top = p.node_buf.items.len;
@@ -270,21 +246,12 @@ pub const Parser = struct {
         const body = try p.blockOrExpr(skip_nl, level);
         try p.node_buf.append(body);
 
-        if (identifier) {
-            return switch (params.len) {
-                0 => unreachable, // body is always added to the list
-                1 => try p.addBin(.fn_decl_one, tok, .none, body),
-                2 => try p.addBin(.fn_decl_one, tok, params[0], body),
-                else => try p.addList(.fn_decl, tok, params),
-            };
-        } else {
-            return switch (params.len) {
-                0 => unreachable, // body is always added to the list
-                1 => try p.addBin(.lambda_expr_one, tok, .none, body),
-                2 => try p.addBin(.lambda_expr_one, tok, params[0], body),
-                else => try p.addList(.lambda_expr, tok, params),
-            };
-        }
+        return switch (params.len) {
+            0 => unreachable, // body is always added to the list
+            1 => try p.addBin(.fn_expr_one, fn_tok, .none, body),
+            2 => try p.addBin(.fn_expr_one, fn_tok, params[0], body),
+            else => try p.addList(.fn_expr, fn_tok, params),
+        };
     }
 
     /// stmt
@@ -383,10 +350,9 @@ pub const Parser = struct {
     ///     : jump_expr
     ///     | lambda
     ///     | bool_expr
-    /// lambda : "fn" "(" (bool_expr ",")* bool_expr? ")" block_or_expr
     fn expr(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
         if (try p.jumpExpr(skip_nl, level)) |node| return node;
-        if (try p.func(skip_nl, level, false)) |node| return node;
+        if (try p.func(skip_nl, level)) |node| return node;
         return p.boolExpr(skip_nl, level);
     }
 

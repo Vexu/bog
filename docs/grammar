@@ -1,12 +1,10 @@
-file : (decl_or_export NL)* EOF
+root : (stmt NL)* EOF
 
-decl_or_export
-    : "export" decl
-    | decl
+stmt
+    : decl
+    | assign_expr
 
-decl
-    : "let" destructuring "=" block_or_expr
-    | "fn" IDENTIFIER "(" (destructuring ",")* destructuring? ")" block_or_expr
+decl : "let" destructuring "=" block_or_expr
 
 destructuring
     : "mut"? IDENTIFIER
@@ -22,10 +20,6 @@ compound_destructuring
     | "[" destructuring ("," destructuring)* ","? "]"
     | "{" destructuring ("," destructuring)* ","? "}"
 
-stmt
-    : decl
-    | assign_expr
-
 assign_expr : expr (("=" | "+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") block_or_expr)?
 
 block_or_expr : block | expr
@@ -34,12 +28,12 @@ block : NL (stmt NL)+
 
 expr
     : jump_expr
-    | lambda
+    | fn
     | bool_expr
 
 jump_expr : "return" block_or_expr? | "break" | "continue" | "throw" block_or_expr
 
-lambda : "fn" "(" (destructuring ",")* destructuring? ")" block_or_expr
+fn : "fn" "(" (destructuring ",")* destructuring? ")" block_or_expr
 
 bool_expr
     : "not" comparison_expr

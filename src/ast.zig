@@ -8,16 +8,16 @@ pub const Tree = struct {
     tokens: Token.List,
     nodes: Node.List,
     extra: []Node.Index,
-    root_decls: []Node.Index,
+    root_nodes: []Node.Index,
 
     /// not owned by the tree
     source: []const u8,
 
-    pub fn deinit(tree: *Tree, gpa: *Allocator) void {
+    pub fn deinit(tree: *Tree, gpa: Allocator) void {
         tree.tokens.deinit(gpa);
         tree.nodes.deinit(gpa);
         gpa.free(tree.extra);
-        gpa.free(tree.root_decls);
+        gpa.free(tree.root_nodes);
     }
 
     pub const render = @import("render.zig").render;
@@ -26,7 +26,9 @@ pub const Tree = struct {
 pub const Node = struct {
     id: Id,
     token: Token.Index,
-    data: union {
+    data: Data,
+
+    pub const Data = union {
         un: Index,
         bin: struct {
             lhs: Index,
@@ -57,29 +59,15 @@ pub const Node = struct {
                 return extra[f.args_start..][0 .. f.args_start - f.fmt_start - 1];
             }
         },
-    },
+    };
 
     pub const List = std.MultiArrayList(Node);
 
     pub const Index = enum(u32) { none = 0, _ };
 
     pub const Id = enum(u8) {
-        // declarations
-
-        /// export un
-        export_decl,
-        /// import extra[start] extra[start+1..end]
-        import_decl,
-        /// import lhs rhs, rhs may be omitted
-        import_decl_one,
         /// let lhs = rhs
-        let_decl,
-        /// type token = un
-        type_decl,
-        /// fn token(extra[start..end-1]) extra[end-1]
-        fn_decl,
-        /// fn token(lhs) rhs, lhs may be omitted
-        fn_decl_one,
+        decl,
 
         // destructuring
 
@@ -159,9 +147,9 @@ pub const Node = struct {
         /// throw un
         throw_expr,
         /// fn (extra[start..end-1]) extra[end-1]
-        lambda_expr,
+        fn_expr,
         /// fn (lhs) rhs, lhs may be omitted
-        lambda_expr_one,
+        fn_expr_one,
         /// ( data.un )
         paren_expr,
         /// ( extra[start..end])

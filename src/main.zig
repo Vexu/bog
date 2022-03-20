@@ -199,7 +199,7 @@ fn fmtFile(gpa: std.mem.Allocator, name: []const u8) FmtError!bool {
         },
         error.OutOfMemory => return error.OutOfMemory,
     };
-    defer tree.deinit();
+    defer tree.deinit(gpa);
 
     if (true) {
         @panic("TODO render tree");
