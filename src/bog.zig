@@ -26,6 +26,8 @@ pub const Vm = vm.Vm;
 
 pub const Gc = @import("Gc.zig");
 
+pub const Bytecode = @import("Bytecode.zig");
+
 const bytecode = @import("bytecode.zig");
 pub const Op = bytecode.Op;
 pub const Module = bytecode.Module;
