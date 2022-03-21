@@ -58,7 +58,7 @@ pub const Errors = struct {
     };
 
     const List = zig_std.ArrayList(struct {
-        msg: Value.String,
+        msg: @import("String.zig"),
         index: u32,
         kind: Kind,
     });
@@ -74,7 +74,7 @@ pub const Errors = struct {
         self.list.deinit();
     }
 
-    pub fn add(self: *Errors, msg: Value.String, index: u32, kind: Kind) !void {
+    pub fn add(self: *Errors, msg: @import("String.zig"), index: u32, kind: Kind) !void {
         try self.list.append(.{
             .msg = msg,
             .index = index,

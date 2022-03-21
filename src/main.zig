@@ -201,13 +201,16 @@ fn fmtFile(gpa: std.mem.Allocator, name: []const u8) FmtError!bool {
     };
     defer tree.deinit(gpa);
 
+    var buf = std.ArrayList(u8).init(gpa);
+    defer buf.deinit();
+
+    // TODO add check mode
+    _ = try tree.render(buf.writer());
+
     const file = try std.fs.cwd().createFile(name, .{});
     defer file.close();
 
-    // TODO add check mode
-    var buf_writer = std.io.bufferedWriter(file.writer());
-    _ = try tree.render(buf_writer.writer());
-    try buf_writer.flush();
+    try file.writeAll(buf.items);
     return false;
 }
 

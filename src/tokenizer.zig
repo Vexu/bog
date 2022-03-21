@@ -267,11 +267,21 @@ pub const Token = struct {
         .{ "_", .underscore },
     });
 
-    pub fn string(id: std.meta.Tag(Id)) []const u8 {
+    pub fn string(id: Id) []const u8 {
         return switch (id) {
             .eof => "<EOF>",
             .nl => "<NL>",
-            .indent => "<INDENT>",
+            // zig fmt: off
+            .indent_1, .indent_2, .indent_3, .indent_4,
+            .indent_5, .indent_6, .indent_7, .indent_8,
+            .indent_9, .indent_10, .indent_11, .indent_12,
+            .indent_13, .indent_14, .indent_15, .indent_16,
+            .indent_17, .indent_18, .indent_19, .indent_20,
+            .indent_21, .indent_22, .indent_23, .indent_24,
+            .indent_25, .indent_26, .indent_27, .indent_28,
+            .indent_29, .indent_30, .indent_31, .indent_32,
+            // zig fmt: on
+            => "<INDENT>",
             .identifier => "Identifier",
             .string => "String",
             .integer => "Integer",
@@ -993,7 +1003,13 @@ pub const Tokenizer = struct {
                     },
                 },
                 .line_comment => switch (c) {
-                    '\n' => state = .start,
+                    '\n' => {
+                        start_index = self.it.i;
+                        state = .start;
+                        self.expect_indent = false;
+                        if (try self.getIndent()) |some|
+                            return some;
+                    },
                     else => {},
                 },
                 .zero => switch (c) {

@@ -99,6 +99,7 @@ pub fn firstToken(tree: Tree, node: Node.Index) Token.Index {
         => return toks[cur] - 1 - offset,
         .import_expr => return toks[cur] - 2 - offset,
         .call_expr => cur = tree.extra[data[cur].range.start],
+        .member_access_expr => cur = data[cur].un,
         .assign,
         .add_assign,
         .sub_assign,
@@ -114,7 +115,6 @@ pub fn firstToken(tree: Tree, node: Node.Index) Token.Index {
         .bit_x_or_assign,
         .map_item_expr,
         .array_access_expr,
-        .member_access_expr,
         .call_expr_one,
         .match_case_one,
         .range_expr_end,
@@ -163,8 +163,8 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
     const tokens = tree.nodes.items(.token);
     const ids = tree.nodes.items(.id);
     const data = tree.nodes.items(.data);
+    const tok_ids = tree.tokens.items(.id);
     var cur = node;
-    var offset: Token.Index = 0;
     while (true) switch (ids[cur]) {
         .ident_dest,
         .mut_ident_dest,
@@ -180,19 +180,16 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .break_expr,
         .continue_expr,
         .member_access_expr,
-        => return tokens[cur] + offset,
-        .import_expr => return tokens[cur] + 1 + offset,
+        => return tokens[cur],
+        .import_expr => return tree.nextToken(tokens[cur]),
         .match_case,
         .try_expr,
         .fn_expr,
         .match_expr,
         .block_stmt,
-        => cur = tree.extra[data[cur].range.end],
+        => cur = tree.extra[data[cur].range.end - 1],
         .fn_expr_one => cur = data[cur].bin.rhs,
-        .paren_expr => {
-            offset += 1;
-            cur = data[cur].un;
-        },
+        .paren_expr => return tree.nextToken(tree.lastToken(data[cur].un)),
         .tuple_expr,
         .list_expr,
         .map_expr,
@@ -201,13 +198,13 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .map_dest,
         .call_expr,
         => {
-            offset += 1;
-            cur = tree.extra[data[cur].range.end];
+            const next = tree.nextToken(tree.lastToken(tree.extra[data[cur].range.end - 1]));
+            return if (tok_ids[next] == .comma)
+                tree.nextToken(next)
+            else
+                next;
         },
-        .array_access_expr => {
-            offset += 1;
-            cur = data[cur].bin.rhs;
-        },
+        .array_access_expr => return tree.nextToken(tree.lastToken(data[cur].bin.rhs)),
         .block_stmt_two => if (data[cur].bin.rhs != 0) {
             cur = data[cur].bin.rhs;
         } else {
@@ -220,19 +217,28 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .list_dest_two,
         .map_dest_two,
         => if (data[cur].bin.rhs != 0) {
-            offset += 1;
-            cur = data[cur].bin.rhs;
+            const next = tree.nextToken(tree.lastToken(data[cur].bin.rhs));
+            return if (tok_ids[next] == .comma)
+                tree.nextToken(next)
+            else
+                next;
         } else if (data[cur].bin.lhs != 0) {
-            offset += 1;
-            cur = data[cur].bin.lhs;
+            const next = tree.nextToken(tree.lastToken(data[cur].bin.lhs));
+            return if (tok_ids[next] == .comma)
+                tree.nextToken(next)
+            else
+                next;
         } else {
-            return tokens[cur] + 1 + offset;
+            return tree.nextToken(tokens[cur]);
         },
         .call_expr_one => if (data[cur].bin.rhs != 0) {
-            offset += 1;
-            cur = data[cur].bin.rhs;
+            const next = tree.nextToken(tree.lastToken(data[cur].bin.rhs));
+            return if (tok_ids[next] == .comma)
+                tree.nextToken(next)
+            else
+                next;
         } else {
-            return tokens[cur] + 1 + offset;
+            return tree.nextToken(tokens[cur]);
         },
         .try_expr_one => if (data[cur].bin.rhs != 0) {
             cur = data[cur].bin.rhs;
@@ -241,7 +247,7 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         },
         .format_expr => {
             const strs = data[cur].format.str(tree.extra);
-            return strs[strs.len - 1] + offset;
+            return strs[strs.len - 1];
         },
         .if_let_else_expr => cur = tree.extra[data[cur].cond.extra + 1],
         .while_let_expr,
@@ -258,7 +264,7 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         => if (data[cur].un != 0) {
             cur = data[cur].un;
         } else {
-            return tokens[cur] + offset;
+            return tokens[cur];
         },
         .throw_expr,
         .bool_not_expr,
@@ -267,7 +273,7 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .plus_expr,
         .match_case_catch_all,
         => cur = data[cur].un,
-        .is_expr, .as_expr => return tokens[cur] + 1 + offset,
+        .is_expr, .as_expr => return tokens[cur],
         .decl,
         .assign,
         .add_assign,
@@ -303,12 +309,6 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .div_floor_expr,
         .mod_expr,
         .pow_expr,
-        .range_expr_start,
-        .range_expr_end,
-        .range_expr_step,
-        .range_dest_start,
-        .range_dest_end,
-        .range_dest_step,
         .match_expr_one,
         .match_case_let,
         .match_case_one,
@@ -319,6 +319,42 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .while_expr,
         .map_item_expr,
         => cur = data[cur].bin.rhs,
+        .range_expr_start,
+        .range_dest_start,
+        => if (data[cur].bin.rhs != 0) {
+            cur = data[cur].bin.rhs;
+        } else if (data[cur].bin.lhs != 0) {
+            cur = data[cur].bin.lhs;
+        } else {
+            return tokens[cur];
+        },
+        .range_expr_end,
+        .range_dest_end,
+        => if (data[cur].bin.rhs != 0) {
+            cur = data[cur].bin.rhs;
+        } else {
+            const last = tree.lastToken(data[cur].bin.lhs);
+            const next = tree.nextToken(last);
+            return if (tok_ids[next] == .colon)
+                next
+            else
+                last;
+        },
+        .range_expr_step,
+        .range_dest_step,
+        => {
+            if (data[cur].bin.rhs != 0) {
+                cur = data[cur].bin.rhs;
+            } else {
+                cur = data[cur].bin.lhs;
+            }
+            const last = tree.lastToken(cur);
+            const next = tree.nextToken(last);
+            return if (tok_ids[next] == .colon)
+                next
+            else
+                last;
+        },
     };
 }
 
@@ -663,31 +699,34 @@ pub const Range = struct {
             .start = null,
             .colon_1 = tokens[node],
             .end = null,
-            .colon_2 = tokens[node],
+            .colon_2 = null,
             .step = null,
         };
         const data = tree.nodes.items(.data);
         switch (tree.nodes.items(.id)[node]) {
             .range_expr, .range_dest => {
-                range.start = tree.extra[data[node].cond.cond];
+                range.start = data[node].cond.cond;
                 range.end = tree.extra[data[node].cond.extra];
                 range.step = tree.extra[data[node].cond.extra + 1];
                 range.colon_2 = tree.prevToken(tree.firstToken(range.step.?));
             },
             .range_expr_start, .range_dest_start => {
-                range.end = data[node].bin.lhs;
-                range.step = data[node].bin.rhs;
-                range.colon_2 = tree.prevToken(tree.firstToken(range.step.?));
+                if (data[node].bin.lhs != 0) range.end = data[node].bin.lhs;
+                if (data[node].bin.rhs != 0) range.step = data[node].bin.rhs;
+                if (range.step) |some| {
+                    range.colon_2 = tree.prevToken(tree.firstToken(some));
+                }
             },
             .range_expr_end, .range_dest_end => {
                 range.start = data[node].bin.lhs;
-                range.step = data[node].bin.rhs;
-                range.colon_2 = tree.prevToken(tree.firstToken(range.step.?));
+                if (data[node].bin.rhs != 0) range.step = data[node].bin.rhs;
+                if (range.step) |some| {
+                    range.colon_2 = tree.prevToken(tree.firstToken(some));
+                }
             },
             .range_expr_step, .range_dest_step => {
                 range.start = data[node].bin.lhs;
                 range.end = data[node].bin.rhs;
-                range.colon_2 = tree.nextToken(tree.lastToken(range.end.?));
             },
             else => unreachable,
         }
@@ -711,9 +750,9 @@ pub const For = struct {
         const data = tree.nodes.items(.data);
         if (tree.nodes.items(.id)[node] == .for_let_expr) {
             for_expr.let_tok = tree.nextToken(tokens[node]);
-            for_expr.capture = tree.extra[data[node].cond.cond];
+            for_expr.capture = tree.extra[data[node].cond.extra];
             for_expr.in_tok = tree.nextToken(tree.lastToken(for_expr.capture.?));
-            for_expr.cond = tree.extra[data[node].cond.extra];
+            for_expr.cond = data[node].cond.cond;
             for_expr.body = tree.extra[data[node].cond.extra + 1];
         } else {
             for_expr.cond = data[node].bin.lhs;
@@ -740,7 +779,7 @@ pub const While = struct {
         const data = tree.nodes.items(.data);
         if (tree.nodes.items(.id)[node] == .while_let_expr) {
             while_expr.let_tok = tree.nextToken(tokens[node]);
-            while_expr.capture = tree.extra[data[node].cond.cond];
+            while_expr.capture = data[node].cond.cond;
             while_expr.eq_tok = tree.nextToken(tree.lastToken(while_expr.capture.?));
             while_expr.cond = tree.extra[data[node].cond.extra];
             while_expr.body = tree.extra[data[node].cond.extra + 1];
@@ -778,15 +817,16 @@ pub const If = struct {
             },
             .if_else_expr => {
                 if_expr.capture = null;
-                if_expr.cond = tree.extra[data[node].cond.cond];
+                if_expr.cond = data[node].cond.cond;
                 if_expr.then_body = tree.extra[data[node].cond.extra];
+                if_expr.else_tok = tree.nextToken(tree.lastToken(if_expr.then_body));
                 if_expr.else_body = tree.extra[data[node].cond.extra + 1];
             },
             .if_let_expr => {
                 if_expr.let_tok = tree.nextToken(tokens[node]);
                 if_expr.capture = tree.extra[data[node].cond.extra];
                 if_expr.eq_tok = tree.nextToken(tree.lastToken(if_expr.capture.?));
-                if_expr.cond = tree.extra[data[node].cond.cond];
+                if_expr.cond = data[node].cond.cond;
                 if_expr.then_body = tree.extra[data[node].cond.extra + 1];
                 if_expr.else_body = null;
             },
@@ -794,7 +834,7 @@ pub const If = struct {
                 if_expr.let_tok = tree.nextToken(tokens[node]);
                 if_expr.capture = tree.extra[data[node].cond.extra];
                 if_expr.eq_tok = tree.nextToken(tree.lastToken(if_expr.capture.?));
-                if_expr.cond = tree.extra[data[node].cond.cond];
+                if_expr.cond = data[node].cond.cond;
                 if_expr.then_body = tree.extra[data[node].cond.extra + 1];
                 if_expr.else_tok = tree.nextToken(tree.lastToken(if_expr.then_body));
                 if_expr.else_body = tree.extra[data[node].cond.extra + 2];
@@ -823,12 +863,12 @@ pub fn nodeItems(tree: Tree, node: Node.Index, buf: *[2]Node.Index) []const Node
         => {
             buf[0] = data[node].bin.lhs;
             buf[1] = data[node].bin.rhs;
-            if (buf[0] == 0) {
-                return buf[0..0];
-            } else if (buf[1] == 0) {
+            if (buf[1] != 0) {
+                return buf[0..2];
+            } else if (buf[0] != 0) {
                 return buf[0..1];
             } else {
-                return buf[0..2];
+                return buf[0..0];
             }
         },
         .match_case,

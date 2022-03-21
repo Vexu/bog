@@ -55,8 +55,6 @@ test "ranges" {
         \\1:2:3
         \\:2:3
         \\::3
-        \\1:2:
-        \\1::
         \\1::3
         \\1:2
         \\1:
@@ -95,7 +93,7 @@ test "tag" {
         \\@bar(foo)
         \\@baz(2.4, "foo")
         \\@qux[1, 2]
-        \\@quux{foo: bar}
+        \\@quux{foo = bar}
         \\
     );
 }
@@ -106,16 +104,16 @@ test "different error initializations" {
         \\error(foo)
         \\error(2.4, "foo")
         \\error[1, 2]
-        \\error{foo: bar}
+        \\error{foo = bar}
         \\
     );
 }
 
 test "nested blocks and matches" {
     try testCanonical(
-        \\if (false)
-        \\    if (true)
-        \\        match (2)
+        \\if false
+        \\    if true
+        \\        match 2
         \\            true => a
         \\            false => b
         \\
@@ -139,15 +137,15 @@ test "comments after expression" {
 
 test "two empty lines after block" {
     try testTransform(
-        \\const foo = fn(a)
+        \\let foo = fn(a)
         \\    a * 4
-        \\const bar = 2
+        \\let bar = 2
     ,
-        \\const foo = fn(a)
+        \\let foo = fn(a)
         \\    a * 4
         \\
         \\
-        \\const bar = 2
+        \\let bar = 2
         \\
     );
 }
@@ -174,10 +172,10 @@ test "respect new lines" {
 
 test "nested blocks" {
     try testCanonical(
-        \\if (false)
-        \\    if (false)
+        \\if false
+        \\    if false
         \\        3
-        \\    else if (true)
+        \\    else if true
         \\        4
         \\    else
         \\        5
@@ -227,10 +225,10 @@ test "preserve comments" {
 
 test "match" {
     try testCanonical(
-        \\match (2)
+        \\match 2
         \\    let (x, 2) => x + 4
         \\    2, 3 => 1
-        \\    _ => ()
+        \\    _ => null
         \\
         \\
         \\
@@ -239,8 +237,8 @@ test "match" {
 
 test "if" {
     try testCanonical(
-        \\if (foo) bar else baz
-        \\if (const foo = bar()) baz
+        \\if foo bar else baz
+        \\if let foo = bar() baz
         \\
     );
 }
@@ -249,7 +247,7 @@ test "tuples, lists, maps" {
     try testCanonical(
         \\(a, b)
         \\[a, b]
-        \\{a: b, c: d}
+        \\{a = b, c = d}
         \\
     );
     try testTransform(
@@ -266,8 +264,8 @@ test "tuples, lists, maps" {
 
 test "functions" {
     try testCanonical(
-        \\const foo = fn(arg1, arg2, _, arg3) (arg1, arg2, arg3)
-        \\const bar = fn(val)
+        \\let foo = fn(arg1, arg2, _, arg3) (arg1, arg2, arg3)
+        \\let bar = fn(val)
         \\    val * 45
         \\
         \\
@@ -316,10 +314,10 @@ test "trailing comma in call" {
 
 test "loops" {
     try testCanonical(
-        \\while (true) break
+        \\while true break
         \\return 123 // 4
-        \\for (let foo in arr) foo + 2
-        \\for (1:3) continue
+        \\for let foo in arr foo + 2
+        \\for 1:3 continue
         \\
     );
 }
@@ -327,7 +325,7 @@ test "loops" {
 test "declarations" {
     try testCanonical(
         \\let bar = import("args")
-        \\const foo = bar + 2
+        \\let foo = bar + 2
         \\let err = error(foo)
         \\
     );
@@ -350,7 +348,7 @@ test "prefix ops" {
 
 test "infix ops" {
     try testCanonical(
-        \\123 + 2 * 3 / (4 as num) + ()
+        \\123 + 2 * 3 / (4 as num) + null
         \\
     );
 }
@@ -371,7 +369,7 @@ fn testTransform(source: []const u8, expected: []const u8) !void {
             @panic("test failure");
         },
     };
-    defer tree.deinit();
+    defer tree.deinit(std.testing.allocator);
 
     var out_buf = std.ArrayList(u8).init(std.testing.allocator);
     defer out_buf.deinit();

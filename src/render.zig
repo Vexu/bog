@@ -139,7 +139,7 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
         .decl => {
             try renderToken(tree, tokens[node], aiw, .space);
             try renderNode(tree, data[node].bin.lhs, aiw, .space);
-            const init_node = data[node].bin.lhs;
+            const init_node = data[node].bin.rhs;
             const eq_token = tree.prevToken(tree.firstToken(init_node));
             try renderToken(tree, eq_token, aiw, getBlockIndent(tree, init_node, .space));
             try renderNode(tree, init_node, aiw, space);
@@ -263,7 +263,7 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
             try renderNode(tree, data[node].un, aiw, space);
         },
         .match_case_let => {
-            try renderToken(tree, tree.prevToken(tree.firstToken(data[node].bin.rhs)), aiw, .space);
+            try renderToken(tree, tree.prevToken(tree.firstToken(data[node].bin.lhs)), aiw, .space);
             try renderNode(tree, data[node].bin.lhs, aiw, .space);
 
             try renderToken(tree, tokens[node], aiw, getBlockIndent(tree, data[node].bin.rhs, .space));
@@ -300,10 +300,7 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
 
             const callee = items[0];
             const args = items[1..];
-            const r_paren = blk: {
-                if (items.len == 0) break :blk tree.nextToken(tokens[node]);
-                break :blk tree.nextToken(tree.lastToken(items[items.len - 1]));
-            };
+            const r_paren = tree.lastToken(node);
 
             try renderNode(tree, callee, aiw, .none);
             try renderToken(tree, tokens[node], aiw, .none);
@@ -327,10 +324,7 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
             const items = tree.nodeItems(node, &buf);
 
             try renderToken(tree, tokens[node], aiw, .none);
-            const last_token = blk: {
-                if (items.len == 0) break :blk tree.nextToken(tokens[node]);
-                break :blk tree.nextToken(tree.lastToken(items[items.len - 1]));
-            };
+            const last_token = tree.lastToken(node);
             try renderCommaList(tree, items, last_token, aiw, .none);
             try renderToken(tree, last_token, aiw, space);
         },
@@ -522,15 +516,13 @@ fn isBlock(tree: Tree, node: Node.Index) bool {
     const data = tree.nodes.items(.data);
     var cur = node;
     while (true) switch (ids[cur]) {
-        .match_expr => cur = tree.extra[data[cur].range.end],
-        .match_expr_one => cur = data[cur].bin.rhs,
-        .block_stmt => cur = tree.extra[data[cur].range.end],
+        .match_expr => return !isBlock(tree, tree.extra[data[cur].range.end - 1]),
+        .block_stmt => return !isBlock(tree, tree.extra[data[cur].range.end - 1]),
+        .match_expr_one => return !isBlock(tree, data[cur].bin.rhs),
         .block_stmt_two => {
             const bin = data[cur].bin;
-            if (bin.rhs != 0)
-                cur = bin.rhs
-            else
-                cur = bin.lhs;
+            if (bin.rhs != 0) cur = bin.rhs else cur = bin.lhs;
+            return !isBlock(tree, cur);
         },
         .if_expr => cur = data[cur].bin.rhs,
         .if_else_expr, .if_let_expr => cur = tree.extra[data[cur].cond.extra + 1],
@@ -540,9 +532,9 @@ fn isBlock(tree: Tree, node: Node.Index) bool {
         .while_expr => cur = data[cur].bin.rhs,
         .while_let_expr => cur = tree.extra[data[cur].cond.extra + 1],
         .decl => cur = data[cur].bin.rhs,
-        .fn_expr => cur = tree.extra[data[cur].range.end],
+        .fn_expr => cur = tree.extra[data[cur].range.end - 1],
         .fn_expr_one => cur = data[cur].bin.rhs,
-        .try_expr => cur = tree.extra[data[cur].range.end],
+        .try_expr => cur = tree.extra[data[cur].range.end - 1],
         .try_expr_one => {
             const bin = data[cur].bin;
             if (bin.rhs != 0)

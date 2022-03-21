@@ -17,6 +17,7 @@ pub fn parse(gpa: Allocator, source: []const u8, errors: *bog.Errors) (Parser.Er
     var parser = Parser{
         .errors = errors,
         .tok_ids = tokens.items(.id),
+        .tok_starts = tokens.items(.start),
         .extra = std.ArrayList(Node.Index).init(gpa),
         .node_buf = std.ArrayList(Node.Index).init(gpa),
     };
@@ -28,6 +29,8 @@ pub fn parse(gpa: Allocator, source: []const u8, errors: *bog.Errors) (Parser.Er
         .nl => parser.tok_i += 1,
         else => break,
     };
+
+    try parser.nodes.append(gpa, undefined); // index 0 is reserved for null
 
     while (true) {
         _ = try parser.eatIndent(0);
@@ -64,8 +67,9 @@ pub fn parseRepl(repl: *@import("repl.zig").Repl) Parser.Error!?Node.Index {
 }
 
 pub const Parser = struct {
-    tok_ids: []Token.Id,
+    tok_ids: []const Token.Id,
     tok_i: u32 = 0,
+    tok_starts: []const u32,
     nodes: Node.List = .{},
     extra: std.ArrayList(Node.Index),
     node_buf: std.ArrayList(Node.Index),
@@ -209,7 +213,7 @@ pub const Parser = struct {
     ///     | "{" destructuring ("," destructuring)* ","? "}"
     fn compoundDestructuring(p: *Parser, skip_nl: SkipNl, level: u8) Error!?Node.Index {
         if (p.eatToken(.l_brace, .skip_nl)) |tok| {
-            const elems = try p.listParser(skip_nl, level, mapItem, .r_brace, null);
+            const elems = try p.listParser(skip_nl, level, destructuring, .r_brace, null);
             return switch (elems.len) {
                 0 => try p.addBin(.map_dest_two, tok, null_node, null_node),
                 1 => try p.addBin(.map_dest_two, tok, elems[0], null_node),
@@ -242,12 +246,13 @@ pub const Parser = struct {
 
         const node_buf_top = p.node_buf.items.len;
         defer p.node_buf.items.len = node_buf_top;
-        const params = try p.listParser(.keep_nl, level, destructuring, .r_paren, null);
+        var params = try p.listParser(.keep_nl, level, destructuring, .r_paren, null);
         p.node_buf.items.len += params.len;
 
         const body = try p.blockOrExpr(skip_nl, level);
         try p.node_buf.append(body);
 
+        params = p.node_buf.items[node_buf_top..];
         return switch (params.len) {
             0 => unreachable, // body is always added to the list
             1 => try p.addBin(.fn_expr_one, fn_tok, null_node, body),
@@ -261,7 +266,7 @@ pub const Parser = struct {
     ///     | assign_expr
     fn stmt(p: *Parser, level: u8) Error!Node.Index {
         if (try p.decl(level)) |node| return node;
-        return p.assignExpr(.skip_nl, level);
+        return p.assignExpr(.keep_nl, level);
     }
 
     /// assign_expr : expr (("=" | "+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") block_or_expr)?
@@ -322,6 +327,7 @@ pub const Parser = struct {
             const indent = p.eatIndentExtra();
             if (indent == null or indent.? <= level)
                 return p.reportErr("expected indentation", p.tok_i);
+            p.tok_i += 1;
 
             break :indent indent.?;
         };
@@ -695,16 +701,13 @@ pub const Parser = struct {
             .keyword_null => return p.addUn(.null_expr, tok, null_node),
             .keyword_this => return p.addUn(.this_expr, tok, null_node),
             .keyword_error => {
-                p.skipNl();
-                const init = (try p.initializer(skip_nl, level)) orelse
-                    return p.reportErr("expected initializer", p.tok_i);
+                const init = (try p.initializer(skip_nl, level)) orelse null_node;
                 return p.addUn(.error_expr, tok, init);
             },
             .at => {
                 p.skipNl();
                 const ident = try p.expectToken(.identifier, skip_nl);
-                const init = (try p.initializer(skip_nl, level)) orelse
-                    return p.reportErr("expected initializer", p.tok_i);
+                const init = (try p.initializer(skip_nl, level)) orelse null_node;
                 return p.addUn(.enum_expr, ident, init);
             },
             .keyword_import => {
@@ -916,7 +919,7 @@ pub const Parser = struct {
             const indent = p.eatIndentExtra();
             if (indent == null or indent.? <= level)
                 return p.reportErr("expected indentation", p.tok_i);
-
+            p.tok_i += 1;
             break :indent indent.?;
         };
 
@@ -959,12 +962,13 @@ pub const Parser = struct {
             const node_buf_top = p.node_buf.items.len;
             defer p.node_buf.items.len = node_buf_top;
 
-            const items = try p.listParser(.skip_nl, level, expr, .equal_rarr, null);
+            var items = try p.listParser(.skip_nl, level, expr, .equal_rarr, null);
             const arr = p.tok_i - 1;
 
             p.node_buf.items.len += items.len;
             try p.node_buf.append(try p.blockOrExpr(.keep_nl, level));
 
+            items = p.node_buf.items[node_buf_top..];
             switch (items.len) {
                 0 => unreachable,
                 1 => return p.reportErr("expected at least one item in match case", start),
@@ -1009,10 +1013,7 @@ pub const Parser = struct {
     }
 
     fn reportErr(p: *Parser, msg: []const u8, tok: Token.Index) Error {
-        _ = p;
-        _ = msg;
-        _ = tok;
-        // try p.errors.add(.{ .data = msg }, p.tokens.items(.start)[tok], .err);
+        try p.errors.add(.{ .data = msg }, p.tok_starts[tok], .err);
         return error.ParseError;
     }
 
@@ -1075,38 +1076,16 @@ pub const Parser = struct {
         while (true) {
             switch (p.tok_ids[p.tok_i]) {
                 // skip nl and indent if they are not meaningful
-                .indent_1,
-                .indent_2,
-                .indent_3,
-                .indent_4,
-                .indent_5,
-                .indent_6,
-                .indent_7,
-                .indent_8,
-                .indent_9,
-                .indent_10,
-                .indent_11,
-                .indent_12,
-                .indent_13,
-                .indent_14,
-                .indent_15,
-                .indent_16,
-                .indent_17,
-                .indent_18,
-                .indent_19,
-                .indent_20,
-                .indent_21,
-                .indent_22,
-                .indent_23,
-                .indent_24,
-                .indent_25,
-                .indent_26,
-                .indent_27,
-                .indent_28,
-                .indent_29,
-                .indent_30,
-                .indent_31,
-                .indent_32,
+                // zig fmt: off
+                .indent_1, .indent_2, .indent_3, .indent_4,
+                .indent_5, .indent_6, .indent_7, .indent_8,
+                .indent_9, .indent_10, .indent_11, .indent_12,
+                .indent_13, .indent_14, .indent_15, .indent_16,
+                .indent_17, .indent_18, .indent_19, .indent_20,
+                .indent_21, .indent_22, .indent_23, .indent_24,
+                .indent_25, .indent_26, .indent_27, .indent_28,
+                .indent_29, .indent_30, .indent_31, .indent_32,
+                // zig fmt: on
                 => if (skip_nl == .keep_nl) break,
                 .nl => if (skip_nl == .keep_nl and p.tok_i + 1 <= p.tok_ids.len) break,
                 else => break,
@@ -1131,11 +1110,11 @@ pub const Parser = struct {
 
     fn expectToken(p: *Parser, id: Token.Id, skip_nl: SkipNl) !Token.Index {
         if (p.eatToken(id, skip_nl)) |tok| return tok;
-        // try p.errors.add(try bog.Value.String.init(
-        //     p.gpa,
-        //     "expected '{s}', found '{s}'",
-        //     .{ Token.string(id), Token.string(tok.id) },
-        // ), p.tokens[p.tok_i], .err);
+        try p.errors.add(try @import("String.zig").init(
+            p.errors.list.allocator,
+            "expected '{s}', found '{s}'",
+            .{ Token.string(id), Token.string(p.tok_ids[p.tok_i]) },
+        ), p.tok_starts[p.tok_i], .err);
         return error.ParseError;
     }
 };
