@@ -189,13 +189,14 @@ pub const Parser = struct {
             .keyword_mut => {
                 _ = p.nextToken(.skip_nl);
                 const ident = try p.expectToken(.identifier, skip_nl);
-                return p.addUn(.ident_dest, ident, null_node);
+                return p.addUn(.mut_ident_dest, ident, null_node);
             },
             .identifier => return p.addUn(.ident_dest, p.nextToken(skip_nl), null_node),
             .underscore => return p.addUn(.discard_dest, p.nextToken(skip_nl), null_node),
             .keyword_error => {
                 const err_tok = p.nextToken(skip_nl);
-                const init = (try p.compoundDestructuring(skip_nl, level)) orelse null_node;
+                const init = (try p.compoundDestructuring(skip_nl, level)) orelse 
+                    return p.reportErr("expected a destructuring", p.tok_i);
                 return p.addUn(.error_dest, err_tok, init);
             },
             .l_paren, .l_bracket, .l_brace => {

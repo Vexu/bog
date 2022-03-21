@@ -56,6 +56,9 @@ pub const Inst = struct {
         // import, uses Data.str
         import,
 
+        // discards Data.un, complains if it's an error
+        discard,
+
         // res = copy(operand)
         copy_un,
         // lhs = copy(rhs)
@@ -133,6 +136,7 @@ pub const Inst = struct {
 
         // use Data.un
         iter_init,
+        // use Data.jump_condition
         iter_next,
 
         // uses Data.call

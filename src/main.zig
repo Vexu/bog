@@ -65,9 +65,6 @@ fn help() !void {
 }
 
 fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
-    if (true) {
-        @panic("TODO re-enable run");
-    }
     std.debug.assert(args.len > 0);
     const file_name = args[0];
 

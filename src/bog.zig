@@ -13,9 +13,8 @@ pub const parse = parser.parse;
 pub const Tree = @import("Tree.zig");
 pub const Node = Tree.Node;
 
-const compiler = @import("compiler.zig");
-pub const Compiler = compiler.Compiler;
-pub const compile = compiler.compile;
+pub const Compiler = @import("Compiler.zig");
+pub const compile = Compiler.compile;
 
 const value = @import("value.zig");
 pub const Value = value.Value;

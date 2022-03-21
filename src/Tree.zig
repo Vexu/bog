@@ -19,6 +19,7 @@ pub fn deinit(tree: *Tree, gpa: Allocator) void {
     tree.nodes.deinit(gpa);
     gpa.free(tree.extra);
     gpa.free(tree.root_nodes);
+    tree.* = undefined;
 }
 
 pub const render = @import("render.zig").render;
