@@ -520,6 +520,8 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
             const val = try c.genNegate(node);
             return c.wrapResult(node, val, res);
         },
+        .bool_and_expr => return c.genBoolAnd(node, res),
+        .bool_or_expr => return c.genBoolOr(node, res),
         .less_than_expr,
         .less_than_equal_expr,
         .greater_than_expr,
@@ -616,9 +618,6 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
             const val = try c.genFormatString(node);
             return c.wrapResult(node, val, res);
         },
-
-        .bool_or_expr,
-        .bool_and_expr,
         .try_expr,
         .try_expr_one,
         .catch_let_expr,
@@ -1189,6 +1188,56 @@ fn genNegate(c: *Compiler, node: Node.Index) Error!Value {
 
 fn needNum(a: Value, b: Value) bool {
     return a == .num or b == .num;
+}
+
+fn genBoolAnd(c: *Compiler, node: Node.Index, res: Result) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const lhs = data[node].bin.lhs;
+    const rhs = data[node].bin.rhs;
+    var lhs_val = try c.genNode(lhs, .value);
+
+    if (!lhs_val.isRt()) {
+        const l_bool = try lhs_val.getBool(c, lhs);
+        if (!l_bool) return lhs_val;
+        return c.genNode(rhs, res);
+    }
+
+    const lhs_ref = if (lhs_val == .mut)
+        try c.addUn(.copy_un, lhs_val.mut)
+    else
+        try c.makeRuntime(lhs_val);
+
+    const rhs_skip = try c.addJump(.jump_if_false, lhs_ref);
+
+    _ = try c.genNode(rhs, .{ .ref = lhs_ref });
+    c.finishJump(rhs_skip);
+
+    return Value{ .ref = lhs_ref };
+}
+
+fn genBoolOr(c: *Compiler, node: Node.Index, res: Result) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const lhs = data[node].bin.lhs;
+    const rhs = data[node].bin.rhs;
+    var lhs_val = try c.genNode(lhs, .value);
+
+    if (!lhs_val.isRt()) {
+        const l_bool = try lhs_val.getBool(c, lhs);
+        if (l_bool) return lhs_val;
+        return c.genNode(rhs, res);
+    }
+
+    const lhs_ref = if (lhs_val == .mut)
+        try c.addUn(.copy_un, lhs_val.mut)
+    else
+        try c.makeRuntime(lhs_val);
+
+    const rhs_skip = try c.addJump(.jump_if_true, lhs_ref);
+
+    _ = try c.genNode(rhs, .{ .ref = lhs_ref });
+    c.finishJump(rhs_skip);
+
+    return Value{ .ref = lhs_ref };
 }
 
 fn genComparison(c: *Compiler, node: Node.Index) Error!Value {
