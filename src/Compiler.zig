@@ -57,11 +57,7 @@ pub fn compile(gpa: Allocator, source: []const u8, errors: *Errors) (Compiler.Er
     for (tree.root_nodes) |node| {
         // try compiler.addLineInfo(node);
 
-        const val = try compiler.genNode(node, .discard);
-        if (val.isRt()) {
-            // discard unused runtime value
-            _ = try compiler.addUn(.discard, val.getRt());
-        }
+        _ = try compiler.genNode(node, .discard);
     }
     _ = try compiler.addUn(.ret_null, undefined);
     try compiler.resolveGlobals();
@@ -2056,24 +2052,27 @@ fn genLval(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
     switch (ids[node]) {
         .paren_expr => {
             const data = c.tree.nodes.items(.data);
-            return c.genLval(data[node].un, lval);
+            try c.genLval(data[node].un, lval);
         },
-        .ident_expr => try c.genLValIdent(node, lval, false),
-        .mut_ident_expr => try c.genLValIdent(node, lval, true),
+        .ident_expr => try c.genLvalIdent(node, lval, false),
+        .mut_ident_expr => try c.genLvalIdent(node, lval, true),
         .discard_expr => {
             // no op
         },
-        .error_expr => try c.genLValError(node, lval),
+        .enum_expr => try c.genLvalEnum(node, lval),
+        .error_expr => try c.genLvalError(node, lval),
         .range_expr,
         .range_expr_end,
         .range_expr_step,
+        => try c.genLvalRange(node, lval),
         .tuple_expr,
         .tuple_expr_two,
         .list_expr,
         .list_expr_two,
+        => return c.genLvalTupleList(node, lval),
         .map_expr,
         .map_expr_two,
-        => @panic("TODO"),
+        => return c.genLvalMap(node, lval),
         else => switch (lval) {
             .let => return c.reportErr("invalid left-hand side to declaration", node),
             .assign, .aug_assign => return c.reportErr("invalid left-hand side to assignment", node),
@@ -2081,7 +2080,7 @@ fn genLval(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
     }
 }
 
-fn genLValIdent(c: *Compiler, node: Node.Index, lval: Lval, mutable: bool) Error!void {
+fn genLvalIdent(c: *Compiler, node: Node.Index, lval: Lval, mutable: bool) Error!void {
     const tokens = c.tree.nodes.items(.token);
     switch (lval) {
         .let => |val| {
@@ -2124,7 +2123,35 @@ fn genLValIdent(c: *Compiler, node: Node.Index, lval: Lval, mutable: bool) Error
     }
 }
 
-fn genLValError(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
+fn genLvalEnum(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
+    const val = switch (lval) {
+        .let, .assign => |val| val,
+        .aug_assign => return c.reportErr("invalid left hand side to augmented assignment", node),
+    };
+    if (!val.isRt()) {
+        return c.reportErr("expected a tagged value", node);
+    }
+    const data = c.tree.nodes.items(.data);
+    if (data[node].un == 0) {
+        return c.reportErr("expected a destructuring", node);
+    }
+
+    const tokens = c.tree.nodes.items(.token);
+    const slice = c.tree.tokenSlice(tokens[node]);
+    const unwrapped_ref = try c.addInst(.unwrap_tagged, .{ .str = .{
+        .len = @intCast(u32, slice.len),
+        .offset = try c.putString(slice),
+    } });
+
+    const rhs_val = Value{ .ref = unwrapped_ref };
+    try c.genLval(data[node].un, switch (lval) {
+        .let => .{ .let = &rhs_val },
+        .assign => .{ .assign = &rhs_val },
+        else => unreachable,
+    });
+}
+
+fn genLvalError(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
     const val = switch (lval) {
         .let, .assign => |val| val,
         .aug_assign => return c.reportErr("invalid left hand side to augmented assignment", node),
@@ -2144,6 +2171,124 @@ fn genLValError(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
         .assign => .{ .assign = &rhs_val },
         else => unreachable,
     });
+}
+
+fn genLvalRange(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
+    const val = switch (lval) {
+        .let, .assign => |val| val,
+        .aug_assign => return c.reportErr("invalid left hand side to augmented assignment", node),
+    };
+    if (!val.isRt()) {
+        return c.reportErr("expected a range", node);
+    }
+    const range = Tree.Range.get(c.tree.*, node);
+
+    try c.genLValRangePart(range.start, val.getRt(), lval, "start");
+    if (range.end) |some| {
+        try c.genLValRangePart(some, val.getRt(), lval, "end");
+    }
+    if (range.step) |some| {
+        try c.genLValRangePart(some, val.getRt(), lval, "step");
+    }
+}
+
+fn genLValRangePart(c: *Compiler, node: Node.Index, range_ref: Ref, lval: Lval, part: []const u8) Error!void {
+    var name_val = Value{ .str = part };
+    var name_ref = try c.makeRuntime(name_val);
+
+    const res_ref = try c.addBin(.get, range_ref, name_ref);
+    const res_val = Value{ .ref = res_ref };
+    try c.genLval(node, switch (lval) {
+        .let => .{ .let = &res_val },
+        .assign => .{ .assign = &res_val },
+        else => unreachable,
+    });
+}
+
+fn genLvalTupleList(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
+    const res = switch (lval) {
+        .let, .assign => |val| val,
+        .aug_assign => return c.reportErr("invalid left hand side to augmented assignment", node),
+    };
+    if (!res.isRt()) {
+        return c.reportErr("expected a tuple/list", node);
+    }
+    const container_ref = res.getRt();
+
+    var buf: [2]Node.Index = undefined;
+    const items = c.tree.nodeItems(node, &buf);
+    const ids = c.tree.nodes.items(.id);
+
+    for (items) |item, i| {
+        const last_node = c.getLastNode(item);
+        if (ids[last_node] == .discard_expr) {
+            continue;
+        }
+
+        const index_ref = try c.makeRuntime(Value{ .int = @intCast(u32, i) });
+        const res_ref = try c.addBin(.get, container_ref, index_ref);
+        const res_val = Value{ .ref = res_ref };
+        try c.genLval(item, switch (lval) {
+            .let => .{ .let = &res_val },
+            .assign => .{ .assign = &res_val },
+            else => unreachable,
+        });
+    }
+}
+
+fn genLvalMap(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
+    const res = switch (lval) {
+        .let, .assign => |val| val,
+        .aug_assign => return c.reportErr("invalid left hand side to augmented assignment", node),
+    };
+    if (!res.isRt()) {
+        return c.reportErr("expected a tuple/list", node);
+    }
+    const container_ref = res.getRt();
+
+    var buf: [2]Node.Index = undefined;
+    const items = c.tree.nodeItems(node, &buf);
+    const tok_ids = c.tree.tokens.items(.id);
+    const data = c.tree.nodes.items(.data);
+
+    for (items) |item| {
+        var key: Ref = undefined;
+        if (data[item].bin.lhs != 0) {
+            const last_node = c.getLastNode(data[item].bin.lhs);
+            if (tok_ids[last_node] == .identifier) {
+                // `ident = value` is equal to `"ident" = value`
+                const ident = c.tree.firstToken(last_node);
+                const str = c.tree.tokenSlice(ident);
+                key = try c.addInst(.str, .{ .str = .{
+                    .len = @intCast(u32, str.len),
+                    .offset = try c.putString(str),
+                } });
+            } else {
+                var key_val = try c.genNode(data[item].bin.lhs, .value);
+                key = try c.makeRuntime(key_val);
+            }
+        } else {
+            const last_node = c.getLastNode(data[item].bin.rhs);
+            if (tok_ids[last_node] == .identifier) {
+                return c.reportErr("expected a key", item);
+            }
+            // `ident` is equal to `"ident" = ident`
+            const ident = c.tree.firstToken(last_node);
+            const str = c.tree.tokenSlice(ident);
+            key = try c.addInst(.str, .{ .str = .{
+                .len = @intCast(u32, str.len),
+                .offset = try c.putString(str),
+            } });
+        }
+
+        const res_ref = try c.addBin(.get, container_ref, key);
+        const res_val = Value{ .ref = res_ref };
+        try c.genLval(data[item].bin.rhs, switch (lval) {
+            .let => .{ .let = &res_val },
+            .assign => .{ .assign = &res_val },
+            else => unreachable,
+        });
+    }
 }
 
 fn parseStr(c: *Compiler, tok: TokenIndex) ![]u8 {
