@@ -496,6 +496,37 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
             const val = try c.genNegate(node);
             return c.wrapResult(node, val, res);
         },
+        .less_than_expr,
+        .less_than_equal_expr,
+        .greater_than_expr,
+        .greater_than_equal_expr,
+        .equal_expr,
+        .not_equal_expr,
+        .in_expr,
+        => {
+            const val = try c.genComparison(node);
+            return c.wrapResult(node, val, res);
+        },
+        .bit_and_expr,
+        .bit_or_expr,
+        .bit_xor_expr,
+        .l_shift_expr,
+        .r_shift_expr,
+        => {
+            const val = try c.genIntArithmetic(node);
+            return c.wrapResult(node, val, res);
+        },
+        .add_expr,
+        .sub_expr,
+        .mul_expr,
+        .div_expr,
+        .div_floor_expr,
+        .mod_expr,
+        .pow_expr,
+        => {
+            const val = try c.genArithmetic(node);
+            return c.wrapResult(node, val, res);
+        },
         .tuple_expr,
         .tuple_expr_two,
         => return c.genTupleList(node, res, .build_tuple),
@@ -512,25 +543,6 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .member_access_expr,
         .bool_or_expr,
         .bool_and_expr,
-        .less_than_expr,
-        .less_than_equal_expr,
-        .greater_than_expr,
-        .greater_than_equal_expr,
-        .equal_expr,
-        .not_equal_expr,
-        .in_expr,
-        .bit_and_expr,
-        .bit_or_expr,
-        .bit_xor_expr,
-        .l_shift_expr,
-        .r_shift_expr,
-        .add_expr,
-        .sub_expr,
-        .mul_expr,
-        .div_expr,
-        .div_floor_expr,
-        .mod_expr,
-        .pow_expr,
         .assign,
         .add_assign,
         .sub_assign,
@@ -1009,7 +1021,7 @@ fn genAs(c: *Compiler, node: Node.Index) Error!Value {
         .num => Value{
             .num = switch (lhs) {
                 .num => |val| val,
-                .int => |val| std.math.lossyCast(f64, val),
+                .int => |val| @intToFloat(f64, val),
                 .Bool => |val| @intToFloat(f64, @boolToInt(val)),
                 .str => |str| std.fmt.parseFloat(f64, str) catch
                     return c.reportErr("invalid cast to num", ty_tok),
@@ -1117,6 +1129,244 @@ fn genNegate(c: *Compiler, node: Node.Index) Error!Value {
     } else {
         return Value{ .num = -operand.num };
     }
+}
+
+fn needNum(a: Value, b: Value) bool {
+    return a == .num or b == .num;
+}
+
+fn genComparison(c: *Compiler, node: Node.Index) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const lhs = data[node].bin.lhs;
+    const rhs = data[node].bin.rhs;
+    var lhs_val = try c.genNode(lhs, .value);
+    var rhs_val = try c.genNode(rhs, .value);
+
+    const op: Bytecode.Inst.Op = switch (c.tree.nodes.items(.id)[node]) {
+        .less_than_expr => .less_than,
+        .less_than_equal_expr => .less_than_equal,
+        .greater_than_expr => .greater_than,
+        .greater_than_equal_expr => .greater_than_equal,
+        .equal_expr => .equal,
+        .not_equal_expr => .not_equal,
+        .in_expr => .in,
+        else => unreachable,
+    };
+
+    if (rhs_val.isRt() or lhs_val.isRt()) {
+        const rhs_ref = try c.makeRuntime(rhs_val);
+        const lhs_ref = try c.makeRuntime(lhs_val);
+
+        const ref = try c.addBin(op, lhs_ref, rhs_ref);
+        return Value{ .ref = ref };
+    }
+
+    // order comparisons are only allowed on numbers
+    switch (op) {
+        .in, .equal, .not_equal => {},
+        else => {
+            try lhs_val.checkNum(c, lhs);
+            try rhs_val.checkNum(c, rhs);
+        },
+    }
+
+    switch (op) {
+        .less_than => return Value{
+            .Bool = if (needNum(lhs_val, rhs_val))
+                lhs_val.getNum() < rhs_val.getNum()
+            else
+                lhs_val.int < rhs_val.int,
+        },
+        .less_than_equal => return Value{
+            .Bool = if (needNum(lhs_val, rhs_val))
+                lhs_val.getNum() <= rhs_val.getNum()
+            else
+                lhs_val.int <= rhs_val.int,
+        },
+        .greater_than => return Value{
+            .Bool = if (needNum(lhs_val, rhs_val))
+                lhs_val.getNum() > rhs_val.getNum()
+            else
+                lhs_val.int > rhs_val.int,
+        },
+        .greater_than_equal => return Value{
+            .Bool = if (needNum(lhs_val, rhs_val))
+                lhs_val.getNum() >= rhs_val.getNum()
+            else
+                lhs_val.int >= rhs_val.int,
+        },
+        .equal, .not_equal => {
+            const eql = switch (lhs_val) {
+                .@"null" => rhs_val == .@"null",
+                .int => |a_val| switch (rhs_val) {
+                    .int => |b_val| a_val == b_val,
+                    .num => |b_val| @intToFloat(f64, a_val) == b_val,
+                    else => false,
+                },
+                .num => |a_val| switch (rhs_val) {
+                    .int => |b_val| a_val == @intToFloat(f64, b_val),
+                    .num => |b_val| a_val == b_val,
+                    else => false,
+                },
+                .Bool => |a_val| switch (rhs_val) {
+                    .Bool => |b_val| a_val == b_val,
+                    else => false,
+                },
+                .str => |a_val| switch (rhs_val) {
+                    .str => |b_val| mem.eql(u8, a_val, b_val),
+                    else => false,
+                },
+                .empty, .mut, .ref => unreachable,
+            };
+            return Value{ .Bool = if (op == .equal) eql else !eql };
+        },
+        .in => return Value{
+            .Bool = switch (lhs_val) {
+                .str => mem.indexOf(
+                    u8,
+                    try lhs_val.getStr(c, lhs),
+                    try rhs_val.getStr(c, rhs),
+                ) != null,
+                else => return c.reportErr("TODO: range without strings", lhs),
+            },
+        },
+        else => unreachable,
+    }
+}
+
+fn genIntArithmetic(c: *Compiler, node: Node.Index) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const lhs = data[node].bin.lhs;
+    const rhs = data[node].bin.rhs;
+    var lhs_val = try c.genNode(lhs, .value);
+    var rhs_val = try c.genNode(rhs, .value);
+
+    const op: Bytecode.Inst.Op = switch (c.tree.nodes.items(.id)[node]) {
+        .bit_and_expr => .bit_and,
+        .bit_or_expr => .bit_or,
+        .bit_xor_expr => .bit_xor,
+        .l_shift_expr => .l_shift,
+        .r_shift_expr => .r_shift,
+        else => unreachable,
+    };
+
+    if (lhs_val.isRt() or rhs_val.isRt()) {
+        const rhs_ref = try c.makeRuntime(rhs_val);
+        const lhs_ref = try c.makeRuntime(lhs_val);
+
+        const ref = try c.addBin(op, lhs_ref, rhs_ref);
+        return Value{ .ref = ref };
+    }
+    const l_int = try lhs_val.getInt(c, lhs);
+    const r_int = try rhs_val.getInt(c, rhs);
+
+    switch (op) {
+        .bit_and => return Value{ .int = l_int & r_int },
+        .bit_or => return Value{ .int = l_int | r_int },
+        .bit_xor => return Value{ .int = l_int ^ r_int },
+        .l_shift => {
+            if (r_int < 0)
+                return c.reportErr("shift by negative amount", rhs);
+            const val = if (r_int > std.math.maxInt(u6))
+                0
+            else
+                l_int << @truncate(u6, @bitCast(u64, r_int));
+            return Value{ .int = val };
+        },
+        .r_shift => {
+            if (r_int < 0)
+                return c.reportErr("shift by negative amount", rhs);
+            const val = if (r_int > std.math.maxInt(u6))
+                std.math.maxInt(i64)
+            else
+                l_int >> @truncate(u6, @bitCast(u64, r_int));
+            return Value{ .int = val };
+        },
+        else => unreachable,
+    }
+}
+
+fn genArithmetic(c: *Compiler, node: Node.Index) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const lhs = data[node].bin.lhs;
+    const rhs = data[node].bin.rhs;
+    var lhs_val = try c.genNode(lhs, .value);
+    var rhs_val = try c.genNode(rhs, .value);
+
+    const op: Bytecode.Inst.Op = switch (c.tree.nodes.items(.id)[node]) {
+        .add_expr => .add,
+        .sub_expr => .sub,
+        .mul_expr => .mul,
+        .div_expr => .div,
+        .div_floor_expr => .div_floor,
+        .mod_expr => .mod,
+        .pow_expr => .pow,
+        else => unreachable,
+    };
+
+    if (!rhs_val.isRt() and !lhs_val.isRt()) rt: {
+        try lhs_val.checkNum(c, lhs);
+        try rhs_val.checkNum(c, rhs);
+
+        switch (op) {
+            .add => {
+                if (needNum(lhs_val, rhs_val)) {
+                    return Value{ .num = lhs_val.getNum() + rhs_val.getNum() };
+                }
+                return Value{
+                    .int = std.math.add(i64, lhs_val.int, rhs_val.int) catch break :rt,
+                };
+            },
+            .sub => {
+                if (needNum(lhs_val, rhs_val)) {
+                    return Value{ .num = lhs_val.getNum() - rhs_val.getNum() };
+                }
+                return Value{
+                    .int = std.math.sub(i64, lhs_val.int, rhs_val.int) catch break :rt,
+                };
+            },
+            .mul => {
+                if (needNum(lhs_val, rhs_val)) {
+                    return Value{ .num = lhs_val.getNum() * rhs_val.getNum() };
+                }
+                return Value{
+                    .int = std.math.mul(i64, lhs_val.int, rhs_val.int) catch break :rt,
+                };
+            },
+            .div => return Value{ .num = lhs_val.getNum() / rhs_val.getNum() },
+            .div_floor => {
+                if (needNum(lhs_val, rhs_val)) {
+                    return Value{ .int = @floatToInt(i64, @divFloor(lhs_val.getNum(), rhs_val.getNum())) };
+                }
+                return Value{
+                    .int = std.math.divFloor(i64, lhs_val.int, rhs_val.int) catch break :rt,
+                };
+            },
+            .mod => {
+                if (needNum(lhs_val, rhs_val)) {
+                    return Value{ .num = @rem(lhs_val.getNum(), rhs_val.getNum()) };
+                }
+                return Value{
+                    .int = std.math.rem(i64, lhs_val.int, rhs_val.int) catch break :rt,
+                };
+            },
+            .pow => {
+                if (needNum(lhs_val, rhs_val)) {
+                    return Value{ .num = std.math.pow(f64, lhs_val.getNum(), rhs_val.getNum()) };
+                }
+                return Value{
+                    .int = std.math.powi(i64, lhs_val.int, rhs_val.int) catch break :rt,
+                };
+            },
+            else => unreachable,
+        }
+    }
+
+    const rhs_ref = try c.makeRuntime(rhs_val);
+    const lhs_ref = try c.makeRuntime(lhs_val);
+
+    const ref = try c.addBin(op, lhs_ref, rhs_ref);
+    return Value{ .ref = ref };
 }
 
 fn genTupleList(
