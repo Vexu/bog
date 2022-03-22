@@ -431,9 +431,15 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .mut_ident_expr => {
             return c.reportErr("'mut' cannot be used as a value", node);
         },
+        .this_expr => {
+            const res_ref = try c.addUn(.load_this, undefined);
+            const res_val = Value{ .ref = res_ref };
+            return c.wrapResult(node, res_val, res);
+        },
 
         .decl => try c.genDecl(node),
 
+        .throw_expr => try c.genThrow(node),
         .return_expr => try c.genReturn(node),
         .break_expr => try c.genBreak(node),
         .continue_expr => try c.genContinue(node),
@@ -538,8 +544,19 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .map_expr_two,
         => return c.genMap(node, res),
         .map_item_expr => unreachable, // handled in genMap
+        .enum_expr => {
+            const val = try c.genEnum(node);
+            return c.wrapResult(node, val, res);
+        },
         .error_expr => {
             const val = try c.genError(node);
+            return c.wrapResult(node, val, res);
+        },
+        .range_expr,
+        .range_expr_end,
+        .range_expr_step,
+        => {
+            const val = try c.genRange(node);
             return c.wrapResult(node, val, res);
         },
         .import_expr => {
@@ -564,21 +581,17 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
             const val = try c.genArrayAccess(node);
             return c.wrapResult(node, val, res);
         },
+        .format_expr => {
+            const val = try c.genFormatString(node);
+            return c.wrapResult(node, val, res);
+        },
 
-        .this_expr,
-        .throw_expr,
         .bool_or_expr,
         .bool_and_expr,
-        .enum_expr,
-        .range_expr,
-        .range_expr_start,
-        .range_expr_end,
-        .range_expr_step,
         .try_expr,
         .try_expr_one,
         .catch_let_expr,
         .catch_expr,
-        .format_expr,
         => @panic("TODO"),
     }
     return c.wrapResult(node, .empty, res);
@@ -608,6 +621,12 @@ fn genDecl(c: *Compiler, node: Node.Index) !void {
         );
     }
     try c.genLval(destructuring, .{ .let = &init_val });
+}
+
+fn genThrow(c: *Compiler, node: Node.Index) !void {
+    const data = c.tree.nodes.items(.data);
+    const operand = try c.genNode(data[node].un, .value);
+    _ = try c.addUn(.throw, try c.makeRuntime(operand));
 }
 
 fn genReturn(c: *Compiler, node: Node.Index) !void {
@@ -1523,6 +1542,34 @@ fn genMap(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     return c.wrapResult(node, Value{ .ref = ref }, res);
 }
 
+fn genEnum(c: *Compiler, node: Node.Index) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const tokens = c.tree.nodes.items(.token);
+    const str = c.tree.tokenSlice(tokens[node]);
+    if (data[node].un == 0) {
+        const res_ref = try c.addInst(.build_tagged_null, .{ .str = .{
+            .len = @intCast(u32, str.len),
+            .offset = try c.putString(str),
+        } });
+        return Value{ .ref = res_ref };
+    }
+    const operand_val = try c.genNode(data[node].un, .value);
+    const operand_ref = try c.makeRuntime(operand_val);
+
+    const str_offset = try c.putString(str);
+
+    const extra = @intCast(u32, c.extra.items.len);
+    try c.extra.append(c.gpa, operand_ref);
+    try c.extra.append(c.gpa, @intToEnum(Ref, str_offset));
+    const res_ref = try c.addInst(.build_tagged, .{
+        .extra = .{
+            .extra = extra,
+            .len = @intCast(u32, str.len),
+        },
+    });
+    return Value{ .ref = res_ref };
+}
+
 fn genError(c: *Compiler, node: Node.Index) Error!Value {
     const data = c.tree.nodes.items(.data);
     if (data[node].un == 0) {
@@ -1534,6 +1581,41 @@ fn genError(c: *Compiler, node: Node.Index) Error!Value {
 
     const ref = try c.addUn(.build_error, operand_ref);
     return Value{ .ref = ref };
+}
+
+fn genRange(c: *Compiler, node: Node.Index) Error!Value {
+    const range = Tree.Range.get(c.tree.*, node);
+
+    const start_val = try c.genNode(range.start, .value);
+    if (!start_val.isRt()) _ = try start_val.getInt(c, range.start);
+    const start_ref = try c.makeRuntime(start_val);
+
+    var end_val = Value{ .int = std.math.maxInt(i64) };
+    if (range.end) |some| {
+        end_val = try c.genNode(some, .value);
+        if (!end_val.isRt()) _ = try end_val.getInt(c, some);
+    }
+    const end_ref = try c.makeRuntime(end_val);
+
+    const step = range.step orelse {
+        const res_ref = try c.addBin(.build_range, start_ref, end_ref);
+        return Value{ .ref = res_ref };
+    };
+
+    const step_val = try c.genNode(step, .value);
+    if (!step_val.isRt()) _ = try step_val.getInt(c, step);
+    const step_ref = try c.makeRuntime(step_val);
+
+    const extra = @intCast(u32, c.extra.items.len);
+    try c.extra.append(c.gpa, end_ref);
+    try c.extra.append(c.gpa, step_ref);
+    const res_ref = try c.addInst(.build_range_step, .{
+        .range = .{
+            .start = start_ref,
+            .extra = extra,
+        },
+    });
+    return Value{ .ref = res_ref };
 }
 
 fn genImport(c: *Compiler, node: Node.Index) Error!Value {
@@ -1713,6 +1795,81 @@ fn genArrayAccess(c: *Compiler, node: Node.Index) Error!Value {
     return Value{ .ref = res_ref };
 }
 
+fn genFormatString(c: *Compiler, node: Node.Index) Error!Value {
+    // transform f"foo {x=:X}bar" into "foo x={X}bar".format((255,))
+    var buf = std.ArrayList(u8).init(c.gpa);
+    defer buf.deinit();
+
+    const data = c.tree.nodes.items(.data);
+    const strings = data[node].format.str(c.tree.extra);
+    const args = data[node].format.exprs(c.tree.extra);
+    const token_ids = c.tree.tokens.items(.id);
+    const starts = c.tree.tokens.items(.start);
+    const ends = c.tree.tokens.items(.end);
+
+    for (strings) |str, i| {
+        if (i != 0 and token_ids[c.tree.prevToken(str)] == .equal) {
+            assert(buf.pop() == '{');
+            const first_token = c.tree.firstToken(args[i - 1]);
+            const last_token = c.tree.lastToken(args[i - 1]);
+
+            const slice = c.tree.source[starts[first_token]..ends[last_token]];
+            try buf.appendSlice(slice);
+            try buf.appendSlice("={");
+        }
+        var slice = c.tree.tokenSlice(str);
+        if (token_ids[str] == .format_start) {
+            slice = slice[2..]; // strip f"
+        } else if (slice[0] == ':') {
+            slice = slice[1..]; // strip : from :X}
+        }
+        if (token_ids[str] == .format_end) {
+            slice = slice[0 .. slice.len - 1]; // strip final "
+        }
+
+        try buf.ensureUnusedCapacity(slice.len);
+        const unused_slice = buf.items.ptr[buf.items.len..buf.capacity];
+        buf.items.len += try c.parseStrExtra(str, slice, unused_slice);
+    }
+    const string_val = Value{ .str = try c.arena.dupe(u8, buf.items) };
+    const string_ref = try c.makeRuntime(string_val);
+
+    var format_val = Value{ .str = "format" };
+    var format_ref = try c.makeRuntime(format_val);
+
+    const format_fn_ref = try c.addBin(.get, string_ref, format_ref);
+
+    const list_buf_top = c.list_buf.items.len;
+    defer c.list_buf.items.len = list_buf_top;
+
+    try c.list_buf.append(c.gpa, format_fn_ref);
+
+    for (args) |arg| {
+        const arg_val = try c.genNode(arg, .value);
+        const arg_ref = if (arg_val == .mut)
+            try c.addUn(.copy_un, arg_val.mut)
+        else
+            try c.makeRuntime(arg_val);
+
+        try c.list_buf.append(c.gpa, arg_ref);
+    }
+
+    const arg_refs = c.list_buf.items[list_buf_top..];
+    const res_ref = switch (arg_refs.len) {
+        0 => unreachable, // format_fn_ref is always added
+        1 => try c.addUn(.call_zero, arg_refs[0]),
+        2 => try c.addBin(.call_one, arg_refs[0], arg_refs[1]),
+        else => try c.addExtra(.call, arg_refs),
+    };
+
+    if (c.cur_try) |try_scope| {
+        _ = try c.addBin(.move, try_scope.err_ref, res_ref);
+        try try_scope.jumps.append(c.gpa, try c.addJump(.jump_if_error, res_ref));
+    }
+
+    return Value{ .ref = res_ref };
+}
+
 const Lval = union(enum) {
     let: *const Value,
     assign: *const Value,
@@ -1733,7 +1890,6 @@ fn genLval(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
         },
         .error_expr => try c.genLValError(node, lval),
         .range_expr,
-        .range_expr_start,
         .range_expr_end,
         .range_expr_step,
         .tuple_expr,
@@ -1814,7 +1970,8 @@ fn genLValError(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
 
 fn parseStr(c: *Compiler, tok: TokenIndex) ![]u8 {
     var slice = c.tree.tokenSlice(tok);
-    slice = slice[1 .. slice.len - 1];
+    const start = @as(u32, 1) + @boolToInt(slice[0] == 'f');
+    slice = slice[start .. slice.len - 1];
     var buf = try c.arena.alloc(u8, slice.len);
     return buf[0..try c.parseStrExtra(tok, slice, buf)];
 }

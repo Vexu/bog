@@ -356,16 +356,10 @@ pub const Parser = struct {
             p.reportErr("expected type name", p.tok_i);
     }
 
-    /// range_expr : bit_expr? (":" bit_expr? (":" bit_expr)?)?
+    /// range_expr : bit_expr (":" bit_expr? (":" bit_expr)?)?
     fn rangeExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
-        var colon_1 = p.eatToken(.colon, skip_nl);
-        const start = if (colon_1 == null) start: {
-            const start = try p.bitExpr(skip_nl, level);
-            colon_1 = p.eatToken(.colon, skip_nl);
-            // not a range
-            if (colon_1 == null) return start;
-            break :start start;
-        } else null_node;
+        const start = try p.bitExpr(skip_nl, level);
+        var colon_1 = p.eatToken(.colon, skip_nl) orelse return start;
 
         var end: Node.Index = null_node;
         var colon_2 = p.eatToken(.colon, skip_nl);
@@ -379,14 +373,12 @@ pub const Parser = struct {
 
         const step = if (colon_2 != null) try p.bitExpr(skip_nl, level) else null_node;
 
-        if (start != null_node and end != null_node and step != null_node) {
-            return p.addCond(.range_expr, colon_1.?, start, &.{ end, step });
-        } else if (start == null_node) {
-            return p.addBin(.range_expr_start, colon_1.?, end, step);
+        if (end != null_node and step != null_node) {
+            return p.addCond(.range_expr, colon_1, start, &.{ end, step });
         } else if (end == null_node) {
-            return p.addBin(.range_expr_end, colon_1.?, start, step);
+            return p.addBin(.range_expr_step, colon_1, start, step);
         } else {
-            return p.addBin(.range_expr_step, colon_1.?, start, end);
+            return p.addBin(.range_expr_end, colon_1, start, end);
         }
     }
 
@@ -638,7 +630,7 @@ pub const Parser = struct {
         return p.reportErr("expected an identifier, a literal '(', '{{', '[', error, try, if, while, for or match", p.tok_i);
     }
 
-    /// format_string : FORMAT_START expr (FORMAT expr)* FORMAT_END
+    /// format_string : FORMAT_START expr "="? (FORMAT expr "="?)* FORMAT_END
     fn formatString(p: *Parser, skip_nl: SkipNl, level: u8) Error!?Node.Index {
         const first = p.eatToken(.format_start, .skip_nl) orelse return null;
 
@@ -651,6 +643,7 @@ pub const Parser = struct {
 
         while (true) {
             try p.node_buf.append(try p.expr(.skip_nl, level));
+            _ = p.eatToken(.equal, .skip_nl);
 
             if (p.eatToken(.format, .skip_nl)) |tok| {
                 try toks.append(tok);

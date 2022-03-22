@@ -62,14 +62,18 @@ pub const Inst = struct {
         // use Data.un
         build_error,
         build_error_null,
+        /// uses Data.extra with
+        /// extra[0] == operand
+        /// extra[1] == str.offset
         build_tagged,
+        /// uses Data.str
         build_tagged_null,
         /// uses Data.func with
         // extra[0] == Data.FnInfo
         build_func,
-        // uses Data.range
+        /// uses Data.bin
         build_range,
-        // uses Data.range_step
+        /// uses Data.range
         build_range_step,
 
         // import, uses Data.str
@@ -90,6 +94,8 @@ pub const Inst = struct {
         load_capture,
         // CAPTURE(lhs func).append(rhs)
         store_capture,
+        // res = THIS
+        load_this,
 
         // binary operators
 
@@ -169,6 +175,7 @@ pub const Inst = struct {
         // use Data.un
         ret,
         ret_null,
+        throw,
 
         _,
     };
@@ -191,10 +198,6 @@ pub const Inst = struct {
             len: u32,
         },
         range: struct {
-            start: Ref,
-            end: Ref,
-        },
-        range_step: struct {
             start: Ref,
             /// end = extra[extra]
             /// step = extra[extra + 1]
@@ -304,11 +307,23 @@ fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
                 std.debug.print("args: {d}, captures: {d}\n", .{ fn_info.args, fn_info.captures });
                 b.dumpExtra(fn_body, level + 2);
             },
-            .build_tagged,
-            .build_tagged_null,
-            .build_range,
-            .build_range_step,
-            => std.debug.print("TODO\n", .{}),
+            .build_tagged_null => {
+                const str = b.strings[data[i].str.offset..][0..data[i].str.len];
+                std.debug.print("@{s} = null\n", .{str});
+            },
+            .build_tagged => {
+                const operand = b.extra[data[i].extra.extra];
+                const str_offset = @enumToInt(b.extra[data[i].extra.extra + 1]);
+                const str = b.strings[str_offset..][0..data[i].extra.len];
+                std.debug.print("@{s} = {}\n", .{ str, operand });
+            },
+            .build_range => std.debug.print("{}:{}\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
+            .build_range_step => {
+                const start = data[i].range.start;
+                const end = b.extra[data[i].range.extra];
+                const step = b.extra[data[i].range.extra + 1];
+                std.debug.print("{}:{}:{}\n", .{ start, end, step });
+            },
             .load_global => std.debug.print("GLOBAL({d})\n", .{data[i].un}),
             .load_capture => std.debug.print("CAPTURE({d})\n", .{@enumToInt(data[i].un)}),
             .store_capture => std.debug.print("CAPTURE({d}) = {}\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
@@ -348,6 +363,7 @@ fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
             .discard,
             .build_error,
             .copy_un,
+            .throw,
             => std.debug.print("{}\n", .{data[i].un}),
             .jump => std.debug.print("{d}\n", .{data[i].jump}),
             .jump_if_true,
@@ -365,7 +381,7 @@ fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
             },
             .call_one => std.debug.print("{}({})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
             .call_zero => std.debug.print("{}()\n", .{data[i].un}),
-            .ret_null, .build_error_null => std.debug.print("\n", .{}),
+            .ret_null, .build_error_null, .load_this => std.debug.print("\n", .{}),
             _ => unreachable,
         }
     }

@@ -193,13 +193,12 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
             }
         },
         .range_expr,
-        .range_expr_start,
         .range_expr_end,
         .range_expr_step,
         => {
             const range = Tree.Range.get(tree, node);
 
-            if (range.start) |some| try renderNode(tree, some, aiw, .none);
+            try renderNode(tree, range.start, aiw, .none);
             try renderToken(tree, range.colon_1, aiw, if (range.end == null and
                 range.colon_2 == null and
                 range.step == null) space else .none);
@@ -397,8 +396,14 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
             const token_ids = tree.tokens.items(.id);
             const exprs = data[node].format.exprs(tree.extra);
             for (data[node].format.str(tree.extra)) |str, i| {
-                if (token_ids[str] == .format_end) {
-                    return renderToken(tree, str, aiw, space);
+                if (i != 0) {
+                    const equal = tree.prevToken(str);
+                    if (token_ids[equal] == .equal) {
+                        try renderToken(tree, equal, aiw, .none);
+                    }
+                    if (token_ids[str] == .format_end) {
+                        return renderToken(tree, str, aiw, space);
+                    }
                 }
                 try renderToken(tree, str, aiw, .none);
                 try renderNode(tree, exprs[i], aiw, .none);

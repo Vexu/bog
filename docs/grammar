@@ -32,7 +32,7 @@ comparison_expr
 
 type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
 
-range_expr : bit_expr? (":" bit_expr? (":" bit_expr)?)?
+range_expr : bit_expr (":" bit_expr? (":" bit_expr)?)?
 
 bit_expr : shift_expr (("&" shift_expr)* | ("|" shift_expr)* | ("^" shift_expr)*
 
@@ -73,7 +73,7 @@ primary_expr
     | match
     | try
 
-format_string : FORMAT_START expr (FORMAT expr)* FORMAT_END
+format_string : FORMAT_START expr "="? (FORMAT expr "="?)* FORMAT_END
 
 initializer
     : "(" block_or_expr ")"
