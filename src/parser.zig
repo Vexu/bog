@@ -207,7 +207,7 @@ pub const Parser = struct {
                     .r_arr_arr_equal => .r_shift_assign,
                     .ampersand_equal => .bit_and_assign,
                     .pipe_equal => .bit_or_assign,
-                    .caret_equal => .bit_x_or_assign,
+                    .caret_equal => .bit_xor_assign,
                     else => unreachable,
                 }, tok, lhs, try p.blockOrExpr(skip_nl, level));
             },

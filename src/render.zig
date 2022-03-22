@@ -106,7 +106,7 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
         .r_shift_assign,
         .bit_and_assign,
         .bit_or_assign,
-        .bit_x_or_assign,
+        .bit_xor_assign,
         => {
             try renderNode(tree, data[node].bin.lhs, aiw, .space);
             const after_op_space: Space = if (tree.lineDist(tokens[node], tree.nextToken(tokens[node])) == 0) .space else .newline;

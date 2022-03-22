@@ -527,6 +527,20 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
             const val = try c.genArithmetic(node);
             return c.wrapResult(node, val, res);
         },
+        .assign => return c.genAssign(node, res),
+        .add_assign,
+        .sub_assign,
+        .mul_assign,
+        .pow_assign,
+        .div_assign,
+        .div_floor_assign,
+        .mod_assign,
+        .l_shift_assign,
+        .r_shift_assign,
+        .bit_and_assign,
+        .bit_or_assign,
+        .bit_xor_assign,
+        => return c.genAugAssign(node, res),
         .tuple_expr,
         .tuple_expr_two,
         => return c.genTupleList(node, res, .build_tuple),
@@ -543,19 +557,6 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .member_access_expr,
         .bool_or_expr,
         .bool_and_expr,
-        .assign,
-        .add_assign,
-        .sub_assign,
-        .mul_assign,
-        .pow_assign,
-        .div_assign,
-        .div_floor_assign,
-        .mod_assign,
-        .l_shift_assign,
-        .r_shift_assign,
-        .bit_and_assign,
-        .bit_or_assign,
-        .bit_x_or_assign,
         .array_access_expr,
         .import_expr,
         .error_expr,
@@ -1369,6 +1370,62 @@ fn genArithmetic(c: *Compiler, node: Node.Index) Error!Value {
     return Value{ .ref = ref };
 }
 
+fn genAssign(c: *Compiler, node: Node.Index, res: Result) Error!Value {
+    if (res != .discard) {
+        return c.reportErr("assignment produces no value", node);
+    }
+    const data = c.tree.nodes.items(.data);
+    const lhs = data[node].bin.lhs;
+    const rhs = data[node].bin.rhs;
+    const rhs_val = try c.genNode(rhs, .value);
+
+    try c.genLval(lhs, .{ .assign = &rhs_val });
+    return .empty;
+}
+
+fn genAugAssign(c: *Compiler, node: Node.Index, res: Result) Error!Value {
+    if (res != .discard) {
+        return c.reportErr("assignment produces no value", node);
+    }
+    const data = c.tree.nodes.items(.data);
+    const lhs = data[node].bin.lhs;
+    const rhs = data[node].bin.rhs;
+    const rhs_val = try c.genNode(rhs, .value);
+
+    const op: Bytecode.Inst.Op = switch (c.tree.nodes.items(.id)[node]) {
+        .add_assign => .add,
+        .sub_assign => .sub,
+        .mul_assign => .mul,
+        .pow_assign => .pow,
+        .div_assign => .div,
+        .div_floor_assign => .div_floor,
+        .mod_assign => .mod,
+        .l_shift_assign => .l_shift,
+        .r_shift_assign => .r_shift,
+        .bit_and_assign => .bit_and,
+        .bit_or_assign => .bit_or,
+        .bit_xor_assign => .bit_xor,
+        else => unreachable,
+    };
+
+    var lhs_ref: Ref = undefined;
+    try c.genLval(lhs, .{ .aug_assign = &lhs_ref });
+    if (!rhs_val.isRt()) switch (op) {
+        // zig fmt: off
+        .add, .sub, .mul, .pow, .div, .div_floor, .mod,
+        => try rhs_val.checkNum(c, rhs),
+        .l_shift, .r_shift, .bit_and, .bit_or, .bit_xor,
+        => _ = try rhs_val.getInt(c, rhs),
+        // zig fmt: on
+        else => unreachable,
+    };
+
+    const rhs_ref = try c.makeRuntime(rhs_val);
+    const res_ref = try c.addBin(op, lhs_ref, rhs_ref);
+    _ = try c.addBin(.move, lhs_ref, res_ref);
+    return Value.empty;
+}
+
 fn genTupleList(
     c: *Compiler,
     node: Node.Index,
@@ -1464,7 +1521,7 @@ fn genMap(c: *Compiler, node: Node.Index, res: Result) Error!Value {
 const Lval = union(enum) {
     let: *const Value,
     assign: *const Value,
-    aug_assign: *Value,
+    aug_assign: *Ref,
 };
 
 fn genLval(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
@@ -1505,7 +1562,7 @@ fn genLValIdent(c: *Compiler, node: Node.Index, lval: Lval, mutable: bool) Error
             try c.checkRedeclaration(tokens[node]);
 
             var ref = try c.makeRuntime(val.*);
-            if (val.* == .mut or mutable) {
+            if (val.* == .mut or (mutable and val.isRt())) {
                 // copy on assign
                 ref = try c.addUn(.copy_un, ref);
             }
@@ -1533,7 +1590,7 @@ fn genLValIdent(c: *Compiler, node: Node.Index, lval: Lval, mutable: bool) Error
             if (!sym.mut) {
                 return c.reportErr("assignment to constant", node);
             }
-            val.* = Value{ .mut = sym.ref };
+            val.* = sym.ref;
         },
     }
 }

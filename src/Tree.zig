@@ -101,7 +101,7 @@ pub fn firstToken(tree: Tree, node: Node.Index) Token.Index {
         .r_shift_assign,
         .bit_and_assign,
         .bit_or_assign,
-        .bit_x_or_assign,
+        .bit_xor_assign,
         .array_access_expr,
         .call_expr_one,
         .match_case_one,
@@ -270,7 +270,7 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .r_shift_assign,
         .bit_and_assign,
         .bit_or_assign,
-        .bit_x_or_assign,
+        .bit_xor_assign,
         .bool_or_expr,
         .bool_and_expr,
         .less_than_expr,
@@ -461,7 +461,7 @@ pub const Node = struct {
         /// lhs |= rhs
         bit_or_assign,
         /// lhs ^= rhs
-        bit_x_or_assign,
+        bit_xor_assign,
 
         // expressions
 
