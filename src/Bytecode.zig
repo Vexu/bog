@@ -155,9 +155,11 @@ pub const Inst = struct {
         // use Data.jump_condition
         jump_if_true,
         jump_if_false,
-        jump_if_not_error,
         jump_if_null,
         jump_if_error,
+        /// if operand is not an error jumps,
+        /// otherwise unwraps the error
+        unwrap_error_or_jump,
 
         // use Data.un
         iter_init,
@@ -368,7 +370,7 @@ fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
             .jump => std.debug.print("{d}\n", .{data[i].jump}),
             .jump_if_true,
             .jump_if_false,
-            .jump_if_not_error,
+            .unwrap_error_or_jump,
             .jump_if_null,
             .jump_if_error,
             .iter_next,

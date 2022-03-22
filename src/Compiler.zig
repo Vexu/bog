@@ -489,6 +489,12 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .match_case,
         .match_case_one,
         => unreachable, // handled in genMatch
+        .try_expr,
+        .try_expr_one,
+        => return c.genTry(node, res),
+        .catch_let_expr,
+        .catch_expr,
+        => unreachable, // handled in genTry
         .block_stmt_two,
         .block_stmt,
         => {
@@ -618,11 +624,6 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
             const val = try c.genFormatString(node);
             return c.wrapResult(node, val, res);
         },
-        .try_expr,
-        .try_expr_one,
-        .catch_let_expr,
-        .catch_expr,
-        => @panic("TODO"),
     }
     return c.wrapResult(node, .empty, res);
 }
@@ -1007,6 +1008,103 @@ fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     return sub_res.toVal();
 }
 
+fn genTry(c: *Compiler, node: Node.Index, res: Result) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const ids = c.tree.nodes.items(.id);
+    var buf: [2]Node.Index = undefined;
+    const items = c.tree.nodeItems(node, &buf);
+    const cond = items[0];
+    const catches = items[1..];
+
+    const sub_res = switch (res) {
+        .ref, .discard => res,
+        .value => val: {
+            // add a dummy instruction we can store the value into
+            const res_ref = Bytecode.indexToRef(c.instructions.len);
+            try c.instructions.append(c.gpa, undefined);
+            break :val Result{ .ref = res_ref };
+        },
+    };
+
+    var try_scope = Try{
+        .err_ref = try c.makeRuntime(Value.@"null"),
+    };
+
+    const old_try = c.cur_try;
+    defer c.cur_try = old_try;
+    c.cur_try = &try_scope;
+
+    _ = try c.genNode(cond, sub_res);
+
+    // no longer in try scope
+    c.cur_try = old_try;
+
+    if (try_scope.jumps.items.len == 0) {
+        // no possible error to be handled
+        return sub_res.toVal();
+    }
+
+    // if no error jump over all catchers
+    const skip_all = try c.addJump(.unwrap_error_or_jump, try_scope.err_ref);
+
+    for (try_scope.jumps.items) |jump| {
+        c.finishJump(jump);
+    }
+    try_scope.jumps.items.len = 0;
+    try try_scope.jumps.append(c.gpa, skip_all);
+
+    const scope_count = c.scopes.items.len;
+    defer c.scopes.items.len = scope_count;
+
+    var seen_catch_all = false;
+    for (catches) |catcher, catcher_i| {
+        if (seen_catch_all) {
+            return c.reportErr("additional handlers after catch-all handler", catcher);
+        }
+
+        var catch_skip: ?Ref = null;
+        const capture = data[catcher].bin.lhs;
+        if (capture != 0) {
+            if (ids[catcher] == .catch_let_expr) {
+                seen_catch_all = true;
+
+                try c.genLval(capture, .{ .let = &.{ .ref = try_scope.err_ref } });
+            } else {
+                const capture_val = try c.genNode(capture, .value);
+                const capture_ref = try c.makeRuntime(capture_val);
+                // if not equal to the error value jump over this handler
+                const eq_ref = try c.addBin(.equal, capture_ref, try_scope.err_ref);
+                catch_skip = try c.addJump(.jump_if_false, eq_ref);
+            }
+        } else {
+            seen_catch_all = true;
+        }
+
+        _ = try c.genNode(data[catcher].bin.rhs, sub_res);
+
+        // exit this handler (unless it's the last one)
+        if (catcher_i + 1 != catches.len) {
+            try try_scope.jumps.append(c.gpa, try c.addUn(.jump, undefined));
+        }
+
+        // jump over this handler if the value doesn't match
+        if (catch_skip) |some| {
+            c.finishJump(some);
+        }
+    }
+
+    // return uncaught errors
+    if (!seen_catch_all) {
+        _ = try c.addUn(.ret, try_scope.err_ref);
+    }
+
+    // exit try-catch
+    for (try_scope.jumps.items) |jump| {
+        c.finishJump(jump);
+    }
+    return sub_res.toVal();
+}
+
 fn genBlock(c: *Compiler, stmts: []const Node.Index, res: Result) Error!Value {
     const scope_count = c.scopes.items.len;
     defer c.scopes.items.len = scope_count;
@@ -1177,10 +1275,7 @@ fn genNegate(c: *Compiler, node: Node.Index) Error!Value {
 
     try operand.checkNum(c, data[node].un);
     if (operand == .int) {
-        return Value{
-            .int = std.math.sub(i64, 0, operand.int) catch
-                return c.reportErr("TODO integer overflow", node),
-        };
+        return Value{ .int = -operand.int };
     } else {
         return Value{ .num = -operand.num };
     }
@@ -1332,7 +1427,7 @@ fn genComparison(c: *Compiler, node: Node.Index) Error!Value {
                     try lhs_val.getStr(c, lhs),
                     try rhs_val.getStr(c, rhs),
                 ) != null,
-                else => return c.reportErr("TODO: range without strings", lhs),
+                else => unreachable,
             },
         },
         else => unreachable,

@@ -17,22 +17,27 @@ test "try-catch" {
         \\try
         \\    assert(x == y)
         \\    assert(x != z)
-        \\catch ("assertion failure")
+        \\catch "assertion failure"
         \\    print("assertion failure")
-        \\catch (1)
+        \\catch 1
         \\    print("got one")
-        \\catch (let err)
+        \\catch let err
         \\    print(err)
         \\
         \\
         \\
     );
     try testCanonical(
-        \\try assert(x == y) catch ("assertion failure") print("assertion failure")
+        \\try assert(x == y) catch print("assertion failure")
         \\
     );
     try testCanonical(
-        \\try foo() catch (1) print("1") catch (2) print("2")
+        \\try
+        \\    assert(x == y)
+        \\catch
+        \\    print("them all")
+        \\
+        \\
         \\
     );
 }

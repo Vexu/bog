@@ -907,8 +907,22 @@ pub const Parser = struct {
 
         if (p.eatToken(.keyword_let, .skip_nl)) |_| {
             return try p.addBin(.catch_let_expr, tok, try p.primaryExpr(.keep_nl, level), try p.blockOrExpr(skip_nl, level));
+        } else if (p.tok_ids[p.tok_i] == .nl) {
+            // catch
+            //    foo
+            return try p.addBin(.catch_expr, tok, null_node, try p.blockOrExpr(skip_nl, level));
         } else {
-            return try p.addBin(.catch_let_expr, tok, try p.expr(.keep_nl, level), try p.blockOrExpr(skip_nl, level));
+            const capture_or_body = try p.expr(.keep_nl, level);
+            const start_i = p.tok_i;
+            if (p.eatToken(.nl, .keep_nl) != null and p.eatIndentExtra() orelse level > level) {
+                // catch 1
+                //    foo
+                p.tok_i = start_i;
+                return try p.addBin(.catch_expr, tok, capture_or_body, try p.blockOrExpr(skip_nl, level));
+            } else {
+                // catch 1
+                return try p.addBin(.catch_expr, tok, null_node, capture_or_body);
+            }
         }
     }
 
