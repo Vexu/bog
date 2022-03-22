@@ -40,7 +40,6 @@ pub fn firstToken(tree: Tree, node: Node.Index) Token.Index {
         .bool_not_expr,
         .bit_not_expr,
         .negate_expr,
-        .plus_expr,
         .decl,
         .ident_dest,
         .discard_dest,
@@ -271,7 +270,6 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .bool_not_expr,
         .bit_not_expr,
         .negate_expr,
-        .plus_expr,
         .match_case_catch_all,
         => cur = data[cur].un,
         .is_expr, .as_expr => return tokens[cur],
@@ -633,8 +631,6 @@ pub const Node = struct {
         bit_not_expr,
         /// -un
         negate_expr,
-        /// +un
-        plus_expr,
 
         // binary expressions
 

@@ -156,16 +156,16 @@ const Value = union(enum) {
         }
     }
 
-    fn getBool(val: Value, c: *Compiler, tok: TokenIndex) !bool {
+    fn getBool(val: Value, c: *Compiler, node: Node.Index) !bool {
         if (val != .Bool) {
-            return c.reportErr("expected a boolean", tok);
+            return c.reportErr("expected a boolean", node);
         }
         return val.Bool;
     }
 
-    fn getInt(val: Value, c: *Compiler, tok: TokenIndex) !i64 {
+    fn getInt(val: Value, c: *Compiler, node: Node.Index) !i64 {
         if (val != .int) {
-            return c.reportErr("expected an integer", tok);
+            return c.reportErr("expected an integer", node);
         }
         return val.int;
     }
@@ -178,16 +178,16 @@ const Value = union(enum) {
         };
     }
 
-    fn getStr(val: Value, c: *Compiler, tok: TokenIndex) ![]const u8 {
+    fn getStr(val: Value, c: *Compiler, node: Node.Index) ![]const u8 {
         if (val != .str) {
-            return c.reportErr("expected a string", tok);
+            return c.reportErr("expected a string", node);
         }
         return val.str;
     }
 
-    fn checkNum(val: Value, c: *Compiler, tok: TokenIndex) !void {
+    fn checkNum(val: Value, c: *Compiler, node: Node.Index) !void {
         if (val != .int and val != .num) {
-            return c.reportErr("expected a number", tok);
+            return c.reportErr("expected a number", node);
         }
     }
 };
@@ -452,13 +452,33 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
             const stmts = c.tree.nodeItems(node, &buf);
             return c.genBlock(stmts, res);
         },
+        .paren_expr => {
+            const data = c.tree.nodes.items(.data);
+            return c.genNode(data[node].un, res);
+        },
+        .as_expr => {
+            const val = try c.genAs(node);
+            return c.wrapResult(node, val, res);
+        },
+        .is_expr => {
+            const val = try c.genIs(node);
+            return c.wrapResult(node, val, res);
+        },
+        .bool_not_expr => {
+            const val = try c.genBoolNot(node);
+            return c.wrapResult(node, val, res);
+        },
+        .bit_not_expr => {
+            const val = try c.genBitNot(node);
+            return c.wrapResult(node, val, res);
+        },
+        .negate_expr => {
+            const val = try c.genNegate(node);
+            return c.wrapResult(node, val, res);
+        },
 
         .this_expr,
-        .bool_not_expr,
         .throw_expr,
-        .bit_not_expr,
-        .negate_expr,
-        .plus_expr,
         .member_access_expr,
         .bool_or_expr,
         .bool_and_expr,
@@ -496,9 +516,6 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .bit_x_or_assign,
         .map_item_expr,
         .array_access_expr,
-        .as_expr,
-        .is_expr,
-        .paren_expr,
         .import_expr,
         .error_expr,
         .enum_expr,
@@ -670,10 +687,14 @@ fn genWhile(c: *Compiler, node: Node.Index, res: Result) Error!Value {
 
     const cond_val = try c.genNode(while_expr.cond, .value);
     if (while_expr.capture) |capture| {
-        // TODO handle cond_val.isRt()
+        if (cond_val.isRt()) {
+            // exit loop if cond == null
+            cond_jump = try c.addJump(.jump_if_null, cond_val.getRt());
+        } else if (cond_val == .@"null") {
+            // never executed
+            return sub_res.toVal();
+        }
         const cond_ref = try c.makeRuntime(cond_val);
-        // jump past exit loop if cond == null
-        cond_jump = try c.addJump(.jump_if_null, cond_ref);
 
         try c.genLval(capture, .{ .let = &.{ .ref = cond_ref } });
     } else if (cond_val.isRt()) {
@@ -682,8 +703,7 @@ fn genWhile(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         const bool_val = try cond_val.getBool(c, while_expr.cond);
         if (bool_val == false) {
             // never executed
-            const res_val = Value{ .@"null" = {} };
-            return c.wrapResult(node, res_val, sub_res);
+            return sub_res.toVal();
         }
     }
 
@@ -722,9 +742,18 @@ fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
 
     const cond_val = try c.genNode(if_expr.cond, .value);
     if (if_expr.capture) |capture| {
+        if (cond_val.isRt()) {
+            // jump past if_body if cond == .none
+            if_skip = try c.addJump(.jump_if_null, cond_val.getRt());
+        } else if (cond_val == .@"null") {
+            if (if_expr.else_body) |some| {
+                return c.genNode(some, res);
+            }
+
+            const res_val = Value{ .@"null" = {} };
+            return c.wrapResult(node, res_val, res);
+        }
         const cond_ref = try c.makeRuntime(cond_val);
-        // jump past if_body if cond == .none
-        if_skip = try c.addJump(.jump_if_null, cond_ref);
 
         try c.genLval(capture, .{ .let = &.{ .ref = cond_ref } });
     } else if (!cond_val.isRt()) {
@@ -897,6 +926,170 @@ fn genBlock(c: *Compiler, stmts: []const Node.Index, res: Result) Error!Value {
         _ = try c.genNode(stmt, .discard);
     }
     return Value{ .@"null" = {} };
+}
+
+const type_id_map = std.ComptimeStringMap(bog.Type, .{
+    .{ "null", .@"null" },
+    .{ "int", .int },
+    .{ "num", .num },
+    .{ "bool", .bool },
+    .{ "str", .str },
+    .{ "tuple", .tuple },
+    .{ "map", .map },
+    .{ "list", .list },
+    .{ "err", .err },
+    .{ "range", .range },
+    .{ "func", .func },
+    .{ "tagged", .tagged },
+});
+
+fn genAs(c: *Compiler, node: Node.Index) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const lhs = try c.genNode(data[node].ty_bin.lhs, .value);
+
+    const ty_tok = data[node].ty_bin.rhs;
+
+    const type_str = c.tree.tokenSlice(ty_tok);
+    const type_id = type_id_map.get(type_str) orelse
+        return c.reportErr("expected a type name", ty_tok);
+
+    if (lhs.isRt()) {
+        const cast_ref = try c.addInst(.as, .{ .bin_ty = .{
+            .operand = lhs.getRt(),
+            .ty = type_id,
+        } });
+
+        // `as` can result in a type error
+        if (c.cur_try) |try_scope| {
+            _ = try c.addBin(.move, try_scope.err_ref, cast_ref);
+            try try_scope.jumps.append(c.gpa, try c.addJump(.jump_if_error, cast_ref));
+        }
+        return Value{ .ref = cast_ref };
+    }
+
+    return switch (type_id) {
+        .@"null" => Value{ .@"null" = {} },
+        .int => Value{
+            .int = switch (lhs) {
+                .int => |val| val,
+                .num => |val| std.math.lossyCast(i64, val),
+                .Bool => |val| @boolToInt(val),
+                .str => |str| std.fmt.parseInt(i64, str, 0) catch
+                    return c.reportErr("invalid cast to int", ty_tok),
+                else => return c.reportErr("invalid cast to int", ty_tok),
+            },
+        },
+        .num => Value{
+            .num = switch (lhs) {
+                .num => |val| val,
+                .int => |val| std.math.lossyCast(f64, val),
+                .Bool => |val| @intToFloat(f64, @boolToInt(val)),
+                .str => |str| std.fmt.parseFloat(f64, str) catch
+                    return c.reportErr("invalid cast to num", ty_tok),
+                else => return c.reportErr("invalid cast to num", ty_tok),
+            },
+        },
+        .bool => Value{
+            .Bool = switch (lhs) {
+                .int => |val| val != 0,
+                .num => |val| val != 0,
+                .Bool => |val| val,
+                .str => |val| if (mem.eql(u8, val, "true"))
+                    true
+                else if (mem.eql(u8, val, "false"))
+                    false
+                else
+                    return c.reportErr("cannot cast string to bool", ty_tok),
+                else => return c.reportErr("invalid cast to bool", ty_tok),
+            },
+        },
+        .str => Value{
+            .str = switch (lhs) {
+                .int => |val| try std.fmt.allocPrint(c.arena, "{}", .{val}),
+                .num => |val| try std.fmt.allocPrint(c.arena, "{d}", .{val}),
+                .Bool => |val| if (val) "true" else "false",
+                .str => |val| val,
+                else => return c.reportErr("invalid cast to string", ty_tok),
+            },
+        },
+        .func => return c.reportErr("cannot cast to function", ty_tok),
+        .err => return c.reportErr("cannot cast to error", ty_tok),
+        .range => return c.reportErr("cannot cast to range", ty_tok),
+        .tuple, .map, .list, .tagged => return c.reportErr("invalid cast", ty_tok),
+        else => unreachable,
+    };
+}
+
+fn genIs(c: *Compiler, node: Node.Index) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const lhs = try c.genNode(data[node].ty_bin.lhs, .value);
+
+    const ty_tok = data[node].ty_bin.rhs;
+
+    const type_str = c.tree.tokenSlice(ty_tok);
+    const type_id = type_id_map.get(type_str) orelse
+        return c.reportErr("expected a type name", ty_tok);
+
+    if (lhs.isRt()) {
+        const ref = try c.addInst(.is, .{ .bin_ty = .{
+            .operand = lhs.getRt(),
+            .ty = type_id,
+        } });
+        return Value{ .ref = ref };
+    }
+
+    return Value{
+        .Bool = switch (type_id) {
+            .@"null" => lhs == .@"null",
+            .int => lhs == .int,
+            .num => lhs == .num,
+            .bool => lhs == .Bool,
+            .str => lhs == .str,
+            else => false,
+        },
+    };
+}
+
+fn genBoolNot(c: *Compiler, node: Node.Index) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const operand = try c.genNode(data[node].un, .value);
+
+    if (operand.isRt()) {
+        const ref = try c.addUn(.bool_not, operand.getRt());
+        return Value{ .ref = ref };
+    }
+    return Value{ .Bool = !try operand.getBool(c, data[node].un) };
+}
+
+fn genBitNot(c: *Compiler, node: Node.Index) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const operand = try c.genNode(data[node].un, .value);
+
+    if (operand.isRt()) {
+        const ref = try c.addUn(.bit_not, operand.getRt());
+        return Value{ .ref = ref };
+    }
+    return Value{ .int = ~try operand.getInt(c, data[node].un) };
+}
+
+fn genNegate(c: *Compiler, node: Node.Index) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const operand = try c.genNode(data[node].un, .value);
+
+    if (operand.isRt()) {
+        const ref = try c.addUn(.negate, operand.getRt());
+        return Value{ .ref = ref };
+    }
+
+    try operand.checkNum(c, data[node].un);
+    if (operand == .int) {
+        return Value{
+            .int = std.math.sub(i64, 0, operand.int) catch
+                return c.reportErr("TODO integer overflow", node),
+        };
+    } else {
+        return Value{ .num = -operand.num };
+    }
 }
 
 const Lval = union(enum) {

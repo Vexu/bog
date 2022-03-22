@@ -58,7 +58,7 @@ mul_expr : cast_expr (("*" | "/" | "//" | "%") cast_expr)*
 
 cast_expr : prefix_expr ("as" type_name)?
 
-prefix_expr : ("-" | "+" | "~")? power_expr
+prefix_expr : ("-" | "~")? power_expr
 
 power_expr : primary_expr suffix_expr* ("**" power_expr)?
 

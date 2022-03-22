@@ -610,17 +610,13 @@ pub const Parser = struct {
         return lhs;
     }
 
-    /// prefix_expr : ("-" | "+" | "~")? power_expr
+    /// prefix_expr : ("-" | "~")? power_expr
     fn prefixExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
         const tok = p.nextToken(skip_nl);
         switch (p.tok_ids[tok]) {
             .minus => {
                 p.skipNl();
                 return p.addUn(.negate_expr, tok, try p.powerExpr(skip_nl, level));
-            },
-            .plus => {
-                p.skipNl();
-                return p.addUn(.plus_expr, tok, try p.powerExpr(skip_nl, level));
             },
             .tilde => {
                 p.skipNl();
