@@ -26,6 +26,7 @@ string_interner: std.StringHashMapUnmanaged(u32) = .{},
 // intermediate
 arena: Allocator,
 scopes: std.ArrayListUnmanaged(Scope) = .{},
+globals: std.ArrayListUnmanaged(Symbol) = .{},
 unresolved_globals: std.ArrayListUnmanaged(UnresolvedGlobal) = .{},
 list_buf: std.ArrayListUnmanaged(Ref) = .{},
 cur_loop: ?*Loop = null,
@@ -63,6 +64,7 @@ pub fn compile(gpa: Allocator, source: []const u8, errors: *Errors) (Compiler.Er
         }
     }
     _ = try compiler.addUn(.ret_null, undefined);
+    try compiler.resolveGlobals();
 
     return Bytecode{
         .name = "",
@@ -76,6 +78,7 @@ pub fn compile(gpa: Allocator, source: []const u8, errors: *Errors) (Compiler.Er
 
 pub fn deinit(c: *Compiler) void {
     c.scopes.deinit(c.gpa);
+    c.globals.deinit(c.gpa);
     c.unresolved_globals.deinit(c.gpa);
     c.list_buf.deinit(c.gpa);
     c.instructions.deinit(c.gpa);
@@ -100,7 +103,7 @@ const Fn = struct {
 };
 
 const UnresolvedGlobal = struct {
-    identifier: TokenIndex,
+    tok: TokenIndex,
     ref: Ref,
 };
 
@@ -273,6 +276,18 @@ const FoundSymbol = struct {
 };
 
 fn findSymbol(c: *Compiler, tok: TokenIndex) !FoundSymbol {
+    if (c.cur_fn != null) {
+        const name = c.tree.tokenSlice(tok);
+        for (c.globals.items) |global| {
+            if (mem.eql(u8, global.name, name)) {
+                const ref = try c.addUn(.load_global, global.ref);
+                return FoundSymbol{
+                    .ref = ref,
+                    .mut = global.mut,
+                };
+            }
+        }
+    }
     return c.findSymbolExtra(tok, c.scopes.items.len);
 }
 
@@ -316,7 +331,7 @@ fn findSymbolExtra(c: *Compiler, tok: TokenIndex, start_index: usize) Error!Foun
     }
 
     const ref = try c.addInst(.load_global, undefined);
-    try c.unresolved_globals.append(c.gpa, .{ .identifier = tok, .ref = ref });
+    try c.unresolved_globals.append(c.gpa, .{ .tok = tok, .ref = ref });
     return FoundSymbol{ .ref = ref, .mut = false, .global = true };
 }
 
@@ -334,6 +349,22 @@ fn checkRedeclaration(c: *Compiler, tok: TokenIndex) !void {
                 return error.CompileError;
             },
             else => {},
+        }
+    }
+}
+
+fn resolveGlobals(c: *Compiler) !void {
+    const data = c.instructions.items(.data);
+    for (c.unresolved_globals.items) |unresolved| {
+        const name = c.tree.tokenSlice(unresolved.tok);
+        for (c.globals.items) |global| {
+            if (mem.eql(u8, global.name, name)) {
+                const index = Bytecode.refToIndex(unresolved.ref);
+                data[index] = .{ .un = global.ref };
+                break;
+            }
+        } else {
+            return c.reportErr("use of undeclared identifier", unresolved.tok);
         }
     }
 }
@@ -1924,6 +1955,9 @@ fn genLValIdent(c: *Compiler, node: Node.Index, lval: Lval, mutable: bool) Error
                 .val = val.*,
             };
             try c.scopes.append(c.gpa, .{ .symbol = sym });
+            if (c.cur_fn == null) {
+                try c.globals.append(c.gpa, sym);
+            }
         },
         .assign => |val| {
             const sym = try c.findSymbol(tokens[node]);
