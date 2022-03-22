@@ -346,11 +346,10 @@ pub fn prevToken(tree: Tree, tok: Token.Index) Token.Index {
         .indent_16, .indent_17, .indent_18, .indent_19, .indent_20,
         .indent_21, .indent_22, .indent_23, .indent_24, .indent_25,
         .indent_26, .indent_27, .indent_28, .indent_29, .indent_30,
-        .indent_31, .indent_32, .nl, .identifier => i -= 1,
-        else => break,
+        .indent_31, .indent_32, .nl => i -= 1,
+        else => return i,
         // zig fmt: on
     };
-    return i;
 }
 
 pub fn nextToken(tree: Tree, tok: Token.Index) Token.Index {
@@ -364,11 +363,10 @@ pub fn nextToken(tree: Tree, tok: Token.Index) Token.Index {
         .indent_16, .indent_17, .indent_18, .indent_19, .indent_20,
         .indent_21, .indent_22, .indent_23, .indent_24, .indent_25,
         .indent_26, .indent_27, .indent_28, .indent_29, .indent_30,
-        .indent_31, .indent_32, .nl, .identifier => i += 1,
-        else => break,
+        .indent_31, .indent_32, .nl => i += 1,
+        else => return i,
         // zig fmt: on
     };
-    return i;
 }
 
 pub fn lineDist(tree: Tree, a: Token.Index, b: Token.Index) u32 {

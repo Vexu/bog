@@ -109,11 +109,14 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
         .bit_xor_assign,
         => {
             try renderNode(tree, data[node].bin.lhs, aiw, .space);
-            const after_op_space: Space = if (tree.lineDist(tokens[node], tree.nextToken(tokens[node])) == 0) .space else .newline;
 
-            aiw.pushIndent();
-            try renderToken(tree, tokens[node], aiw, after_op_space);
-            aiw.popIndent();
+            if (tree.lineDist(tokens[node], tree.nextToken(tokens[node])) == 0) {
+                try renderToken(tree, tokens[node], aiw, .space);
+            } else {
+                aiw.pushIndent();
+                try renderToken(tree, tokens[node], aiw, .newline);
+                aiw.popIndent();
+            }
 
             aiw.pushIndentOneShot();
             try renderNode(tree, data[node].bin.rhs, aiw, space);
@@ -121,11 +124,14 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
         .map_item_expr => {
             if (data[node].bin.lhs != 0) {
                 try renderNode(tree, data[node].bin.lhs, aiw, .space);
-                const after_op_space: Space = if (tree.lineDist(tokens[node], tree.nextToken(tokens[node])) == 0) .space else .newline;
 
-                aiw.pushIndent();
-                try renderToken(tree, tokens[node], aiw, after_op_space);
-                aiw.popIndent();
+                if (tree.lineDist(tokens[node], tree.nextToken(tokens[node])) == 0) {
+                    try renderToken(tree, tokens[node], aiw, .space);
+                } else {
+                    aiw.pushIndent();
+                    try renderToken(tree, tokens[node], aiw, .newline);
+                    aiw.popIndent();
+                }
 
                 aiw.pushIndentOneShot();
             }

@@ -9,14 +9,30 @@ const Bytecode = @This();
 
 name: []const u8,
 code: Inst.List.Slice,
-extra: []const u32,
+extra: []const Ref,
 
 main: []const Ref,
 
 strings: []const u8,
 debug_info: DebugInfo,
 
-pub const Ref = u32;
+pub const max_params = 32;
+
+pub const Index = usize;
+pub const Ref = enum(u32) {
+    _,
+    pub fn format(ref: Ref, _: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        try writer.writeByte('%');
+        try std.fmt.formatInt(@enumToInt(ref), 10, .lower, options, writer);
+    }
+};
+
+pub inline fn indexToRef(i: Index) Ref {
+    return @intToEnum(Ref, i + max_params);
+}
+pub inline fn refToIndex(r: Ref) Index {
+    return @enumToInt(r) - max_params;
+}
 
 /// All integers are little endian
 pub const Inst = struct {
@@ -72,7 +88,7 @@ pub const Inst = struct {
         load_global,
         // res = CAPTURE(operand)
         load_capture,
-        // CAPTURE(lhs) = rhs
+        // CAPTURE(lhs func).append(rhs)
         store_capture,
 
         // binary operators
@@ -200,8 +216,8 @@ pub const Inst = struct {
         },
 
         pub const FnInfo = packed struct {
-            args: u8,
             captures: u24,
+            args: u8,
         };
     };
 
@@ -242,10 +258,15 @@ pub const DebugInfo = struct {
 };
 
 pub fn dump(b: *Bytecode, body: []const Ref) void {
+    b.dumpExtra(body, 0);
+}
+
+fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
     const ops = b.code.items(.op);
     const data = b.code.items(.data);
-    for (body) |i, inst| {
-        std.debug.print("{d} %{d} = {s} ", .{ inst, i, @tagName(ops[i]) });
+    for (body) |ref, inst| {
+        const i = refToIndex(ref);
+        std.debug.print("{d:[3]} {} = {s} ", .{ inst, ref, @tagName(ops[i]), level });
         switch (ops[i]) {
             .primitive => std.debug.print("{s}\n", .{@tagName(data[i].primitive)}),
             .int => std.debug.print("{d}\n", .{data[i].int}),
@@ -272,19 +293,25 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
                 var extra_i: u32 = 0;
                 while (extra_i < extra.len) : (extra_i += 2) {
                     if (extra_i != 0) std.debug.print(", ", .{});
-                    std.debug.print("%{d} = %{d}", .{ extra[extra_i], extra[extra_i + 1] });
+                    std.debug.print("{} = {}", .{ extra[extra_i], extra[extra_i + 1] });
                 }
                 std.debug.print("}}\n", .{});
             },
+            .build_func => {
+                const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
+                const fn_info = @bitCast(Inst.Data.FnInfo, extra[0]);
+                const fn_body = extra[1..];
+                std.debug.print("args: {d}, captures: {d}\n", .{ fn_info.args, fn_info.captures });
+                b.dumpExtra(fn_body, level + 2);
+            },
             .build_tagged,
             .build_tagged_null,
-            .build_func,
             .build_range,
             .build_range_step,
             => std.debug.print("TODO\n", .{}),
             .load_global => std.debug.print("GLOBAL({d})\n", .{data[i].un}),
-            .load_capture => std.debug.print("CAPTURE({d})\n", .{data[i].un}),
-            .store_capture => std.debug.print("CAPTURE({d}) = %{d}\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
+            .load_capture => std.debug.print("CAPTURE({d})\n", .{@enumToInt(data[i].un)}),
+            .store_capture => std.debug.print("CAPTURE({d}) = {}\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
             .copy,
             .move,
             .get,
@@ -309,9 +336,9 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
             .greater_than,
             .greater_than_equal,
             .in,
-            => std.debug.print("%{d} %{d}\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
-            .append => std.debug.print("%{d}.append(%{d})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
-            .as, .is => std.debug.print("%{d} {s}\n", .{ data[i].bin_ty.operand, @tagName(data[i].bin_ty.ty) }),
+            => std.debug.print("{} {}\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
+            .append => std.debug.print("{}.append({})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
+            .as, .is => std.debug.print("{} {s}\n", .{ data[i].bin_ty.operand, @tagName(data[i].bin_ty.ty) }),
             .ret,
             .negate,
             .bool_not,
@@ -321,7 +348,7 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
             .discard,
             .build_error,
             .copy_un,
-            => std.debug.print("%{d}\n", .{data[i].un}),
+            => std.debug.print("{}\n", .{data[i].un}),
             .jump => std.debug.print("{d}\n", .{data[i].jump}),
             .jump_if_true,
             .jump_if_false,
@@ -329,15 +356,15 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
             .jump_if_null,
             .jump_if_error,
             .iter_next,
-            => std.debug.print("{d} cond %{d}\n", .{ data[i].jump_condition.offset, data[i].jump_condition.operand }),
+            => std.debug.print("{d} cond {}\n", .{ data[i].jump_condition.offset, data[i].jump_condition.operand }),
             .call => {
                 const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
-                std.debug.print("%{d}(", .{extra[0]});
+                std.debug.print("{}(", .{extra[0]});
                 dumpList(extra[1..]);
                 std.debug.print(")\n", .{});
             },
-            .call_one => std.debug.print("%{d}(%{d})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
-            .call_zero => std.debug.print("%{d}()\n", .{data[i].un}),
+            .call_one => std.debug.print("{}({})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
+            .call_zero => std.debug.print("{}()\n", .{data[i].un}),
             .ret_null, .build_error_null => std.debug.print("\n", .{}),
             _ => unreachable,
         }
@@ -347,6 +374,6 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
 fn dumpList(list: []const Ref) void {
     for (list) |item, i| {
         if (i != 0) std.debug.print(", ", .{});
-        std.debug.print("%{d}", .{item});
+        std.debug.print("{}", .{item});
     }
 }
