@@ -200,9 +200,9 @@ pub const Inst = struct {
             offset: u32,
         },
         call: struct {
-            callee: Ref,
-            extra: u24,
-            count: u8,
+            /// callee = extra[0]
+            extra: u32,
+            len: u8,
         },
 
         pub const FnInfo = packed struct {
@@ -246,3 +246,112 @@ pub const DebugInfo = struct {
         return cur;
     }
 };
+
+pub fn dump(b: *Bytecode, body: []const Ref) void {
+    const ops = b.code.items(.op);
+    const data = b.code.items(.data);
+    for (body) |i, inst| {
+        std.debug.print("{d} %{d} = {s} ", .{ inst, i, @tagName(ops[i]) });
+        switch (ops[i]) {
+            .primitive => std.debug.print("{s}\n", .{@tagName(data[i].primitive)}),
+            .int => std.debug.print("{d}\n", .{data[i].int}),
+            .num => std.debug.print("{d}\n", .{data[i].num}),
+            .import, .str, .unwrap_tagged => {
+                const str = b.strings[data[i].str.offset..][0..data[i].str.len];
+                std.debug.print("{s}\n", .{str});
+            },
+            .build_tuple => {
+                const extra = b.extra[data[i].aggregate.extra..][0..data[i].aggregate.len];
+                std.debug.print("(", .{});
+                dumpList(extra);
+                std.debug.print(")\n", .{});
+            },
+            .build_list => {
+                const extra = b.extra[data[i].aggregate.extra..][0..data[i].aggregate.len];
+                std.debug.print("[", .{});
+                dumpList(extra);
+                std.debug.print("]\n", .{});
+            },
+            .build_map => {
+                const extra = b.extra[data[i].aggregate.extra..][0..data[i].aggregate.len];
+                std.debug.print("{{", .{});
+                var extra_i: u32 = 0;
+                while (extra_i < extra.len) : (extra_i += 2) {
+                    if (extra_i != 0) std.debug.print(", ", .{});
+                    std.debug.print("%{d} = %{d}", .{ extra[extra_i], extra[extra_i + 1] });
+                }
+                std.debug.print("}}\n", .{});
+            },
+            .build_tagged,
+            .build_func,
+            .build_range,
+            .build_range_step,
+            => std.debug.print("TODO\n", .{}),
+            .load_global => std.debug.print("GLOBAL({d})\n", .{data[i].un}),
+            .load_capture => std.debug.print("CAPTURE({d})\n", .{data[i].un}),
+            .store_capture => std.debug.print("CAPTURE({d}) = %{d}\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
+            .copy,
+            .move,
+            .get,
+            .get_or_null,
+            .set,
+            .div_floor,
+            .div,
+            .mul,
+            .pow,
+            .mod,
+            .add,
+            .sub,
+            .l_shift,
+            .r_shift,
+            .bit_and,
+            .bit_or,
+            .bit_xor,
+            .equal,
+            .not_equal,
+            .less_than,
+            .less_than_equal,
+            .greater_than,
+            .greater_than_equal,
+            .in,
+            => std.debug.print("%{d} %{d}\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
+            .append => std.debug.print("%{d}.append(%{d})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
+            .as, .is => std.debug.print("%{d} {s}\n", .{ data[i].bin_ty.operand, @tagName(data[i].bin_ty.ty) }),
+            .ret,
+            .negate,
+            .bool_not,
+            .bit_not,
+            .unwrap_error,
+            .iter_init,
+            .discard,
+            .build_error,
+            .copy_un,
+            => std.debug.print("%{d}\n", .{data[i].un}),
+            .jump => std.debug.print("{d}\n", .{data[i].jump}),
+            .jump_if_true,
+            .jump_if_false,
+            .jump_if_not_error,
+            .jump_if_null,
+            .jump_if_error,
+            .iter_next,
+            => std.debug.print("{d} cond %{d}\n", .{ data[i].jump_condition.offset, data[i].jump_condition.operand }),
+            .call => {
+                const extra = b.extra[data[i].call.extra..][0..data[i].call.len];
+                std.debug.print("%{d}(", .{extra[0]});
+                dumpList(extra[1..]);
+                std.debug.print(")\n", .{});
+            },
+            .call_one => std.debug.print("%{d}(%{d})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
+            .call_zero => std.debug.print("%{d}()\n", .{data[i].un}),
+            .ret_null => std.debug.print("\n", .{}),
+            _ => unreachable,
+        }
+    }
+}
+
+fn dumpList(list: []const Ref) void {
+    for (list) |item, i| {
+        if (i != 0) std.debug.print(", ", .{});
+        std.debug.print("%{d}", .{item});
+    }
+}

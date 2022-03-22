@@ -54,7 +54,7 @@ pub fn compile(gpa: Allocator, source: []const u8, errors: *Errors) (Compiler.Er
     for (tree.root_nodes) |node| {
         // try compiler.addLineInfo(node);
 
-        const val = try compiler.genNode(node);
+        const val = try compiler.genNode(node, .discard);
         if (val.isRt()) {
             // discard unused runtime value
             _ = try compiler.addUn(.discard, val.getRt());
@@ -230,6 +230,17 @@ fn addJump(c: *Compiler, op: Bytecode.Inst.Op, operand: Ref) !Ref {
     });
 }
 
+fn addAggregate(c: *Compiler, op: Bytecode.Inst.Op, items: []const Ref) !Ref {
+    const extra = @intCast(u32, c.extra.items.len);
+    try c.extra.appendSlice(c.gpa, items);
+    return c.addInst(op, .{
+        .aggregate = .{
+            .extra = extra,
+            .len = @intCast(u32, items.len),
+        },
+    });
+}
+
 fn finishJump(c: *Compiler, jump_inst: Ref) void {
     const offset = @intCast(u32, c.code.items.len);
     const data = c.instructions.items(.data);
@@ -337,46 +348,98 @@ fn checkRedeclaration(c: *Compiler, tok: TokenIndex) !void {
     }
 }
 
-fn genNode(c: *Compiler, node: Node.Index) Error!Value {
+const Result = union(enum) {
+    /// A runtime value is expected
+    ref: Ref,
+
+    /// A value, runtime or constant, is expected
+    value,
+
+    /// No value is expected if some is given it will be discarded
+    discard,
+
+    /// returns .empty if res != .rt
+    fn toVal(res: Result) Value {
+        return if (res == .ref) .{ .ref = res.ref } else .empty;
+    }
+};
+
+fn wrapResult(c: *Compiler, node: Node.Index, val: Value, res: Result) Error!Value {
+    if (val == .empty and res != .discard) {
+        return c.reportErr("expected a value", node);
+    }
+    if (res == .discard and val.isRt()) {
+        // discard unused runtime value
+        _ = try c.addUn(.discard, val.getRt());
+    }
+    if (res == .ref) {
+        const val_ref = try c.makeRuntime(val);
+        if (val_ref == res.ref) return val;
+        if (val == .mut) {
+            _ = try c.addBin(.copy, res.ref, val_ref);
+        } else {
+            _ = try c.addBin(.move, res.ref, val_ref);
+        }
+        return Value{ .ref = res.ref };
+    }
+    return val;
+}
+
+fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     const ids = c.tree.nodes.items(.id);
     const tokens = c.tree.nodes.items(.token);
     switch (ids[node]) {
         .string_expr => {
-            return Value{ .str = try c.parseStr(tokens[node]) };
+            const val = Value{ .str = try c.parseStr(tokens[node]) };
+            return c.wrapResult(node, val, res);
         },
         .int_expr => {
             const slice = c.tree.tokenSlice(tokens[node]);
-            return Value{
+            const val = Value{
                 .int = std.fmt.parseInt(i64, slice, 0) catch
                     return c.reportErr("TODO big int", node),
             };
+            return c.wrapResult(node, val, res);
         },
         .num_expr => {
             const slice = c.tree.tokenSlice(tokens[node]);
-            return Value{
+            const val = Value{
                 .num = std.fmt.parseFloat(f64, slice) catch unreachable,
             };
+            return c.wrapResult(node, val, res);
         },
-        .true_expr => return Value{ .Bool = true },
-        .false_expr => return Value{ .Bool = false },
-        .null_expr => return Value{ .@"null" = {} },
-        .decl_ref_expr => return c.genDeclRef(node),
+        .true_expr => {
+            const val = Value{ .Bool = true };
+            return c.wrapResult(node, val, res);
+        },
+        .false_expr => {
+            const val = Value{ .Bool = false };
+            return c.wrapResult(node, val, res);
+        },
+        .null_expr => {
+            const val = Value{ .@"null" = {} };
+            return c.wrapResult(node, val, res);
+        },
+        .decl_ref_expr => {
+            const val = try c.genDeclRef(node);
+            return c.wrapResult(node, val, res);
+        },
 
         .decl => try c.genDecl(node),
 
         .return_expr => try c.genReturn(node),
         .break_expr => try c.genBreak(node),
         .continue_expr => try c.genContinue(node),
-        .for_expr, .for_let_expr => try c.genFor(node),
-        .while_expr, .while_let_expr => try c.genWhile(node),
+        .for_expr, .for_let_expr => return c.genFor(node, res),
+        .while_expr, .while_let_expr => return c.genWhile(node, res),
         .if_expr,
         .if_else_expr,
         .if_let_expr,
         .if_let_else_expr,
-        => try c.genIf(node),
+        => return c.genIf(node, res),
         .match_expr,
         .match_expr_one,
-        => try c.genMatch(node),
+        => return c.genMatch(node, res),
         .match_case_catch_all,
         .match_case_let,
         .match_case,
@@ -387,7 +450,7 @@ fn genNode(c: *Compiler, node: Node.Index) Error!Value {
         => {
             var buf: [2]Node.Index = undefined;
             const stmts = c.tree.nodeItems(node, &buf);
-            return c.genBlock(stmts);
+            return c.genBlock(stmts, res);
         },
 
         .this_expr,
@@ -466,16 +529,7 @@ fn genNode(c: *Compiler, node: Node.Index) Error!Value {
         .map_dest, .map_dest_two => unreachable,
         // zig fmt: on
     }
-    return Value{ .empty = {} };
-}
-
-fn genNodeNonEmpty(c: *Compiler, node: Node.Index) Error!Value {
-    const val = try c.genNode(node);
-
-    if (val == .empty) {
-        return c.reportErr("expected a value", node);
-    }
-    return val;
+    return c.wrapResult(node, .empty, res);
 }
 
 fn genDeclRef(c: *Compiler, node: Node.Index) Error!Value {
@@ -490,14 +544,14 @@ fn genDeclRef(c: *Compiler, node: Node.Index) Error!Value {
 
 fn genDecl(c: *Compiler, node: Node.Index) !void {
     const data = c.tree.nodes.items(.data);
-    const init_val = try c.genNodeNonEmpty(data[node].bin.rhs);
+    const init_val = try c.genNode(data[node].bin.rhs, .value);
     try c.genLval(data[node].bin.lhs, .{ .let = &init_val });
 }
 
 fn genReturn(c: *Compiler, node: Node.Index) !void {
     const data = c.tree.nodes.items(.data);
     if (data[node].un != 0) {
-        const operand = try c.genNode(data[node].un);
+        const operand = try c.genNode(data[node].un, .value);
         _ = try c.addUn(.ret, try c.makeRuntime(operand));
     } else {
         _ = try c.addUn(.ret_null, undefined);
@@ -519,13 +573,28 @@ fn genContinue(c: *Compiler, node: Node.Index) !void {
     _ = try c.addInst(.jump, .{ .jump = loop.first_inst });
 }
 
-fn genFor(c: *Compiler, node: Node.Index) Error!void {
+fn createListComprehension(c: *Compiler, ref: ?Ref) !Result {
+    const list = try c.addAggregate(.build_list, &.{});
+    if (ref) |some| {
+        _ = try c.addBin(.move, some, list);
+        return Result{ .ref = some };
+    } else {
+        return Result{ .ref = list };
+    }
+}
+
+fn genFor(c: *Compiler, node: Node.Index, res: Result) Error!Value {
+    const sub_res = switch (res) {
+        .discard => res,
+        .value => try c.createListComprehension(null),
+        .ref => |ref| try c.createListComprehension(ref),
+    };
     const for_expr = Tree.For.get(c.tree.*, node);
 
     const scope_count = c.scopes.items.len;
     defer c.scopes.items.len = scope_count;
 
-    const cond_val = try c.genNode(for_expr.cond);
+    const cond_val = try c.genNode(for_expr.cond, .value);
     if (!cond_val.isRt() and cond_val != .str)
         return c.reportErr("expected iterable value", for_expr.cond);
 
@@ -554,9 +623,14 @@ fn genFor(c: *Compiler, node: Node.Index) Error!void {
         try c.genLval(some, .{ .let = &.{ .ref = elem_ref } });
     }
 
-    const body_val = try c.genNode(for_expr.body);
-    if (body_val.isRt()) {
-        _ = try c.addUn(.discard, body_val.getRt());
+    switch (sub_res) {
+        .discard => _ = try c.genNode(for_expr.body, .discard),
+        .ref => |list| {
+            const body_val = try c.genNode(for_expr.body, .value);
+            const body_ref = try c.makeRuntime(body_val);
+            _ = try c.addBin(.append, list, body_ref);
+        },
+        else => unreachable,
     }
 
     // jump to the start of the loop
@@ -568,9 +642,15 @@ fn genFor(c: *Compiler, node: Node.Index) Error!void {
     for (loop.breaks.items) |@"break"| {
         c.finishJump(@"break");
     }
+    return sub_res.toVal();
 }
 
-fn genWhile(c: *Compiler, node: Node.Index) Error!void {
+fn genWhile(c: *Compiler, node: Node.Index, res: Result) Error!Value {
+    const sub_res = switch (res) {
+        .discard => res,
+        .value => try c.createListComprehension(null),
+        .ref => |ref| try c.createListComprehension(ref),
+    };
     const while_expr = Tree.While.get(c.tree.*, node);
 
     const scope_count = c.scopes.items.len;
@@ -588,7 +668,7 @@ fn genWhile(c: *Compiler, node: Node.Index) Error!void {
     // beginning of condition
     var cond_jump: ?Ref = null;
 
-    const cond_val = try c.genNode(while_expr.cond);
+    const cond_val = try c.genNode(while_expr.cond, .value);
     if (while_expr.capture) |capture| {
         // TODO handle cond_val.isRt()
         const cond_ref = try c.makeRuntime(cond_val);
@@ -602,13 +682,19 @@ fn genWhile(c: *Compiler, node: Node.Index) Error!void {
         const bool_val = try cond_val.getBool(c, while_expr.cond);
         if (bool_val == false) {
             // never executed
-            return;
+            const res_val = Value{ .@"null" = {} };
+            return c.wrapResult(node, res_val, sub_res);
         }
     }
 
-    const body_val = try c.genNode(while_expr.body);
-    if (body_val.isRt()) {
-        _ = try c.addUn(.discard, body_val.getRt());
+    switch (sub_res) {
+        .discard => _ = try c.genNode(while_expr.body, .discard),
+        .ref => |list| {
+            const body_val = try c.genNode(while_expr.body, .value);
+            const body_ref = try c.makeRuntime(body_val);
+            _ = try c.addBin(.append, list, body_ref);
+        },
+        else => unreachable,
     }
 
     // jump to the start of the loop
@@ -622,9 +708,11 @@ fn genWhile(c: *Compiler, node: Node.Index) Error!void {
     for (loop.breaks.items) |@"break"| {
         c.finishJump(@"break");
     }
+
+    return sub_res.toVal();
 }
 
-fn genIf(c: *Compiler, node: Node.Index) Error!void {
+fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     const if_expr = Tree.If.get(c.tree.*, node);
 
     const scope_count = c.scopes.items.len;
@@ -632,7 +720,7 @@ fn genIf(c: *Compiler, node: Node.Index) Error!void {
 
     var if_skip: u32 = undefined;
 
-    const cond_val = try c.genNodeNonEmpty(if_expr.cond);
+    const cond_val = try c.genNode(if_expr.cond, .value);
     if (if_expr.capture) |capture| {
         const cond_ref = try c.makeRuntime(cond_val);
         // jump past if_body if cond == .none
@@ -643,30 +731,32 @@ fn genIf(c: *Compiler, node: Node.Index) Error!void {
         const bool_val = try cond_val.getBool(c, if_expr.cond);
 
         if (bool_val) {
-            const then_val = try c.genNode(if_expr.then_body);
-            if (then_val.isRt()) {
-                _ = try c.addUn(.discard, then_val.getRt());
-            }
+            return c.genNode(if_expr.then_body, res);
         } else if (if_expr.else_body) |some| {
-            const else_val = try c.genNode(some);
-            if (else_val.isRt()) {
-                _ = try c.addUn(.discard, else_val.getRt());
-            }
+            return c.genNode(some, res);
         }
 
-        return;
+        const res_val = Value{ .@"null" = {} };
+        return c.wrapResult(node, res_val, res);
     } else {
         // jump past if_body if cond == false
         if_skip = try c.addJump(.jump_if_false, cond_val.getRt());
     }
+    const sub_res = switch (res) {
+        .ref, .discard => res,
+        .value => val: {
+            // add a dummy instruction we can store the value into
+            const res_ref = @intCast(Ref, c.instructions.len);
+            try c.instructions.append(c.gpa, undefined);
+            break :val Result{ .ref = res_ref };
+        },
+    };
 
-    const then_val = try c.genNode(if_expr.then_body);
-    if (then_val.isRt()) {
-        _ = try c.addUn(.discard, then_val.getRt());
-    }
+    // sub_res is either ref or discard, either way wrapResult handles it
+    _ = try c.genNode(if_expr.then_body, sub_res);
 
     // jump past else_body since if_body was executed
-    const else_skip = if (if_expr.else_body != null)
+    const else_skip = if (if_expr.else_body != null or sub_res == .ref)
         try c.addUn(.jump, undefined)
     else
         null;
@@ -676,24 +766,36 @@ fn genIf(c: *Compiler, node: Node.Index) Error!void {
     c.scopes.items.len = scope_count;
 
     if (if_expr.else_body) |some| {
-        const else_val = try c.genNode(some);
-        if (else_val.isRt()) {
-            _ = try c.addUn(.discard, else_val.getRt());
-        }
+        // sub_res is either ref or discard, either way wrapResult handles it
+        _ = try c.genNode(some, sub_res);
+    } else {
+        const res_val = Value{ .@"null" = {} };
+        _ = try c.wrapResult(node, res_val, sub_res);
     }
 
     if (else_skip) |some| {
         c.finishJump(some);
     }
+    return sub_res.toVal();
 }
 
-fn genMatch(c: *Compiler, node: Node.Index) Error!void {
+fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
+    const sub_res = switch (res) {
+        .ref, .discard => res,
+        .value => val: {
+            // add a dummy instruction we can store the value into
+            const res_ref = @intCast(Ref, c.instructions.len);
+            try c.instructions.append(c.gpa, undefined);
+            break :val Result{ .ref = res_ref };
+        },
+    };
+
     const ids = c.tree.nodes.items(.id);
     const data = c.tree.nodes.items(.data);
     var buf: [2]Node.Index = undefined;
     const cases = c.tree.nodeItems(node, &buf);
 
-    const cond_val = try c.genNodeNonEmpty(cases[0]);
+    const cond_val = try c.genNode(cases[0], .value);
     const cond_ref = try c.makeRuntime(cond_val);
 
     var jumps: JumpList = .{};
@@ -730,7 +832,7 @@ fn genMatch(c: *Compiler, node: Node.Index) Error!void {
                 expr = items[items.len - 1];
 
                 if (items.len == 2) {
-                    const item_val = try c.genNodeNonEmpty(items[0]);
+                    const item_val = try c.genNode(items[0], .value);
                     const item_ref = try c.makeRuntime(item_val);
                     // if not equal to the error value jump over this handler
                     const eq_ref = try c.addBin(.equal, item_ref, cond_ref);
@@ -740,7 +842,7 @@ fn genMatch(c: *Compiler, node: Node.Index) Error!void {
                     defer success_jumps.deinit(c.gpa);
 
                     for (items[0 .. items.len - 1]) |item| {
-                        const item_val = try c.genNodeNonEmpty(item);
+                        const item_val = try c.genNode(item, .value);
                         const item_ref = try c.makeRuntime(item_val);
 
                         const eq_ref = try c.addBin(.equal, item_ref, cond_ref);
@@ -756,10 +858,8 @@ fn genMatch(c: *Compiler, node: Node.Index) Error!void {
             else => unreachable,
         }
 
-        const case_res = try c.genNode(expr);
-        if (case_res.isRt()) {
-            _ = try c.addUn(.discard, case_res.getRt());
-        }
+        // sub_res is either ref or discard, either way wrapResult handles it
+        _ = try c.genNode(expr, sub_res);
 
         // exit match (unless it's this is the last case)
         if (case_i + 2 != cases.len) {
@@ -772,27 +872,29 @@ fn genMatch(c: *Compiler, node: Node.Index) Error!void {
         }
     }
 
+    if (!seen_catch_all) {
+        const res_val = Value{ .@"null" = {} };
+        _ = try c.wrapResult(node, res_val, sub_res);
+    }
+
     // exit match
     for (jumps.items) |jump| {
         c.finishJump(jump);
     }
+    return sub_res.toVal();
 }
 
-fn genBlock(c: *Compiler, stmts: []const Node.Index) Error!Value {
+fn genBlock(c: *Compiler, stmts: []const Node.Index, res: Result) Error!Value {
     const scope_count = c.scopes.items.len;
     defer c.scopes.items.len = scope_count;
 
     for (stmts) |stmt, i| {
         // return value of last instruction if it is not discarded
         if (i + 1 == stmts.len) {
-            return c.genNode(stmt);
+            return c.genNode(stmt, res);
         }
 
-        const val = try c.genNode(stmt);
-        if (val.isRt()) {
-            // discard unused runtime value
-            _ = try c.addUn(.discard, val.getRt());
-        }
+        _ = try c.genNode(stmt, .discard);
     }
     return Value{ .@"null" = {} };
 }
