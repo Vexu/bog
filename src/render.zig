@@ -44,7 +44,7 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
     const tokens = tree.nodes.items(.token);
     const data = tree.nodes.items(.data);
     switch (ids[node]) {
-        .decl_ref_expr,
+        .ident_expr,
         .string_expr,
         .int_expr,
         .num_expr,
@@ -52,12 +52,11 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
         .false_expr,
         .this_expr,
         .null_expr,
-        .ident_dest,
-        .discard_dest,
+        .discard_expr,
         .break_expr,
         .continue_expr,
         => try renderToken(tree, tokens[node], aiw, space),
-        .mut_ident_dest => {
+        .mut_ident_expr => {
             try renderToken(tree, tree.prevToken(tokens[node]), aiw, .space);
             try renderToken(tree, tokens[node], aiw, space);
         },
@@ -165,7 +164,7 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
             try renderToken(tree, str, aiw, .none);
             try renderToken(tree, tree.nextToken(str), aiw, space);
         },
-        .error_expr, .error_dest => {
+        .error_expr => {
             const initializer = data[node].un;
             const after_tok_space = if (initializer == 0) space else .none;
             try renderToken(tree, tokens[node], aiw, after_tok_space);
@@ -191,10 +190,6 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
         .range_expr_start,
         .range_expr_end,
         .range_expr_step,
-        .range_dest,
-        .range_dest_start,
-        .range_dest_end,
-        .range_dest_step,
         => {
             const range = Tree.Range.get(tree, node);
 
@@ -320,12 +315,6 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
             try renderCommaList(tree, args, r_paren, aiw, .none);
             try renderToken(tree, r_paren, aiw, space);
         },
-        .tuple_dest,
-        .tuple_dest_two,
-        .list_dest,
-        .list_dest_two,
-        .map_dest,
-        .map_dest_two,
         .tuple_expr,
         .tuple_expr_two,
         .list_expr,

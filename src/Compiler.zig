@@ -356,7 +356,7 @@ fn getLastNode(c: *Compiler, node: Node.Index) Node.Index {
     const ids = c.tree.nodes.items(.id);
     var cur = node;
     while (true)
-        switch (ids[node]) {
+        switch (ids[cur]) {
             .paren_expr => cur = data[cur].un,
             else => return cur,
         };
@@ -434,9 +434,15 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
             const val = Value{ .@"null" = {} };
             return c.wrapResult(node, val, res);
         },
-        .decl_ref_expr => {
-            const val = try c.genDeclRef(node);
+        .ident_expr => {
+            const val = try c.genIdent(node);
             return c.wrapResult(node, val, res);
+        },
+        .discard_expr => {
+            return c.reportErr("'_' cannot be used as a value", node);
+        },
+        .mut_ident_expr => {
+            return c.reportErr("'mut' cannot be used as a value", node);
         },
 
         .decl => try c.genDecl(node),
@@ -556,17 +562,11 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .catch_expr,
         .format_expr,
         => @panic("TODO"),
-        // zig fmt: off
-        .ident_dest, .discard_dest, .mut_ident_dest, .error_dest,
-        .range_dest, .range_dest_start, .range_dest_end, .range_dest_step,
-        .tuple_dest, .tuple_dest_two, .list_dest, .list_dest_two,
-        .map_dest, .map_dest_two => unreachable,
-        // zig fmt: on
     }
     return c.wrapResult(node, .empty, res);
 }
 
-fn genDeclRef(c: *Compiler, node: Node.Index) Error!Value {
+fn genIdent(c: *Compiler, node: Node.Index) Error!Value {
     const tokens = c.tree.nodes.items(.token);
     const sym = try c.findSymbol(tokens[node]);
     if (sym.mut) {
@@ -579,7 +579,17 @@ fn genDeclRef(c: *Compiler, node: Node.Index) Error!Value {
 fn genDecl(c: *Compiler, node: Node.Index) !void {
     const data = c.tree.nodes.items(.data);
     const init_val = try c.genNode(data[node].bin.rhs, .value);
-    try c.genLval(data[node].bin.lhs, .{ .let = &init_val });
+    const destructuring = data[node].bin.lhs;
+    const ids = c.tree.nodes.items(.id);
+
+    const last_node = c.getLastNode(destructuring);
+    if (ids[last_node] == .discard_expr) {
+        return c.reportErr(
+            "'_' cannot be used directly in variable initialization",
+            last_node,
+        );
+    }
+    try c.genLval(destructuring, .{ .let = &init_val });
 }
 
 fn genReturn(c: *Compiler, node: Node.Index) !void {
@@ -1210,29 +1220,35 @@ const Lval = union(enum) {
 fn genLval(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
     const ids = c.tree.nodes.items(.id);
     switch (ids[node]) {
-        .ident_dest => try c.genLValIdentifier(node, lval, false),
-        .mut_ident_dest => try c.genLValIdentifier(node, lval, true),
-        .discard_dest => return c.reportErr(
-            "'_' can only be used to discard unwanted tuple/list items in destructuring assignment",
-            node,
-        ),
-        .error_dest => try c.genLValError(node, lval),
-        .range_dest,
-        .range_dest_start,
-        .range_dest_end,
-        .range_dest_step,
-        .tuple_dest,
-        .tuple_dest_two,
-        .list_dest,
-        .list_dest_two,
-        .map_dest,
-        .map_dest_two,
+        .paren_expr => {
+            const data = c.tree.nodes.items(.data);
+            return c.genLval(data[node].un, lval);
+        },
+        .ident_expr => try c.genLValIdent(node, lval, false),
+        .mut_ident_expr => try c.genLValIdent(node, lval, true),
+        .discard_expr => {
+            // no op
+        },
+        .error_expr => try c.genLValError(node, lval),
+        .range_expr,
+        .range_expr_start,
+        .range_expr_end,
+        .range_expr_step,
+        .tuple_expr,
+        .tuple_expr_two,
+        .list_expr,
+        .list_expr_two,
+        .map_expr,
+        .map_expr_two,
         => @panic("TODO"),
-        else => unreachable,
+        else => switch (lval) {
+            .let => return c.reportErr("invalid left-hand side to declaration", node),
+            .assign, .aug_assign => return c.reportErr("invalid left-hand side to assignment", node),
+        },
     }
 }
 
-fn genLValIdentifier(c: *Compiler, node: Node.Index, lval: Lval, mutable: bool) Error!void {
+fn genLValIdent(c: *Compiler, node: Node.Index, lval: Lval, mutable: bool) Error!void {
     const tokens = c.tree.nodes.items(.token);
     switch (lval) {
         .let => |val| {
@@ -1280,10 +1296,13 @@ fn genLValError(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
     if (!val.isRt()) {
         return c.reportErr("expected an error", node);
     }
+    const data = c.tree.nodes.items(.data);
+    if (data[node].un == 0) {
+        return c.reportErr("expected a destructuring", node);
+    }
     const unwrapped = try c.addUn(.unwrap_error, val.getRt());
 
     const rhs_val = Value{ .ref = unwrapped };
-    const data = c.tree.nodes.items(.data);
     try c.genLval(data[node].un, switch (lval) {
         .let => .{ .let = &rhs_val },
         .assign => .{ .assign = &rhs_val },

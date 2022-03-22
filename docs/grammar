@@ -4,21 +4,7 @@ stmt
     : decl
     | assign_expr
 
-decl : "let" destructuring "=" block_or_expr
-
-destructuring
-    : "mut"? IDENTIFIER
-    | "_"
-    | IDENTIFIER compound_destructuring
-    | "error" compound_destructuring
-    | compound_destructuring
-    | destructuring? ":" (destructuring? (":" destructuring)?)?
-    
-compound_destructuring
-    : "(" destructuring ")"
-    | "(" destructuring ("," destructuring)* ","? ")"
-    | "[" destructuring ("," destructuring)* ","? "]"
-    | "{" destructuring ("," destructuring)* ","? "}"
+decl : "let" primary_expr "=" block_or_expr
 
 assign_expr : expr (("=" | "+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") block_or_expr)?
 
@@ -33,7 +19,7 @@ expr
 
 jump_expr : "return" block_or_expr? | "break" | "continue" | "throw" block_or_expr
 
-fn : "fn" "(" (destructuring ",")* destructuring? ")" block_or_expr
+fn : "fn" "(" (primary_expr ",")* primary_expr? ")" block_or_expr
 
 bool_expr
     : "not" comparison_expr
@@ -68,7 +54,8 @@ suffix_expr
     | "." IDENTIFIER
 
 primary_expr
-    : IDENTIFIER
+    : "mut"? IDENTIFIER
+    | "_"
     | STRING
     | format_string
     | NUMBER
@@ -94,16 +81,16 @@ initializer
     | "{" (expr "=" expr ",")* (expr "=" expr)? "}"
     | "[" (expr ",")* expr? "]"
 
-if : "if" ("let" destructuring "=")? expr block_or_expr ("else" block_or_expr)?
+if : "if" ("let" primary_expr "=")? expr block_or_expr ("else" block_or_expr)?
 
-while : "while" ("let" destructuring "=")? expr block_or_expr
+while : "while" ("let" primary_expr "=")? expr block_or_expr
 
-for : "for" ("let" destructuring "in")? expr block_or_expr
+for : "for" ("let" primary_expr "in")? expr block_or_expr
 
 match : "match" expr (NL match_case)+ NL
 
 match_case
-    : "let" destructuring "=>" block_or_expr
+    : "let" primary_expr "=>" block_or_expr
     | expr ("," expr)* ","? "=>" block_or_expr
 
-try : "try" block_or_expr ("catch" ("let" destructuring | expr)? block_or_expr)*
+try : "try" block_or_expr ("catch" ("let" primary_expr | expr)? block_or_expr)*
