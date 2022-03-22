@@ -233,11 +233,11 @@ fn addJump(c: *Compiler, op: Bytecode.Inst.Op, operand: Ref) !Ref {
     });
 }
 
-fn addAggregate(c: *Compiler, op: Bytecode.Inst.Op, items: []const Ref) !Ref {
+fn addExtra(c: *Compiler, op: Bytecode.Inst.Op, items: []const Ref) !Ref {
     const extra = @intCast(u32, c.extra.items.len);
     try c.extra.appendSlice(c.gpa, items);
     return c.addInst(op, .{
-        .aggregate = .{
+        .extra = .{
             .extra = extra,
             .len = @intCast(u32, items.len),
         },
@@ -551,15 +551,33 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .map_expr_two,
         => return c.genMap(node, res),
         .map_item_expr => unreachable, // handled in genMap
+        .error_expr => {
+            const val = try c.genError(node);
+            return c.wrapResult(node, val, res);
+        },
+        .import_expr => {
+            const val = try c.genImport(node);
+            return c.wrapResult(node, val, res);
+        },
+        .call_expr,
+        .call_expr_one,
+        => {
+            const val = try c.genCall(node);
+            return c.wrapResult(node, val, res);
+        },
+        .member_access_expr => {
+            const val = try c.genMemberAccess(node);
+            return c.wrapResult(node, val, res);
+        },
+        .array_access_expr => {
+            const val = try c.genArrayAccess(node);
+            return c.wrapResult(node, val, res);
+        },
 
         .this_expr,
         .throw_expr,
-        .member_access_expr,
         .bool_or_expr,
         .bool_and_expr,
-        .array_access_expr,
-        .import_expr,
-        .error_expr,
         .enum_expr,
         .range_expr,
         .range_expr_start,
@@ -567,8 +585,6 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .range_expr_step,
         .fn_expr,
         .fn_expr_one,
-        .call_expr,
-        .call_expr_one,
         .try_expr,
         .try_expr_one,
         .catch_let_expr,
@@ -631,7 +647,7 @@ fn genContinue(c: *Compiler, node: Node.Index) !void {
 }
 
 fn createListComprehension(c: *Compiler, ref: ?Ref) !Result {
-    const list = try c.addAggregate(.build_list, &.{});
+    const list = try c.addExtra(.build_list, &.{});
     if (ref) |some| {
         _ = try c.addBin(.move, some, list);
         return Result{ .ref = some };
@@ -1452,7 +1468,7 @@ fn genTupleList(
         try c.list_buf.append(c.gpa, item_ref);
     }
 
-    const ref = try c.addAggregate(op, c.list_buf.items[list_buf_top..]);
+    const ref = try c.addExtra(op, c.list_buf.items[list_buf_top..]);
     return c.wrapResult(node, Value{ .ref = ref }, res);
 }
 
@@ -1514,8 +1530,115 @@ fn genMap(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         try c.list_buf.appendSlice(c.gpa, &.{ key, value_ref });
     }
 
-    const ref = try c.addAggregate(.build_map, c.list_buf.items[list_buf_top..]);
+    const ref = try c.addExtra(.build_map, c.list_buf.items[list_buf_top..]);
     return c.wrapResult(node, Value{ .ref = ref }, res);
+}
+
+fn genError(c: *Compiler, node: Node.Index) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    if (data[node].un == 0) {
+        const ref = try c.addUn(.build_error_null, undefined);
+        return Value{ .ref = ref };
+    }
+    const operand_val = try c.genNode(data[node].un, .value);
+    const operand_ref = try c.makeRuntime(operand_val);
+
+    const ref = try c.addUn(.build_error, operand_ref);
+    return Value{ .ref = ref };
+}
+
+fn genImport(c: *Compiler, node: Node.Index) Error!Value {
+    const tokens = c.tree.nodes.items(.token);
+    const str = try c.parseStr(tokens[node]);
+
+    const res_ref = try c.addInst(.import, .{ .str = .{
+        .len = @intCast(u32, str.len),
+        .offset = try c.putString(str),
+    } });
+    return Value{ .ref = res_ref };
+}
+
+fn genCall(c: *Compiler, node: Node.Index) Error!Value {
+    var buf: [2]Node.Index = undefined;
+    const items = c.tree.nodeItems(node, &buf);
+
+    const callee = items[0];
+    const args = items[1..];
+
+    const callee_val = try c.genNode(callee, .value);
+    if (!callee_val.isRt()) {
+        return c.reportErr("attempt to call non function value", callee);
+    }
+
+    if (args.len > max_params) {
+        return c.reportErr("too many arguments", node);
+    }
+
+    const list_buf_top = c.list_buf.items.len;
+    defer c.list_buf.items.len = list_buf_top;
+
+    try c.list_buf.append(c.gpa, callee_val.getRt());
+
+    for (args) |arg| {
+        const arg_val = try c.genNode(arg, .value);
+        const arg_ref = if (arg_val == .mut)
+            try c.addUn(.copy_un, arg_val.mut)
+        else
+            try c.makeRuntime(arg_val);
+
+        try c.list_buf.append(c.gpa, arg_ref);
+    }
+
+    const arg_refs = c.list_buf.items[list_buf_top..];
+    const res_ref = switch (arg_refs.len) {
+        0 => unreachable, // callee is always added
+        1 => try c.addUn(.call_zero, arg_refs[0]),
+        2 => try c.addBin(.call_one, arg_refs[0], arg_refs[1]),
+        else => try c.addExtra(.call, arg_refs),
+    };
+
+    if (c.cur_try) |try_scope| {
+        _ = try c.addBin(.move, try_scope.err_ref, res_ref);
+        try try_scope.jumps.append(c.gpa, try c.addJump(.jump_if_error, res_ref));
+    }
+
+    return Value{ .ref = res_ref };
+}
+
+fn genMemberAccess(c: *Compiler, node: Node.Index) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const tokens = c.tree.nodes.items(.token);
+    const operand = data[node].un;
+
+    var operand_val = try c.genNode(operand, .value);
+    if (operand_val != .str and !operand_val.isRt()) {
+        return c.reportErr("invalid operand to member access", operand);
+    }
+    const operand_ref = try c.makeRuntime(operand_val);
+
+    var name_val = Value{ .str = c.tree.tokenSlice(tokens[node]) };
+    var name_ref = try c.makeRuntime(name_val);
+
+    const res_ref = try c.addBin(.get, operand_ref, name_ref);
+    return Value{ .ref = res_ref };
+}
+
+fn genArrayAccess(c: *Compiler, node: Node.Index) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const lhs = data[node].bin.lhs;
+    const rhs = data[node].bin.rhs;
+
+    var lhs_val = try c.genNode(lhs, .value);
+    if (lhs_val != .str and !lhs_val.isRt()) {
+        return c.reportErr("invalid operand to subscript", lhs);
+    }
+    const lhs_ref = try c.makeRuntime(lhs_val);
+
+    var rhs_val = try c.genNode(rhs, .value);
+    var rhs_ref = try c.makeRuntime(rhs_val);
+
+    const res_ref = try c.addBin(.get, lhs_ref, rhs_ref);
+    return Value{ .ref = res_ref };
 }
 
 const Lval = union(enum) {

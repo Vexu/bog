@@ -39,14 +39,17 @@ pub const Inst = struct {
 
         // aggregate construction
 
-        // use Data.aggregate
+        // use Data.extra
         build_tuple,
         build_list,
         build_map,
         // use Data.un
         build_error,
+        build_error_null,
         build_tagged,
-        // uses Data.func
+        build_tagged_null,
+        /// uses Data.func with
+        // extra[0] == Data.FnInfo
         build_func,
         // uses Data.range
         build_range,
@@ -139,11 +142,12 @@ pub const Inst = struct {
         // use Data.jump_condition
         iter_next,
 
-        // uses Data.call
+        /// uses Data.extra with 
+        /// extra[0] == callee
         call,
-        // uses Data.bin, lhs(rhs)
+        /// uses Data.bin, lhs(rhs)
         call_one,
-        // uses Data.un, operand()
+        /// uses Data.un, operand()
         call_zero,
 
         // use Data.un
@@ -166,12 +170,7 @@ pub const Inst = struct {
             offset: u32,
             len: u32,
         },
-        aggregate: struct {
-            extra: u32,
-            len: u32,
-        },
-        func: struct {
-            // extra[0] = Data.FnInfo
+        extra: struct {
             extra: u32,
             len: u32,
         },
@@ -198,11 +197,6 @@ pub const Inst = struct {
         jump_condition: struct {
             operand: Ref,
             offset: u32,
-        },
-        call: struct {
-            /// callee = extra[0]
-            extra: u32,
-            len: u8,
         },
 
         pub const FnInfo = packed struct {
@@ -261,19 +255,19 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
                 std.debug.print("{s}\n", .{str});
             },
             .build_tuple => {
-                const extra = b.extra[data[i].aggregate.extra..][0..data[i].aggregate.len];
+                const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
                 std.debug.print("(", .{});
                 dumpList(extra);
                 std.debug.print(")\n", .{});
             },
             .build_list => {
-                const extra = b.extra[data[i].aggregate.extra..][0..data[i].aggregate.len];
+                const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
                 std.debug.print("[", .{});
                 dumpList(extra);
                 std.debug.print("]\n", .{});
             },
             .build_map => {
-                const extra = b.extra[data[i].aggregate.extra..][0..data[i].aggregate.len];
+                const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
                 std.debug.print("{{", .{});
                 var extra_i: u32 = 0;
                 while (extra_i < extra.len) : (extra_i += 2) {
@@ -283,6 +277,7 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
                 std.debug.print("}}\n", .{});
             },
             .build_tagged,
+            .build_tagged_null,
             .build_func,
             .build_range,
             .build_range_step,
@@ -336,14 +331,14 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
             .iter_next,
             => std.debug.print("{d} cond %{d}\n", .{ data[i].jump_condition.offset, data[i].jump_condition.operand }),
             .call => {
-                const extra = b.extra[data[i].call.extra..][0..data[i].call.len];
+                const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
                 std.debug.print("%{d}(", .{extra[0]});
                 dumpList(extra[1..]);
                 std.debug.print(")\n", .{});
             },
             .call_one => std.debug.print("%{d}(%{d})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
             .call_zero => std.debug.print("%{d}()\n", .{data[i].un}),
-            .ret_null => std.debug.print("\n", .{}),
+            .ret_null, .build_error_null => std.debug.print("\n", .{}),
             _ => unreachable,
         }
     }
