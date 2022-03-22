@@ -113,7 +113,6 @@ pub fn firstToken(tree: Tree, node: Node.Index) Token.Index {
         .bit_and_assign,
         .bit_or_assign,
         .bit_x_or_assign,
-        .map_item_expr,
         .array_access_expr,
         .call_expr_one,
         .match_case_one,
@@ -143,6 +142,11 @@ pub fn firstToken(tree: Tree, node: Node.Index) Token.Index {
         .mod_expr,
         .pow_expr,
         => cur = data[cur].bin.lhs,
+        .map_item_expr => if (data[cur].bin.lhs != 0) {
+            cur = data[cur].bin.lhs;
+        } else {
+            cur = data[cur].bin.rhs;
+        },
         .match_case_let => {
             offset += 1;
             cur = data[cur].bin.lhs;
@@ -544,7 +548,7 @@ pub const Node = struct {
         map_expr,
         /// { lhs, rhs } both may be omitted
         map_expr_two,
-        /// lhs = rhs
+        /// lhs = rhs, lhs may be omitted
         map_item_expr,
         /// token
         decl_ref_expr,

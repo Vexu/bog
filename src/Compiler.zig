@@ -27,6 +27,7 @@ string_interner: std.StringHashMapUnmanaged(u32) = .{},
 arena: Allocator,
 scopes: std.ArrayListUnmanaged(Scope) = .{},
 unresolved_globals: std.ArrayListUnmanaged(UnresolvedGlobal) = .{},
+list_buf: std.ArrayListUnmanaged(Ref) = .{},
 cur_loop: ?*Loop = null,
 cur_try: ?*Try = null,
 
@@ -74,6 +75,8 @@ pub fn compile(gpa: Allocator, source: []const u8, errors: *Errors) (Compiler.Er
 
 pub fn deinit(c: *Compiler) void {
     c.scopes.deinit(c.gpa);
+    c.unresolved_globals.deinit(c.gpa);
+    c.list_buf.deinit(c.gpa);
     c.instructions.deinit(c.gpa);
     c.extra.deinit(c.gpa);
     c.strings.deinit(c.gpa);
@@ -348,6 +351,17 @@ fn checkRedeclaration(c: *Compiler, tok: TokenIndex) !void {
     }
 }
 
+fn getLastNode(c: *Compiler, node: Node.Index) Node.Index {
+    const data = c.tree.nodes.items(.data);
+    const ids = c.tree.nodes.items(.id);
+    var cur = node;
+    while (true)
+        switch (ids[node]) {
+            .paren_expr => cur = data[cur].un,
+            else => return cur,
+        };
+}
+
 const Result = union(enum) {
     /// A runtime value is expected
     ref: Ref,
@@ -476,6 +490,16 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
             const val = try c.genNegate(node);
             return c.wrapResult(node, val, res);
         },
+        .tuple_expr,
+        .tuple_expr_two,
+        => return c.genTupleList(node, res, .build_tuple),
+        .list_expr,
+        .list_expr_two,
+        => return c.genTupleList(node, res, .build_list),
+        .map_expr,
+        .map_expr_two,
+        => return c.genMap(node, res),
+        .map_item_expr => unreachable, // handled in genMap
 
         .this_expr,
         .throw_expr,
@@ -514,7 +538,6 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .bit_and_assign,
         .bit_or_assign,
         .bit_x_or_assign,
-        .map_item_expr,
         .array_access_expr,
         .import_expr,
         .error_expr,
@@ -527,12 +550,6 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .fn_expr_one,
         .call_expr,
         .call_expr_one,
-        .tuple_expr,
-        .tuple_expr_two,
-        .list_expr,
-        .list_expr_two,
-        .map_expr,
-        .map_expr_two,
         .try_expr,
         .try_expr_one,
         .catch_let_expr,
@@ -1090,6 +1107,98 @@ fn genNegate(c: *Compiler, node: Node.Index) Error!Value {
     } else {
         return Value{ .num = -operand.num };
     }
+}
+
+fn genTupleList(
+    c: *Compiler,
+    node: Node.Index,
+    res: Result,
+    op: Bytecode.Inst.Op,
+) Error!Value {
+    var buf: [2]Node.Index = undefined;
+    const items = c.tree.nodeItems(node, &buf);
+
+    const list_buf_top = c.list_buf.items.len;
+    defer c.list_buf.items.len = list_buf_top;
+
+    if (res == .discard) {
+        for (items) |val| {
+            _ = try c.genNode(val, .discard);
+        }
+        return Value{ .empty = {} };
+    }
+
+    for (items) |val| {
+        const item_val = try c.genNode(val, .value);
+        const item_ref = try c.makeRuntime(item_val);
+
+        try c.list_buf.append(c.gpa, item_ref);
+    }
+
+    const ref = try c.addAggregate(op, c.list_buf.items[list_buf_top..]);
+    return c.wrapResult(node, Value{ .ref = ref }, res);
+}
+
+fn genMap(c: *Compiler, node: Node.Index, res: Result) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const tok_ids = c.tree.tokens.items(.id);
+    var buf: [2]Node.Index = undefined;
+    const items = c.tree.nodeItems(node, &buf);
+
+    const list_buf_top = c.list_buf.items.len;
+    defer c.list_buf.items.len = list_buf_top;
+
+    if (res == .discard) {
+        for (items) |item| {
+            if (data[item].bin.lhs != 0) {
+                const last_node = c.getLastNode(data[item].bin.lhs);
+                if (tok_ids[last_node] != .identifier) {
+                    _ = try c.genNode(data[item].bin.lhs, .discard);
+                }
+            }
+
+            _ = try c.genNode(data[item].bin.lhs, .discard);
+        }
+        return Value{ .empty = {} };
+    }
+
+    for (items) |item| {
+        var key: Ref = undefined;
+        if (data[item].bin.lhs != 0) {
+            const last_node = c.getLastNode(data[item].bin.lhs);
+            if (tok_ids[last_node] == .identifier) {
+                // `ident = value` is equal to `"ident" = value`
+                const ident = c.tree.firstToken(last_node);
+                const str = c.tree.tokenSlice(ident);
+                key = try c.addInst(.str, .{ .str = .{
+                    .len = @intCast(u32, str.len),
+                    .offset = try c.putString(str),
+                } });
+            } else {
+                var key_val = try c.genNode(data[item].bin.lhs, .value);
+                key = try c.makeRuntime(key_val);
+            }
+        } else {
+            const last_node = c.getLastNode(data[item].bin.rhs);
+            if (tok_ids[last_node] == .identifier) {
+                return c.reportErr("expected a key", item);
+            }
+            // `ident` is equal to `"ident" = ident`
+            const ident = c.tree.firstToken(last_node);
+            const str = c.tree.tokenSlice(ident);
+            key = try c.addInst(.str, .{ .str = .{
+                .len = @intCast(u32, str.len),
+                .offset = try c.putString(str),
+            } });
+        }
+
+        var value_val = try c.genNode(data[item].bin.lhs, .value);
+        const value_ref = try c.makeRuntime(value_val);
+        try c.list_buf.appendSlice(c.gpa, &.{ key, value_ref });
+    }
+
+    const ref = try c.addAggregate(.build_map, c.list_buf.items[list_buf_top..]);
+    return c.wrapResult(node, Value{ .ref = ref }, res);
 }
 
 const Lval = union(enum) {

@@ -108,7 +108,6 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
         .bit_and_assign,
         .bit_or_assign,
         .bit_x_or_assign,
-        .map_item_expr,
         => {
             try renderNode(tree, data[node].bin.lhs, aiw, .space);
             const after_op_space: Space = if (tree.lineDist(tokens[node], tree.nextToken(tokens[node])) == 0) .space else .newline;
@@ -118,6 +117,20 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
             aiw.popIndent();
 
             aiw.pushIndentOneShot();
+            try renderNode(tree, data[node].bin.rhs, aiw, space);
+        },
+        .map_item_expr => {
+            if (data[node].bin.lhs != 0) {
+                try renderNode(tree, data[node].bin.lhs, aiw, .space);
+                const after_op_space: Space = if (tree.lineDist(tokens[node], tree.nextToken(tokens[node])) == 0) .space else .newline;
+
+                aiw.pushIndent();
+                try renderToken(tree, tokens[node], aiw, after_op_space);
+                aiw.popIndent();
+
+                aiw.pushIndentOneShot();
+            }
+
             try renderNode(tree, data[node].bin.rhs, aiw, space);
         },
         .array_access_expr => {
