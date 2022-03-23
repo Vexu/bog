@@ -164,8 +164,18 @@ pub const Value = union(Type) {
     pub const List = std.ArrayListUnmanaged(*Value);
     pub const Native = struct {
         arg_count: u8,
-        func: fn (*Vm, []*Value) Vm.Error!*Value,
+        func: fn (Vm.Context, []const bog.Bytecode.Ref) Vm.Error!*Value,
     };
+
+    /// Makes a distinct type which can be used as the parameter of a native function
+    /// to easily get the value of `this`.
+    pub fn This(comptime T: type) type {
+        return struct {
+            t: T,
+
+            const __bog_This_T = T;
+        };
+    }
 
     var null_base = Value{ .@"null" = {} };
     var true_base = Value{ .bool = true };
@@ -441,10 +451,8 @@ pub const Value = union(Type) {
                         res.*.?.* = .{ .int = @intCast(i64, list.items.len) };
                     } else if (mem.eql(u8, s.data, "append")) {
                         res.* = try zigToBog(vm, struct {
-                            fn append(_vm: *Vm, val: *Value) !void {
-                                if (_vm.last_get.* != .list)
-                                    return _vm.fatal("expected list");
-                                try _vm.last_get.list.append(_vm.gc.gpa, try _vm.gc.dupe(val));
+                            fn append(_list: This(*List), _vm: *Vm, val: *Value) !void {
+                                try _list.t.append(_vm.gc.gpa, try _vm.gc.dupe(val));
                             }
                         }.append);
                     } else {
@@ -547,7 +555,7 @@ pub const Value = union(Type) {
             .int => .{
                 .int = switch (val.*) {
                     .int => unreachable,
-                    .num => |num| @floatToInt(i64, num),
+                    .num => |num| std.math.lossyCast(i64, num),
                     .bool => |b| @boolToInt(b),
                     .str => unreachable,
                     else => return vm.errorFmt("cannot cast {s} to int", .{@tagName(val.*)}),
@@ -760,30 +768,33 @@ pub const Value = union(Type) {
         return switch (T) {
             void => {
                 if (val.* != .@"null")
-                    return vm.fatal("expected null");
+                    return vm.fatal("expected a null");
             },
             bool => {
                 if (val.* != .bool)
-                    return vm.fatal("expected bool");
+                    return vm.fatal("expected a bool");
                 return val.bool;
             },
             []const u8 => {
                 if (val.* != .str)
-                    return vm.fatal("expected string");
+                    return vm.fatal("expected a string");
                 return val.str.data;
             },
             *Map, *const Map => {
                 if (val.* != .map)
-                    return vm.fatal("expected map");
+                    return vm.fatal("expected a map");
                 return &val.map;
             },
-            *Vm => vm,
+            *List, *const List => {
+                if (val.* != .list)
+                    return vm.fatal("expected a list");
+                return &val.list;
+            },
             *Value, *const Value => val,
-            Value => return val.*,
-            String => {
+            *String, *const String => {
                 if (val.* != .str)
-                    return vm.fatal("expected string");
-                return val.str;
+                    return vm.fatal("expected a string");
+                return &val.str;
             },
             []*Value, []const *Value, []*const Value, []const *const Value => {
                 switch (val.*) {
@@ -798,7 +809,7 @@ pub const Value = union(Type) {
                         return vm.fatal("cannot fit int in desired type");
                     break :blk @intCast(T, val.int);
                 } else if (val.* == .num)
-                    @floatToInt(T, val.num)
+                    std.math.lossyCast(T, val.num)
                 else
                     return vm.fatal("expected int"),
                 .Float => |info| switch (info.bits) {
@@ -830,8 +841,8 @@ pub const Value = union(Type) {
         };
     }
 
-    pub fn jsonStringify(val: Value, options: std.json.StringifyOptions, writer: anytype) @TypeOf(writer).Error!void {
-        switch (val) {
+    pub fn jsonStringify(val: *const Value, options: std.json.StringifyOptions, writer: anytype) @TypeOf(writer).Error!void {
+        switch (val.*) {
             .@"null" => try writer.writeAll("null"),
             .tuple => |t| {
                 try writer.writeByte('[');
@@ -889,8 +900,7 @@ pub const Value = union(Type) {
 
 fn wrapZigFunc(func: anytype) Value.Native {
     const Fn = @typeInfo(@TypeOf(func)).Fn;
-    if (Fn.is_generic or Fn.is_var_args)
-        @compileError("unsupported function");
+    if (Fn.is_generic) @compileError("cannot wrap a generic function");
 
     @setEvalBranchQuota(Fn.args.len * 1000);
 
@@ -898,30 +908,41 @@ fn wrapZigFunc(func: anytype) Value.Native {
         // cannot directly use `func` so declare a pointer to it
         var _func: @TypeOf(func) = undefined;
 
-        fn native(vm: *Vm, bog_args: []*Value) Vm.Error!*Value {
+        fn native(ctx: Vm.Context, bog_args: []const bog.Bytecode.Ref) Vm.Error!*Value {
             var args: std.meta.ArgsTuple(@TypeOf(_func)) = undefined;
 
             comptime var bog_arg_i: u8 = 0;
+            comptime var vm_passed = false;
             inline for (Fn.args) |arg, i| {
-                if (arg.arg_type.? == *Vm) {
-                    args[i] = vm;
+                const ArgT = arg.arg_type.?;
+                if (ArgT == *Vm) {
+                    if (vm_passed) @compileError("function takes more than one *Vm");
+                    args[i] = ctx.vm;
+                    vm_passed = true;
+                } else if (@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T")) {
+                    if (i != 0) @compileError("Value.This must be the first parameter");
+                    args[i] = ArgT{ .t = try ctx.this.bogToZig(ArgT.__bog_This_T, ctx.vm) };
                 } else {
-                    args[i] = try bog_args[bog_arg_i].bogToZig(arg.arg_type.?, vm);
+                    if (bog_arg_i > bog.Bytecode.max_params)
+                        @compileError("function takes too many arguments");
+                    const val = ctx.frame.val(bog_args[bog_arg_i]);
+                    args[i] = try val.bogToZig(ArgT, ctx.vm);
                     bog_arg_i += 1;
                 }
             }
-            return Value.zigToBog(vm, @call(.{}, _func, args));
+            return Value.zigToBog(ctx.vm, @call(.{}, _func, args));
         }
     };
     S._func = func;
 
     // TODO can't use bog_arg_i due to a stage1 bug.
     comptime var bog_arg_count = 0;
-    comptime {
-        for (Fn.args) |arg| {
-            if (arg.arg_type != *Vm) bog_arg_count += 1;
+    comptime for (Fn.args) |arg| {
+        const ArgT = arg.arg_type.?;
+        if (ArgT != *Vm and !(@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T"))) {
+            bog_arg_count += 1;
         }
-    }
+    };
 
     return .{
         .arg_count = bog_arg_count,

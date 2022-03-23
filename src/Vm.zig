@@ -18,12 +18,11 @@ errors: Errors,
 
 imports: std.StringHashMapUnmanaged(fn (*Vm) Vm.Error!*bog.Value) = .{},
 
-/// all currently loaded packages and files
+/// All currently loaded packages and files.
 imported_modules: std.StringHashMapUnmanaged(*Bytecode) = .{},
 
 options: Options = .{},
-
-last_get: *Value = Value.Null,
+/// Current call stack depth, used to prevent stack overflow.
 call_depth: u32 = 0,
 
 const max_depth = 512;
@@ -48,10 +47,11 @@ pub const Frame = struct {
     body: []const Ref,
     ip: u32 = 0,
     mod: *Bytecode,
-    this: ?*Value = null,
+    this: *Value = Value.Null,
     caller_frame: ?*Frame,
     err_handlers: ErrHandlers = .{ .short = .{} },
     captures: []*Value,
+    last_get: *Value = Value.Null,
 
     // Where to store a capture after a build_func instruction
     store_capture_index: u24 = 0,
@@ -115,6 +115,20 @@ pub const Frame = struct {
         if (res.* != .bool) return vm.fatal("expected a bool");
         return res.bool;
     }
+
+    pub fn ctx(f: *Frame, vm: *Vm) Context {
+        return .{
+            .this = f.last_get,
+            .vm = vm,
+            .frame = f,
+        };
+    }
+};
+
+pub const Context = struct {
+    this: *Value,
+    vm: *Vm,
+    frame: *Vm.Frame,
 };
 
 pub const Error = error{RuntimeError} || Allocator.Error;
@@ -384,7 +398,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .load_this => {
                 const res = try f.newRef(vm, ref);
-                res.* = f.this orelse Value.Null;
+                res.* = f.this;
             },
             .div_floor => {
                 const res = try f.newVal(vm, ref);
@@ -393,7 +407,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 try vm.checkZero(rhs);
 
                 const copy: Value = if (needNum(lhs, rhs)) .{
-                    .int = @floatToInt(i64, @divFloor(asNum(lhs), asNum(rhs))),
+                    .int = std.math.lossyCast(i64, @divFloor(asNum(lhs), asNum(rhs))),
                 } else .{
                     .int = std.math.divFloor(i64, lhs.int, rhs.int) catch
                         return vm.fatal("operation overflowed"),
@@ -707,7 +721,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const index = f.val(data[inst].bin.rhs);
 
                 try container.get(vm, index, res);
-                f.this = container;
+                f.last_get = container;
             },
             .get_or_null => {
                 const res = try f.newRef(vm, ref);
@@ -718,6 +732,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     res.* = Value.Null;
                 } else {
                     res.* = container.map.get(index) orelse Value.Null;
+                    f.last_get = res.*.?;
                 }
             },
             .set => {
@@ -820,7 +835,20 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     else => unreachable,
                 }
                 if (callee.* == .native) {
-                    if (true) @panic("TODO native calls");
+                    if (callee.native.arg_count != args.len) {
+                        const str = try Value.String.init(
+                            vm.gc.gpa,
+                            "expected {} args, got {}",
+                            .{ callee.native.arg_count, args.len },
+                        );
+                        return vm.fatalExtra(str);
+                    }
+
+                    const res = try callee.native.func(f.ctx(vm), args);
+
+                    // function may mutate the stack
+                    const returned = try f.newRef(vm, ref);
+                    returned.* = res;
                 } else if (callee.* == .func) {
                     if (callee.func.info.args != args.len) {
                         const str = try Value.String.init(
@@ -841,7 +869,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         .mod = mod,
                         .body = callee.func.body[0..callee.func.body_len],
                         .caller_frame = f,
-                        .this = f.this,
+                        .this = f.last_get,
                         .captures = &.{},
                     };
                     defer new_frame.deinit(vm);
@@ -861,7 +889,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     const returned = try f.newRef(vm, ref);
                     returned.* = try vm.typeError(.func, callee.*);
                 }
-                f.this = null;
+                f.last_get = Value.Null;
                 const returned = f.val(ref);
                 if (returned.* == .err) {
                     if (f.err_handlers.get()) |handler| {
@@ -1042,7 +1070,7 @@ fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) !*Value {
         .mod = mod,
         .body = mod.main,
         .caller_frame = caller_frame,
-        .this = caller_frame.this,
+        .this = caller_frame.last_get,
         .captures = &.{},
     };
     defer frame.deinit(vm);

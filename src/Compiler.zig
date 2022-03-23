@@ -1623,7 +1623,7 @@ fn genArithmetic(c: *Compiler, node: Node.Index) Error!Value {
             .div_floor => {
                 try rhs_val.checkZero(c, rhs);
                 if (needNum(lhs_val, rhs_val)) {
-                    return Value{ .int = @floatToInt(i64, @divFloor(lhs_val.getNum(), rhs_val.getNum())) };
+                    return Value{ .int = std.math.lossyCast(i64, @divFloor(lhs_val.getNum(), rhs_val.getNum())) };
                 }
                 return Value{
                     .int = std.math.divFloor(i64, lhs_val.int, rhs_val.int) catch break :rt,
@@ -2105,8 +2105,6 @@ fn genFormatString(c: *Compiler, node: Node.Index) Error!Value {
     const list_buf_top = c.list_buf.items.len;
     defer c.list_buf.items.len = list_buf_top;
 
-    try c.list_buf.append(c.gpa, format_fn_ref);
-
     for (args) |arg| {
         const arg_val = try c.genNode(arg, .value);
         const arg_ref = if (arg_val == .mut)
@@ -2118,13 +2116,9 @@ fn genFormatString(c: *Compiler, node: Node.Index) Error!Value {
     }
 
     const arg_refs = c.list_buf.items[list_buf_top..];
-    const res_ref = switch (arg_refs.len) {
-        0 => unreachable, // format_fn_ref is always added
-        1 => try c.addUn(.call_zero, arg_refs[0], node),
-        2 => try c.addBin(.call_one, arg_refs[0], arg_refs[1], node),
-        else => try c.addExtra(.call, arg_refs, node),
-    };
+    const args_tuple = try c.addExtra(.build_tuple, arg_refs, node);
 
+    const res_ref = try c.addBin(.call_one, format_fn_ref, args_tuple, node);
     return Value{ .ref = res_ref };
 }
 

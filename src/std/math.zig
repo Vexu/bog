@@ -34,8 +34,8 @@ pub const sqrt2 = math.sqrt2;
 /// 1/sqrt(2)
 pub const sqrt1_2 = math.sqrt1_2;
 
-pub fn ln(vm: *Vm, val: Value) !*Value {
-    return switch (val) {
+pub fn ln(vm: *Vm, val: *Value) !*Value {
+    return switch (val.*) {
         // TODO fix zig std
         // .int => |i| Value{
         //     .int = std.math.ln(i),
@@ -45,12 +45,12 @@ pub fn ln(vm: *Vm, val: Value) !*Value {
             res.* = Value{ .num = std.math.ln(n) };
             return res;
         },
-        else => vm.typeError(.num, val),
+        else => vm.typeError(.num, val.*),
     };
 }
 
-pub fn sqrt(vm: *Vm, val: Value) !*Value {
-    return switch (val) {
+pub fn sqrt(vm: *Vm, val: *Value) !*Value {
+    return switch (val.*) {
         .int => |i| {
             _ = i;
             const res = try vm.gc.alloc();
@@ -62,7 +62,7 @@ pub fn sqrt(vm: *Vm, val: Value) !*Value {
             res.* = Value{ .num = std.math.sqrt(n) };
             return res;
         },
-        else => vm.typeError(.num, val),
+        else => vm.typeError(.num, val.*),
     };
 }
 

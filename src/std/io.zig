@@ -13,8 +13,8 @@ pub fn print(val: *Value) !void {
     try writer.writeByte('\n');
 }
 
-pub fn input(vm: *Vm, prompt: Value.String) ![]u8 {
-    try std.io.getStdOut().writer().writeAll(prompt.data);
+pub fn input(vm: *Vm, prompt: []const u8) ![]u8 {
+    try std.io.getStdOut().writer().writeAll(prompt);
 
     return try std.io.getStdIn().reader().readUntilDelimiterAlloc(vm.gc.gpa, '\n', 1024 * 1024);
 }
