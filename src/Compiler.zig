@@ -2147,6 +2147,8 @@ fn genLval(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
         .map_expr,
         .map_expr_two,
         => return c.genLvalMap(node, lval),
+        .member_access_expr => return c.genLvalMemberAccess(node, lval),
+        .array_access_expr => return c.genLvalArrayAccess(node, lval),
         else => switch (lval) {
             .let => return c.reportErr("invalid left-hand side to declaration", node),
             .assign, .aug_assign => return c.reportErr("invalid left-hand side to assignment", node),
@@ -2371,6 +2373,88 @@ fn genLvalMap(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
             .assign => .{ .assign = &res_val },
             else => unreachable,
         });
+    }
+}
+
+fn genLvalMemberAccess(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
+    if (lval == .let) {
+        return c.reportErr("invalid left hand side to augmented assignment", node);
+    }
+    const data = c.tree.nodes.items(.data);
+    const tokens = c.tree.nodes.items(.token);
+    const operand = data[node].un;
+
+    var operand_val = try c.genNode(operand, .value);
+    if (operand_val != .str and !operand_val.isRt()) {
+        return c.reportErr("invalid operand to member access", operand);
+    }
+    const operand_ref = try c.makeRuntime(operand_val);
+
+    var name_val = Value{ .str = c.tree.tokenSlice(tokens[node]) };
+    var name_ref = try c.makeRuntime(name_val);
+
+    switch (lval) {
+        .aug_assign => {
+            return c.reportErr("TODO augmented assign member access", node);
+        },
+        .assign => |val| {
+            const val_ref = if (val.* == .mut)
+                try c.addUn(.copy_un, val.mut)
+            else
+                try c.makeRuntime(val.*);
+
+            const extra = @intCast(u32, c.extra.items.len);
+            try c.extra.append(c.gpa, name_ref);
+            try c.extra.append(c.gpa, val_ref);
+            _ = try c.addInst(.set, .{
+                .range = .{
+                    .start = operand_ref,
+                    .extra = extra,
+                },
+            });
+        },
+        else => unreachable,
+    }
+}
+
+fn genLvalArrayAccess(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
+    if (lval == .let) {
+        return c.reportErr("cannot declare a subscript", node);
+    }
+    const data = c.tree.nodes.items(.data);
+    const lhs = data[node].bin.lhs;
+    const rhs = data[node].bin.rhs;
+
+    var lhs_val = try c.genNode(lhs, .value);
+    if (lhs_val != .str and !lhs_val.isRt()) {
+        return c.reportErr("invalid operand to subscript", lhs);
+    }
+    const lhs_ref = try c.makeRuntime(lhs_val);
+
+    var rhs_val = try c.genNode(rhs, .value);
+    var rhs_ref = try c.makeRuntime(rhs_val);
+
+    switch (lval) {
+        .aug_assign => {
+            return c.reportErr("TODO augmented assign member access", node);
+        },
+        .assign => |val| {
+            const val_ref = if (val.* == .mut)
+                try c.addUn(.copy_un, val.mut)
+            else
+                try c.makeRuntime(val.*);
+
+            const extra = @intCast(u32, c.extra.items.len);
+            try c.extra.append(c.gpa, rhs_ref);
+            try c.extra.append(c.gpa, val_ref);
+            _ = try c.addInst(.set, .{
+                .range = .{
+                    .start = lhs_ref,
+                    .extra = extra,
+                },
+            });
+        },
+        else => unreachable,
     }
 }
 

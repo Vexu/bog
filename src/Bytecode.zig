@@ -157,6 +157,10 @@ pub const Inst = struct {
         get,
         // returns null if no
         get_or_null,
+        // uses Data.range with
+        // start == container
+        // extra[0] == index
+        // extra[1] == value
         set,
 
         // uses Data.jump
@@ -332,6 +336,12 @@ fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
                 const step = b.extra[data[i].range.extra + 1];
                 std.debug.print("{}:{}:{}\n", .{ start, end, step });
             },
+            .set => {
+                const container = data[i].range.start;
+                const index = b.extra[data[i].range.extra];
+                const val = b.extra[data[i].range.extra + 1];
+                std.debug.print("{}[{}] = {}\n", .{ container, index, val });
+            },
             .tuple_len,
             .list_len,
             .assert_list_len,
@@ -348,7 +358,6 @@ fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
             .move,
             .get,
             .get_or_null,
-            .set,
             .div_floor,
             .div,
             .mul,
