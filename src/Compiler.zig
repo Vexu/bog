@@ -330,10 +330,18 @@ fn findSymbol(c: *Compiler, tok: TokenIndex) !FoundSymbol {
             }
         }
     }
-    return c.findSymbolExtra(tok, c.scopes.items.len);
+    return c.findSymbolExtra(tok, c.scopes.items.len) catch |err| switch (err) {
+        error.SymbolNotFound => {
+            const ref = try c.addInst(.load_global, undefined, tok);
+            try c.unresolved_globals.append(c.gpa, .{ .tok = tok, .ref = ref });
+            return FoundSymbol{ .ref = ref, .mut = false, .global = true };
+        },
+        else => |e| return e,
+    };
 }
 
-fn findSymbolExtra(c: *Compiler, tok: TokenIndex, start_index: usize) Error!FoundSymbol {
+const FindSymbolError = Error || error{SymbolNotFound};
+fn findSymbolExtra(c: *Compiler, tok: TokenIndex, start_index: usize) FindSymbolError!FoundSymbol {
     const name = c.tree.tokenSlice(tok);
     var i = start_index;
 
@@ -371,10 +379,7 @@ fn findSymbolExtra(c: *Compiler, tok: TokenIndex, start_index: usize) Error!Foun
             },
         }
     }
-
-    const ref = try c.addInst(.load_global, undefined, tok);
-    try c.unresolved_globals.append(c.gpa, .{ .tok = tok, .ref = ref });
-    return FoundSymbol{ .ref = ref, .mut = false, .global = true };
+    return error.SymbolNotFound;
 }
 
 fn checkRedeclaration(c: *Compiler, tok: TokenIndex) !void {

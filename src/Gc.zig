@@ -168,6 +168,7 @@ fn markGray(gc: *Gc) void {
                         for (frame.captures) |val| {
                             gc.markVal(val);
                         }
+                        gc.markVal(frame.this);
                     },
                     .iterator => |iter| {
                         gc.markVal(iter.value);
