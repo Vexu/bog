@@ -104,7 +104,7 @@ pub const Inst = struct {
         div,
         mul,
         pow,
-        mod,
+        rem,
         add,
         sub,
 
@@ -147,11 +147,9 @@ pub const Inst = struct {
 
         // uses Data.bin
         // returns null if lhs is not tuple/list or if its len is not equal to @enumToInt(rhs)
-        list_len,
-        tuple_len,
+        check_len,
         // same as above but return error on false
-        assert_list_len,
-        assert_tuple_len,
+        assert_len,
 
         // use Data.bin
         get,
@@ -342,10 +340,8 @@ fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
                 const val = b.extra[data[i].range.extra + 1];
                 std.debug.print("{}[{}] = {}\n", .{ container, index, val });
             },
-            .tuple_len,
-            .list_len,
-            .assert_list_len,
-            .assert_tuple_len,
+            .check_len,
+            .assert_len,
             => {
                 const operand = data[i].bin.lhs;
                 const len = @enumToInt(data[i].bin.rhs);
@@ -362,7 +358,7 @@ fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
             .div,
             .mul,
             .pow,
-            .mod,
+            .rem,
             .add,
             .sub,
             .l_shift,

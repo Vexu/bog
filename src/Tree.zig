@@ -94,7 +94,7 @@ pub fn firstToken(tree: Tree, node: Node.Index) Token.Index {
         .pow_assign,
         .div_assign,
         .div_floor_assign,
-        .mod_assign,
+        .rem_assign,
         .l_shift_assign,
         .r_shift_assign,
         .bit_and_assign,
@@ -126,7 +126,7 @@ pub fn firstToken(tree: Tree, node: Node.Index) Token.Index {
         .mul_expr,
         .div_expr,
         .div_floor_expr,
-        .mod_expr,
+        .rem_expr,
         .pow_expr,
         => cur = data[cur].bin.lhs,
         .map_item_expr => if (data[cur].bin.lhs != 0) {
@@ -265,7 +265,7 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .pow_assign,
         .div_assign,
         .div_floor_assign,
-        .mod_assign,
+        .rem_assign,
         .l_shift_assign,
         .r_shift_assign,
         .bit_and_assign,
@@ -290,7 +290,7 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .mul_expr,
         .div_expr,
         .div_floor_expr,
-        .mod_expr,
+        .rem_expr,
         .pow_expr,
         .match_expr_one,
         .match_case_let,
@@ -440,7 +440,7 @@ pub const Node = struct {
         /// lhs //= rhs
         div_floor_assign,
         /// lhs %= rhs
-        mod_assign,
+        rem_assign,
         /// lhs <<= rhs
         l_shift_assign,
         /// lhs >>= rhs
@@ -615,7 +615,7 @@ pub const Node = struct {
         /// lhs // rhs
         div_floor_expr,
         /// lhs % rhs
-        mod_expr,
+        rem_expr,
         /// lhs ** rhs
         pow_expr,
     };

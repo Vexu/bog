@@ -202,7 +202,7 @@ pub const Parser = struct {
                     .asterisk_asterisk_equal => .pow_assign,
                     .slash_equal => .div_assign,
                     .slash_slash_equal => .div_floor_assign,
-                    .percent_equal => .mod_assign,
+                    .percent_equal => .rem_assign,
                     .l_arr_arr_equal => .l_shift_assign,
                     .r_arr_arr_equal => .r_shift_assign,
                     .ampersand_equal => .bit_and_assign,
@@ -482,7 +482,7 @@ pub const Parser = struct {
                 },
                 .percent => {
                     p.skipNl();
-                    lhs = try p.addBin(.mod_expr, tok, lhs, try p.castExpr(skip_nl, level));
+                    lhs = try p.addBin(.rem_expr, tok, lhs, try p.castExpr(skip_nl, level));
                 },
                 else => {
                     p.tok_i = start;

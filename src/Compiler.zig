@@ -200,6 +200,15 @@ const Value = union(enum) {
         }
         return c.reportErr("division by zero", node);
     }
+
+    fn checkNegative(val: Value, c: *Compiler, node: Node.Index) !void {
+        switch (val) {
+            .int => |v| if (v < 0) return,
+            .num => |v| if (v < 0) return,
+            else => unreachable,
+        }
+        return c.reportErr("remainder division by negative denominator", node);
+    }
 };
 
 pub const Error = error{CompileError} || Allocator.Error;
@@ -564,7 +573,7 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .mul_expr,
         .div_expr,
         .div_floor_expr,
-        .mod_expr,
+        .rem_expr,
         .pow_expr,
         => {
             const val = try c.genArithmetic(node);
@@ -577,7 +586,7 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .pow_assign,
         .div_assign,
         .div_floor_assign,
-        .mod_assign,
+        .rem_assign,
         .l_shift_assign,
         .r_shift_assign,
         .bit_and_assign,
@@ -1537,7 +1546,7 @@ fn genIntArithmetic(c: *Compiler, node: Node.Index) Error!Value {
             if (r_int < 0)
                 return c.reportErr("shift by negative amount", rhs);
             const val = if (r_int > std.math.maxInt(u6))
-                std.math.maxInt(i64)
+                if (l_int < 0) std.math.maxInt(i64) else @as(i64, 0)
             else
                 l_int >> @truncate(u6, @bitCast(u64, r_int));
             return Value{ .int = val };
@@ -1559,7 +1568,7 @@ fn genArithmetic(c: *Compiler, node: Node.Index) Error!Value {
         .mul_expr => .mul,
         .div_expr => .div,
         .div_floor_expr => .div_floor,
-        .mod_expr => .mod,
+        .rem_expr => .rem,
         .pow_expr => .pow,
         else => unreachable,
     };
@@ -1606,13 +1615,14 @@ fn genArithmetic(c: *Compiler, node: Node.Index) Error!Value {
                     .int = std.math.divFloor(i64, lhs_val.int, rhs_val.int) catch break :rt,
                 };
             },
-            .mod => {
+            .rem => {
                 try rhs_val.checkZero(c, rhs);
+                try rhs_val.checkNegative(c, rhs);
                 if (needNum(lhs_val, rhs_val)) {
                     return Value{ .num = @rem(lhs_val.getNum(), rhs_val.getNum()) };
                 }
                 return Value{
-                    .int = std.math.rem(i64, lhs_val.int, rhs_val.int) catch break :rt,
+                    .int = @rem(lhs_val.int, rhs_val.int),
                 };
             },
             .pow => {
@@ -1663,7 +1673,7 @@ fn genAugAssign(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .pow_assign => .pow,
         .div_assign => .div,
         .div_floor_assign => .div_floor,
-        .mod_assign => .mod,
+        .rem_assign => .rem,
         .l_shift_assign => .l_shift,
         .r_shift_assign => .r_shift,
         .bit_and_assign => .bit_and,
@@ -1676,7 +1686,7 @@ fn genAugAssign(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     try c.genLval(lhs, .{ .aug_assign = &lhs_ref });
     if (!rhs_val.isRt()) switch (op) {
         // zig fmt: off
-        .add, .sub, .mul, .pow, .div, .div_floor, .mod,
+        .add, .sub, .mul, .pow, .div, .div_floor, .rem,
         => try rhs_val.checkNum(c, rhs),
         .l_shift, .r_shift, .bit_and, .bit_or, .bit_xor,
         => _ = try rhs_val.getInt(c, rhs),
@@ -1918,7 +1928,7 @@ fn genFn(c: *Compiler, node: Node.Index) Error!Value {
     const sub_res: Result = switch (ids[last]) {
         // zig fmt: off
         .block_stmt_two, .block_stmt, .assign, .add_assign, .sub_assign, .mul_assign,
-        .pow_assign, .div_assign, .div_floor_assign, .mod_assign, .l_shift_assign,
+        .pow_assign, .div_assign, .div_floor_assign, .rem_assign, .l_shift_assign,
         .r_shift_assign, .bit_and_assign, .bit_or_assign, .bit_xor_assign => .discard,
         // zig fmt: on
         else => .value,
@@ -2140,10 +2150,9 @@ fn genLval(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
         => try c.genLvalRange(node, lval),
         .tuple_expr,
         .tuple_expr_two,
-        => return c.genLvalTupleList(node, lval, .assert_tuple_len),
         .list_expr,
         .list_expr_two,
-        => return c.genLvalTupleList(node, lval, .assert_list_len),
+        => return c.genLvalTupleList(node, lval),
         .map_expr,
         .map_expr_two,
         => return c.genLvalMap(node, lval),
@@ -2288,7 +2297,7 @@ fn genLValRangePart(c: *Compiler, node: Node.Index, range_ref: Ref, lval: Lval, 
     });
 }
 
-fn genLvalTupleList(c: *Compiler, node: Node.Index, lval: Lval, op: Bytecode.Inst.Op) Error!void {
+fn genLvalTupleList(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
     const res = switch (lval) {
         .let, .assign => |val| val,
         .aug_assign => return c.reportErr("invalid left hand side to augmented assignment", node),
@@ -2302,7 +2311,7 @@ fn genLvalTupleList(c: *Compiler, node: Node.Index, lval: Lval, op: Bytecode.Ins
     const items = c.tree.nodeItems(node, &buf);
     const ids = c.tree.nodes.items(.id);
 
-    _ = try c.addBin(op, container_ref, @intToEnum(Ref, items.len));
+    _ = try c.addBin(.assert_len, container_ref, @intToEnum(Ref, items.len));
 
     for (items) |item, i| {
         const last_node = c.getLastNode(item);
@@ -2478,10 +2487,9 @@ fn genTryUnwrap(c: *Compiler, node: Node.Index, val: *const Value) Error!void {
         => try c.genTryUnwrapRange(node, val),
         .tuple_expr,
         .tuple_expr_two,
-        => return c.genTryUnwrapTupleList(node, val, .tuple_len),
         .list_expr,
         .list_expr_two,
-        => return c.genTryUnwrapTupleList(node, val, .list_len),
+        => return c.genTryUnwrapTupleList(node, val),
         .map_expr,
         .map_expr_two,
         => return c.genTryUnwrapMap(node, val),
@@ -2559,7 +2567,7 @@ fn genUnwrapRangePart(c: *Compiler, node: Node.Index, range_ref: Ref, part: []co
     try c.genTryUnwrap(node, &.{ .ref = res_ref });
 }
 
-fn genTryUnwrapTupleList(c: *Compiler, node: Node.Index, val: *const Value, op: Bytecode.Inst.Op) Error!void {
+fn genTryUnwrapTupleList(c: *Compiler, node: Node.Index, val: *const Value) Error!void {
     if (!val.isRt()) {
         return c.reportErr("expected a tuple/list", node);
     }
@@ -2569,7 +2577,7 @@ fn genTryUnwrapTupleList(c: *Compiler, node: Node.Index, val: *const Value, op: 
     const items = c.tree.nodeItems(node, &buf);
     const ids = c.tree.nodes.items(.id);
 
-    const len_ref = try c.addBin(op, val.getRt(), @intToEnum(Ref, items.len));
+    const len_ref = try c.addBin(.check_len, val.getRt(), @intToEnum(Ref, items.len));
     try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, len_ref));
 
     for (items) |item, i| {
