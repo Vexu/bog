@@ -515,8 +515,6 @@ fn writeFixingWhitespace(writer: anytype, slice: []const u8) !void {
 fn getBlockIndent(tree: Tree, node: Node.Index, space: Space) Space {
     const ids = tree.nodes.items(.id);
     return switch (ids[node]) {
-        .match_expr,
-        .match_expr_one,
         .block_stmt,
         .block_stmt_two,
         => .newline,

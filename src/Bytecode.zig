@@ -18,7 +18,6 @@ debug_info: DebugInfo,
 
 pub const max_params = 32;
 
-pub const Index = usize;
 pub const Ref = enum(u32) {
     _,
     pub fn format(ref: Ref, _: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
@@ -27,10 +26,10 @@ pub const Ref = enum(u32) {
     }
 };
 
-pub inline fn indexToRef(i: Index) Ref {
+pub inline fn indexToRef(i: u64) Ref {
     return @intToEnum(Ref, i + max_params);
 }
-pub inline fn refToIndex(r: Ref) Index {
+pub inline fn refToIndex(r: Ref) u32 {
     return @enumToInt(r) - max_params;
 }
 
@@ -241,45 +240,35 @@ pub const Inst = struct {
 
 pub const DebugInfo = struct {
     file_path: []const u8,
-    line_parts: []const LinePart,
+    lines: []const Line,
 
-    pub const LinePart = struct {
-        offset: u8,
-        line: u8,
-        col: u8,
-    };
-
-    pub const LineCol = struct {
+    pub const Line = struct {
+        index: u32,
         line: u32,
-        col: u32,
     };
 
-    pub fn getLineForOffset(d: DebugInfo, offset: u32) LineCol {
-        var cur: LineCol = .{ .line = 0, .col = 0 };
-        var cur_offset: u32 = 0;
-        for (d.line_parts) |part| {
-            if (cur_offset >= offset) break;
-            cur.line += part.line;
-            if (part.col == std.math.maxInt(u8)) {
-                cur.col = 1;
-            } else {
-                cur.col += part.col;
-            }
-        }
-        return cur;
+    pub fn getLineForIndex(d: DebugInfo, index: u32) u32 {
+        return for (d.lines) |line| {
+            if (line.index >= index) break line.line;
+        } else if (d.lines.len != 0)
+            d.lines[d.lines.len - 1].line
+        else
+            0;
     }
 };
 
 pub fn dump(b: *Bytecode, body: []const Ref) void {
-    b.dumpExtra(body, 0);
-}
-
-fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
     const ops = b.code.items(.op);
     const data = b.code.items(.data);
+    var prev_line: u32 = 0;
     for (body) |ref, inst| {
         const i = refToIndex(ref);
-        std.debug.print("{d:[3]} {} = {s} ", .{ inst, ref, @tagName(ops[i]), level });
+        const line = b.debug_info.getLineForIndex(i);
+        if (line != prev_line) {
+            std.debug.print("line {d}:\n", .{line});
+            prev_line = line;
+        }
+        std.debug.print("{d:4} {} = {s} ", .{ inst, ref, @tagName(ops[i]) });
         switch (ops[i]) {
             .primitive => std.debug.print("{s}\n", .{@tagName(data[i].primitive)}),
             .int => std.debug.print("{d}\n", .{data[i].int}),
@@ -314,8 +303,9 @@ fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
                 const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
                 const fn_info = @bitCast(Inst.Data.FnInfo, extra[0]);
                 const fn_body = extra[1..];
-                std.debug.print("args: {d}, captures: {d}\n", .{ fn_info.args, fn_info.captures });
-                b.dumpExtra(fn_body, level + 2);
+                std.debug.print("\n\nfn(args: {d}, captures: {d}) {{\n", .{ fn_info.args, fn_info.captures });
+                b.dump(fn_body);
+                std.debug.print("}}\n\nline {d}:\n", .{line});
             },
             .build_tagged_null => {
                 const str = b.strings[data[i].str.offset..][0..data[i].str.len];
