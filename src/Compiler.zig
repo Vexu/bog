@@ -1789,7 +1789,7 @@ fn genMap(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         } else {
             const last_node = c.getLastNode(data[item].bin.rhs);
             const maybe_ident = c.tree.firstToken(last_node);
-            if (tok_ids[maybe_ident] == .identifier) {
+            if (tok_ids[maybe_ident] != .identifier) {
                 return c.reportErr("expected a key", item);
             }
             // `ident` is equal to `"ident" = ident`
@@ -2371,7 +2371,7 @@ fn genLvalMap(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
         } else {
             const last_node = c.getLastNode(data[item].bin.rhs);
             const maybe_ident = c.tree.firstToken(last_node);
-            if (tok_ids[maybe_ident] == .identifier) {
+            if (tok_ids[maybe_ident] != .identifier) {
                 return c.reportErr("expected a key", item);
             }
             // `ident` is equal to `"ident" = ident´
@@ -2632,7 +2632,7 @@ fn genTryUnwrapMap(c: *Compiler, node: Node.Index, val: *const Value) Error!void
         } else {
             const last_node = c.getLastNode(data[item].bin.rhs);
             const maybe_ident = c.tree.firstToken(last_node);
-            if (tok_ids[maybe_ident] == .identifier) {
+            if (tok_ids[maybe_ident] != .identifier) {
                 return c.reportErr("expected a key", item);
             }
             // `ident` is equal to `"ident" = ident`

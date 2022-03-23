@@ -215,7 +215,7 @@ pub const Value = union(Type) {
         autoHash(&hasher, @as(Type, key.*));
         switch (key.*) {
             .iterator => unreachable,
-            .frame => unreachable, // TODO
+            .frame => autoHash(&hasher, key.frame),
             .@"null" => {},
             .int => |int| autoHash(&hasher, int),
             .num => {},
@@ -274,7 +274,7 @@ pub const Value = union(Type) {
         }
         return switch (a.*) {
             .iterator, .int, .num => unreachable,
-            .frame => unreachable, // TODO
+            .frame => a.frame == b.frame,
             .@"null" => true,
             .bool => |bool_val| bool_val == b.bool,
             .str => |s| s.eql(b.str),
@@ -377,8 +377,8 @@ pub const Value = union(Type) {
             .func => |*f| {
                 try writer.print("fn({})@0x{X}[{}]", .{ f.info.args, f.body[0], f.info.captures });
             },
-            .frame => {
-                try writer.writeAll("frame"); // TODO
+            .frame => |f| {
+                try writer.print("frame@x{X}", .{f.body[0]});
             },
             .native => |*n| {
                 try writer.print("native({})@0x{}", .{ n.arg_count, @ptrToInt(n.func) });
@@ -873,6 +873,7 @@ pub const Value = union(Type) {
             },
             .native,
             .func,
+            .frame,
             .range,
             .err,
             .tagged,
@@ -881,7 +882,6 @@ pub const Value = union(Type) {
                 try val.dump(writer, 0);
                 try writer.writeByte('\"');
             },
-            .frame => unreachable, // TODO
             .iterator => unreachable,
         }
     }

@@ -50,7 +50,9 @@ pub const Frame = struct {
     this: ?*Value = null,
     caller_frame: ?*Frame,
     err_handlers: ErrHandlers = .{ .short = .{} },
+    captures: []*Value,
 
+    // Where to store a capture after a build_func instruction
     store_capture_index: u24 = 0,
 
     stack: std.AutoArrayHashMapUnmanaged(u32, *Value) = .{},
@@ -62,50 +64,42 @@ pub const Frame = struct {
     }
 
     pub fn newVal(f: *Frame, vm: *Vm, ref: Ref) !*Value {
-        _ = f;
-        _ = vm;
-        _ = ref;
-        @panic("TODO");
+        const res = try f.newRef(vm, ref);
+        res.* = try vm.gc.alloc();
+        return res.*.?;
     }
 
     pub fn newRef(f: *Frame, vm: *Vm, ref: Ref) !*?*Value {
-        _ = f;
-        _ = vm;
-        _ = ref;
-        @panic("TODO");
+        const gop = try f.stack.getOrPut(vm.gc.gpa, @enumToInt(ref));
+        return @ptrCast(*?*Value, gop.value_ptr);
     }
 
     pub fn refAssert(f: *Frame, ref: Ref) **Value {
-        _ = f;
-        _ = ref;
-        @panic("TODO");
+        return f.stack.getPtr(@enumToInt(ref)).?;
     }
 
     pub fn val(f: *Frame, ref: Ref) *Value {
-        _ = f;
-        _ = ref;
-        @panic("TODO");
+        return f.stack.get(@enumToInt(ref)).?;
     }
 
     pub fn int(f: *Frame, vm: *Vm, ref: Ref) !i64 {
-        _ = f;
-        _ = vm;
-        _ = ref;
-        @panic("TODO");
+        const res = f.val(ref);
+        if (res.* != .int) return vm.fatal("expected an integer");
+        return res.int;
     }
 
     pub fn num(f: *Frame, vm: *Vm, ref: Ref) !*Value {
-        _ = f;
-        _ = vm;
-        _ = ref;
-        @panic("TODO");
+        const res = f.val(ref);
+        switch (res.*) {
+            .int, .num => return res,
+            else => return vm.fatal("expected a number"),
+        }
     }
 
     pub fn @"bool"(f: *Frame, vm: *Vm, ref: Ref) !bool {
-        _ = f;
-        _ = vm;
-        _ = ref;
-        @panic("TODO");
+        const res = f.val(ref);
+        if (res.* != .bool) return vm.fatal("expected a bool");
+        return res.bool;
     }
 };
 
@@ -161,6 +155,7 @@ pub fn compileAndExec(vm: *Vm, file_path: []const u8) !*bog.Value {
         .mod = mod,
         .body = mod.main,
         .caller_frame = null,
+        .captures = &.{},
     };
     defer frame.deinit(vm);
 
@@ -179,16 +174,17 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
     const ops = mod.code.items(.op);
     const data = mod.code.items(.data);
 
-    var i: u32 = f.ip;
-    defer f.ip = i;
+    var ip: u32 = f.ip;
+    defer f.ip = ip;
 
     while (true) {
-        const ref = body[i];
-        i += 1;
-        switch (ops[Bytecode.refToIndex(ref)]) {
+        const ref = body[ip];
+        ip += 1;
+        const inst = Bytecode.refToIndex(ref);
+        switch (ops[inst]) {
             .primitive => {
                 const res = try f.newRef(vm, ref);
-                res.* = switch (data[i].primitive) {
+                res.* = switch (data[inst].primitive) {
                     .@"null" => Value.Null,
                     .@"true" => Value.True,
                     .@"false" => Value.False,
@@ -197,22 +193,22 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .int => {
                 const res = try f.newVal(vm, ref);
 
-                res.* = .{ .int = data[i].int };
+                res.* = .{ .int = data[inst].int };
             },
             .num => {
                 const res = try f.newVal(vm, ref);
 
-                res.* = .{ .num = data[i].num };
+                res.* = .{ .num = data[inst].num };
             },
             .str => {
                 const res = try f.newVal(vm, ref);
 
-                const str = mod.strings[data[i].str.offset..][0..data[i].str.len];
+                const str = mod.strings[data[inst].str.offset..][0..data[inst].str.len];
                 res.* = Value.string(str);
             },
             .build_tuple => {
                 const res = try f.newVal(vm, ref);
-                const items = mod.extra[data[i].extra.extra..][0..data[i].extra.len];
+                const items = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
 
                 const tuple = try vm.gc.gpa.alloc(*Value, items.len);
                 errdefer vm.gc.gpa.free(tuple);
@@ -223,7 +219,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .build_list => {
                 const res = try f.newVal(vm, ref);
-                const items = mod.extra[data[i].extra.extra..][0..data[i].extra.len];
+                const items = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
 
                 var list = Value.List{};
                 errdefer list.deinit(vm.gc.gpa);
@@ -238,7 +234,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .build_map => {
                 const res = try f.newVal(vm, ref);
-                const items = mod.extra[data[i].extra.extra..][0..data[i].extra.len];
+                const items = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
 
                 var map = Value.Map{};
                 errdefer map.deinit(vm.gc.gpa);
@@ -255,7 +251,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .build_error => {
                 const res = try f.newVal(vm, ref);
-                const arg = f.val(data[i].un);
+                const arg = f.val(data[inst].un);
 
                 res.* = .{ .err = try vm.gc.dupe(arg) };
             },
@@ -265,9 +261,9 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .build_tagged => {
                 const res = try f.newVal(vm, ref);
-                const arg = f.val(data[i].un);
+                const arg = f.val(data[inst].un);
 
-                const name = mod.strings[data[i].str.offset..][0..data[i].str.len];
+                const name = mod.strings[data[inst].str.offset..][0..data[inst].str.len];
                 res.* = .{ .tagged = .{
                     .name = name,
                     .value = try vm.gc.dupe(arg),
@@ -276,12 +272,12 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .build_tagged_null => {
                 const res = try f.newVal(vm, ref);
 
-                const name = mod.strings[data[i].str.offset..][0..data[i].str.len];
+                const name = mod.strings[data[inst].str.offset..][0..data[inst].str.len];
                 res.* = .{ .tagged = .{ .name = name, .value = Value.Null } };
             },
             .build_func => {
                 const res = try f.newVal(vm, ref);
-                const extra = mod.extra[data[i].extra.extra..][0..data[i].extra.len];
+                const extra = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
                 const fn_info = @bitCast(Bytecode.Inst.Data.FnInfo, extra[0]);
                 const fn_body = extra[1..];
 
@@ -300,8 +296,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .build_range => {
                 const res = try f.newVal(vm, ref);
-                const start = try f.int(vm, data[i].bin.lhs);
-                const end = try f.int(vm, data[i].bin.lhs);
+                const start = try f.int(vm, data[inst].bin.lhs);
+                const end = try f.int(vm, data[inst].bin.lhs);
 
                 res.* = .{
                     .range = .{
@@ -312,9 +308,9 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .build_range_step => {
                 const res = try f.newVal(vm, ref);
-                const start = try f.int(vm, data[i].range.start);
-                const end = try f.int(vm, mod.extra[data[i].range.extra]);
-                const step = try f.int(vm, mod.extra[data[i].range.extra + 1]);
+                const start = try f.int(vm, data[inst].range.start);
+                const end = try f.int(vm, mod.extra[data[inst].range.extra]);
+                const step = try f.int(vm, mod.extra[data[inst].range.extra + 1]);
 
                 res.* = .{
                     .range = .{
@@ -326,19 +322,19 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .import => {
                 const res = try f.newRef(vm, ref);
-                const str = mod.strings[data[i].str.offset..][0..data[i].str.len];
+                const str = mod.strings[data[inst].str.offset..][0..data[inst].str.len];
 
                 res.* = try vm.import(f, str);
             },
             .discard => {
-                const arg = f.val(data[i].un);
+                const arg = f.val(data[inst].un);
 
                 if (arg.* == .err) {
                     return vm.fatal("error discarded");
                 }
             },
             .copy_un => {
-                const val = f.val(data[i].un);
+                const val = f.val(data[inst].un);
 
                 const duped = try vm.gc.dupe(val);
 
@@ -346,24 +342,28 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 res.* = duped;
             },
             .copy => {
-                const val = f.val(data[i].bin.rhs);
+                const val = f.val(data[inst].bin.rhs);
 
                 const duped = try vm.gc.dupe(val);
 
-                const res = try f.newRef(vm, data[i].bin.lhs);
+                const res = try f.newRef(vm, data[inst].bin.lhs);
                 res.* = duped;
             },
             .move => {
-                const val = f.val(data[i].bin.rhs);
-                const res = try f.newRef(vm, data[i].bin.lhs);
+                const val = f.val(data[inst].bin.rhs);
+                const res = try f.newRef(vm, data[inst].bin.lhs);
 
                 res.* = val;
             },
             .load_global => @panic("TODO"),
-            .load_capture => @panic("TODO"),
+            .load_capture => {
+                const index = @enumToInt(data[inst].un);
+                const res = try f.newRef(vm, data[inst].bin.lhs);
+                res.* = f.captures[index];
+            },
             .store_capture => {
-                const res = f.val(data[i].bin.lhs);
-                const val = f.val(data[i].bin.rhs);
+                const res = f.val(data[inst].bin.lhs);
+                const val = f.val(data[inst].bin.rhs);
 
                 res.func.captures[f.store_capture_index] = val;
                 f.store_capture_index += 1;
@@ -374,8 +374,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .div_floor => {
                 const res = try f.newVal(vm, ref);
-                const lhs = try f.num(vm, data[i].bin.lhs);
-                const rhs = try f.num(vm, data[i].bin.rhs);
+                const lhs = try f.num(vm, data[inst].bin.lhs);
+                const rhs = try f.num(vm, data[inst].bin.rhs);
                 try vm.checkZero(rhs);
 
                 const copy: Value = if (needNum(lhs, rhs)) .{
@@ -388,8 +388,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .div => {
                 const res = try f.newVal(vm, ref);
-                const lhs = try f.num(vm, data[i].bin.lhs);
-                const rhs = try f.num(vm, data[i].bin.rhs);
+                const lhs = try f.num(vm, data[inst].bin.lhs);
+                const rhs = try f.num(vm, data[inst].bin.rhs);
                 try vm.checkZero(rhs);
 
                 const copy = Value{ .num = asNum(lhs) / asNum(rhs) };
@@ -397,8 +397,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .rem => {
                 const res = try f.newVal(vm, ref);
-                const lhs = try f.num(vm, data[i].bin.lhs);
-                const rhs = try f.num(vm, data[i].bin.rhs);
+                const lhs = try f.num(vm, data[inst].bin.lhs);
+                const rhs = try f.num(vm, data[inst].bin.rhs);
                 try vm.checkZero(rhs);
                 if (isNegative(rhs))
                     return vm.fatal("remainder division by negative denominator");
@@ -412,8 +412,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .mul => {
                 const res = try f.newVal(vm, ref);
-                const lhs = try f.num(vm, data[i].bin.lhs);
-                const rhs = try f.num(vm, data[i].bin.rhs);
+                const lhs = try f.num(vm, data[inst].bin.lhs);
+                const rhs = try f.num(vm, data[inst].bin.rhs);
 
                 const copy: Value = if (needNum(lhs, rhs)) .{
                     .num = asNum(lhs) * asNum(rhs),
@@ -425,8 +425,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .pow => {
                 const res = try f.newVal(vm, ref);
-                const lhs = try f.num(vm, data[i].bin.lhs);
-                const rhs = try f.num(vm, data[i].bin.rhs);
+                const lhs = try f.num(vm, data[inst].bin.lhs);
+                const rhs = try f.num(vm, data[inst].bin.rhs);
 
                 const copy: Value = if (needNum(lhs, rhs)) .{
                     .num = std.math.pow(f64, asNum(lhs), asNum(rhs)),
@@ -438,8 +438,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .add => {
                 const res = try f.newVal(vm, ref);
-                const lhs = try f.num(vm, data[i].bin.lhs);
-                const rhs = try f.num(vm, data[i].bin.rhs);
+                const lhs = try f.num(vm, data[inst].bin.lhs);
+                const rhs = try f.num(vm, data[inst].bin.rhs);
 
                 const copy: Value = if (needNum(lhs, rhs)) .{
                     .num = asNum(lhs) + asNum(rhs),
@@ -451,8 +451,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .sub => {
                 const res = try f.newVal(vm, ref);
-                const lhs = try f.num(vm, data[i].bin.lhs);
-                const rhs = try f.num(vm, data[i].bin.rhs);
+                const lhs = try f.num(vm, data[inst].bin.lhs);
+                const rhs = try f.num(vm, data[inst].bin.rhs);
 
                 const copy: Value = if (needNum(lhs, rhs)) .{
                     .num = asNum(lhs) - asNum(rhs),
@@ -464,8 +464,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .l_shift => {
                 const res = try f.newVal(vm, ref);
-                const lhs = try f.int(vm, data[i].bin.lhs);
-                const rhs = try f.int(vm, data[i].bin.rhs);
+                const lhs = try f.int(vm, data[inst].bin.lhs);
+                const rhs = try f.int(vm, data[inst].bin.rhs);
                 if (rhs < 0) return vm.fatal("shift by negative amount");
 
                 const val = if (rhs > std.math.maxInt(u6))
@@ -478,8 +478,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .r_shift => {
                 const res = try f.newVal(vm, ref);
-                const lhs = try f.int(vm, data[i].bin.lhs);
-                const rhs = try f.int(vm, data[i].bin.rhs);
+                const lhs = try f.int(vm, data[inst].bin.lhs);
+                const rhs = try f.int(vm, data[inst].bin.rhs);
                 if (rhs < 0) return vm.fatal("shift by negative amount");
 
                 const val = if (rhs > std.math.maxInt(u6))
@@ -492,42 +492,42 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .bit_and => {
                 const res = try f.newVal(vm, ref);
-                const lhs = try f.int(vm, data[i].bin.lhs);
-                const rhs = try f.int(vm, data[i].bin.rhs);
+                const lhs = try f.int(vm, data[inst].bin.lhs);
+                const rhs = try f.int(vm, data[inst].bin.rhs);
 
                 res.* = .{ .int = lhs & rhs };
             },
             .bit_or => {
                 const res = try f.newVal(vm, ref);
-                const lhs = try f.int(vm, data[i].bin.lhs);
-                const rhs = try f.int(vm, data[i].bin.rhs);
+                const lhs = try f.int(vm, data[inst].bin.lhs);
+                const rhs = try f.int(vm, data[inst].bin.rhs);
 
                 res.* = .{ .int = lhs | rhs };
             },
             .bit_xor => {
                 const res = try f.newVal(vm, ref);
-                const lhs = try f.int(vm, data[i].bin.lhs);
-                const rhs = try f.int(vm, data[i].bin.rhs);
+                const lhs = try f.int(vm, data[inst].bin.lhs);
+                const rhs = try f.int(vm, data[inst].bin.rhs);
 
                 res.* = .{ .int = lhs ^ rhs };
             },
             .equal => {
                 const res = try f.newRef(vm, ref);
-                const lhs = f.val(data[i].bin.lhs);
-                const rhs = f.val(data[i].bin.rhs);
+                const lhs = f.val(data[inst].bin.lhs);
+                const rhs = f.val(data[inst].bin.rhs);
 
                 res.* = if (lhs.eql(rhs)) Value.True else Value.False;
             },
             .not_equal => {
                 const res = try f.newRef(vm, ref);
-                const lhs = f.val(data[i].bin.lhs);
-                const rhs = f.val(data[i].bin.rhs);
+                const lhs = f.val(data[inst].bin.lhs);
+                const rhs = f.val(data[inst].bin.rhs);
 
                 res.* = if (!lhs.eql(rhs)) Value.True else Value.False;
             },
             .less_than => {
-                const lhs = try f.num(vm, data[i].bin.lhs);
-                const rhs = try f.num(vm, data[i].bin.rhs);
+                const lhs = try f.num(vm, data[inst].bin.lhs);
+                const rhs = try f.num(vm, data[inst].bin.rhs);
                 const res = try f.newRef(vm, ref);
 
                 const bool_val = if (needNum(lhs, rhs))
@@ -538,8 +538,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 res.* = if (bool_val) Value.True else Value.False;
             },
             .less_than_equal => {
-                const lhs = try f.num(vm, data[i].bin.lhs);
-                const rhs = try f.num(vm, data[i].bin.rhs);
+                const lhs = try f.num(vm, data[inst].bin.lhs);
+                const rhs = try f.num(vm, data[inst].bin.rhs);
                 const res = try f.newRef(vm, ref);
 
                 const bool_val = if (needNum(lhs, rhs))
@@ -550,8 +550,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 res.* = if (bool_val) Value.True else Value.False;
             },
             .greater_than => {
-                const lhs = try f.num(vm, data[i].bin.lhs);
-                const rhs = try f.num(vm, data[i].bin.rhs);
+                const lhs = try f.num(vm, data[inst].bin.lhs);
+                const rhs = try f.num(vm, data[inst].bin.rhs);
                 const res = try f.newRef(vm, ref);
 
                 const bool_val = if (needNum(lhs, rhs))
@@ -562,8 +562,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 res.* = if (bool_val) Value.True else Value.False;
             },
             .greater_than_equal => {
-                const lhs = try f.num(vm, data[i].bin.lhs);
-                const rhs = try f.num(vm, data[i].bin.rhs);
+                const lhs = try f.num(vm, data[inst].bin.lhs);
+                const rhs = try f.num(vm, data[inst].bin.rhs);
                 const res = try f.newRef(vm, ref);
 
                 const bool_val = if (needNum(lhs, rhs))
@@ -574,8 +574,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 res.* = if (bool_val) Value.True else Value.False;
             },
             .in => {
-                const lhs = f.val(data[i].bin.lhs);
-                const rhs = f.val(data[i].bin.rhs);
+                const lhs = f.val(data[inst].bin.lhs);
+                const rhs = f.val(data[inst].bin.rhs);
 
                 switch (rhs.*) {
                     .str, .tuple, .list, .map, .range => {},
@@ -586,21 +586,21 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 res.* = if (lhs.in(rhs)) Value.True else Value.False;
             },
             .append => {
-                const container = f.val(data[i].bin.lhs);
-                const operand = f.val(data[i].bin.rhs);
+                const container = f.val(data[inst].bin.lhs);
+                const operand = f.val(data[inst].bin.rhs);
 
                 try container.list.append(vm.gc.gpa, try vm.gc.dupe(operand));
             },
             .as => {
-                const arg = f.val(data[i].bin_ty.operand);
+                const arg = f.val(data[inst].bin_ty.operand);
 
                 // type is validated by the compiler
-                const casted = try arg.as(vm, data[i].bin_ty.ty);
+                const casted = try arg.as(vm, data[inst].bin_ty.ty);
                 if (casted.* == .err) {
                     if (f.err_handlers.get()) |handler| {
                         const handler_operand = f.refAssert(handler.operand);
                         handler_operand.* = casted;
-                        i = handler.offset;
+                        ip = handler.offset;
                     }
                 }
                 const res = try f.newRef(vm, ref);
@@ -608,14 +608,14 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .is => {
                 const res = try f.newRef(vm, ref);
-                const arg = f.val(data[i].bin_ty.operand);
+                const arg = f.val(data[inst].bin_ty.operand);
 
                 // type is validated by the compiler
-                res.* = if (arg.is(data[i].bin_ty.ty)) Value.True else Value.False;
+                res.* = if (arg.is(data[inst].bin_ty.ty)) Value.True else Value.False;
             },
             .negate => {
                 const res = try f.newVal(vm, ref);
-                const operand = try f.num(vm, data[i].un);
+                const operand = try f.num(vm, data[inst].un);
 
                 const copy: Value = if (operand.* == .num) .{
                     .num = -operand.num,
@@ -625,24 +625,30 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 res.* = copy;
             },
             .bool_not => {
-                const operand = try f.bool(vm, data[i].un);
+                const operand = try f.bool(vm, data[inst].un);
                 const res = try f.newRef(vm, ref);
 
                 res.* = if (operand) Value.False else Value.True;
             },
             .bit_not => {
                 const res = try f.newVal(vm, ref);
-                const operand = try f.int(vm, data[i].un);
+                const operand = try f.int(vm, data[inst].un);
 
                 res.* = .{ .int = ~operand };
             },
-            .unwrap_error,
+            .unwrap_error => {
+                const res = try f.newRef(vm, ref);
+                const arg = f.val(data[inst].jump_condition.operand);
+
+                if (arg.* != .err) return vm.fatal("expected an error");
+                res.* = try vm.gc.dupe(arg.err);
+            },
             .unwrap_tagged,
             .unwrap_tagged_or_null,
             => @panic("TODO"),
             .check_len => {
-                const container = f.val(data[i].bin.lhs);
-                const len = @enumToInt(data[i].bin.rhs);
+                const container = f.val(data[inst].bin.lhs);
+                const len = @enumToInt(data[inst].bin.rhs);
 
                 const ok = switch (container.*) {
                     .list => |list| list.items.len == len,
@@ -657,8 +663,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 }
             },
             .assert_len => {
-                const container = f.val(data[i].bin.lhs);
-                const len = @enumToInt(data[i].bin.rhs);
+                const container = f.val(data[inst].bin.lhs);
+                const len = @enumToInt(data[inst].bin.rhs);
 
                 const actual_len = switch (container.*) {
                     .list => |list| list.items.len,
@@ -683,16 +689,16 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .get => {
                 const res = try f.newRef(vm, ref);
-                const container = f.val(data[i].bin.lhs);
-                const index = f.val(data[i].bin.rhs);
+                const container = f.val(data[inst].bin.lhs);
+                const index = f.val(data[inst].bin.rhs);
 
                 try container.get(vm, index, res);
                 f.this = container;
             },
             .get_or_null => {
                 const res = try f.newRef(vm, ref);
-                const container = f.val(data[i].bin.lhs);
-                const index = f.val(data[i].bin.rhs);
+                const container = f.val(data[inst].bin.lhs);
+                const index = f.val(data[inst].bin.rhs);
 
                 if (container.* != .map) {
                     res.* = Value.Null;
@@ -701,15 +707,15 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 }
             },
             .set => {
-                const container = f.val(data[i].range.start);
-                const index = f.val(mod.extra[data[i].range.extra]);
-                const val = f.val(mod.extra[data[i].range.extra + 1]);
+                const container = f.val(data[inst].range.start);
+                const index = f.val(mod.extra[data[inst].range.extra]);
+                const val = f.val(mod.extra[data[inst].range.extra + 1]);
 
                 try container.set(vm, index, val);
             },
             .push_err_handler => {
-                const err_val_ref = data[i].jump_condition.operand;
-                const offset = data[i].jump_condition.offset;
+                const err_val_ref = data[inst].jump_condition.operand;
+                const offset = data[inst].jump_condition.offset;
 
                 try f.err_handlers.push(vm.gc.gpa, .{
                     .operand = err_val_ref,
@@ -720,49 +726,49 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 f.err_handlers.pop();
             },
             .jump => {
-                i = data[i].jump;
+                ip = data[inst].jump;
             },
             .jump_if_true => {
-                const arg = try f.bool(vm, data[i].jump_condition.operand);
+                const arg = try f.bool(vm, data[inst].jump_condition.operand);
 
                 if (arg) {
-                    i = data[i].jump_condition.offset;
+                    ip = data[inst].jump_condition.offset;
                 }
             },
             .jump_if_false => {
-                const arg = try f.bool(vm, data[i].jump_condition.operand);
+                const arg = try f.bool(vm, data[inst].jump_condition.operand);
 
                 if (!arg) {
-                    i = data[i].jump_condition.offset;
+                    ip = data[inst].jump_condition.offset;
                 }
             },
             .jump_if_null => {
-                const arg = f.val(data[i].jump_condition.operand);
+                const arg = f.val(data[inst].jump_condition.operand);
 
                 if (arg.* == .@"null") {
-                    i = data[i].jump_condition.offset;
+                    ip = data[inst].jump_condition.offset;
                 }
                 continue;
             },
             .unwrap_error_or_jump => {
                 const res = try f.newRef(vm, ref);
-                const arg = f.val(data[i].jump_condition.operand);
+                const arg = f.val(data[inst].jump_condition.operand);
 
                 if (arg.* == .err) {
                     res.* = arg.err;
                 } else {
-                    i = data[i].jump_condition.offset;
+                    ip = data[inst].jump_condition.offset;
                 }
             },
             .iter_init => {
-                const arg = f.val(data[i].un);
+                const arg = f.val(data[inst].un);
 
                 const it = try Value.iterator(arg, vm);
                 if (it.* == .err) {
                     if (f.err_handlers.get()) |handler| {
                         const handler_operand = f.refAssert(handler.operand);
                         handler_operand.* = it;
-                        i = handler.offset;
+                        ip = handler.offset;
                     }
                 }
                 const res = try f.newRef(vm, ref);
@@ -770,27 +776,27 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .iter_next => {
                 const res = try f.newRef(vm, ref);
-                const arg = f.val(data[i].jump_condition.operand);
+                const arg = f.val(data[inst].jump_condition.operand);
 
                 try arg.iterator.next(vm, res);
 
                 if (res.*.?.* == .@"null") {
-                    i = data[i].jump_condition.offset;
+                    ip = data[inst].jump_condition.offset;
                 }
             },
             .call,
             .call_one,
             .call_zero,
             => @panic("TODO"),
-            .ret => return f.val(data[i].un),
+            .ret => return f.val(data[inst].un),
             .ret_null => return Value.Null,
             .throw => {
-                const val = f.val(data[i].un);
+                const val = f.val(data[inst].un);
                 if (val.* == .err) {
                     if (f.err_handlers.get()) |handler| {
                         const handler_operand = f.refAssert(handler.operand);
                         handler_operand.* = val;
-                        i = handler.offset;
+                        ip = handler.offset;
                         continue;
                     }
                 }
@@ -954,6 +960,7 @@ fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) !*Value {
         .body = mod.main,
         .caller_frame = caller_frame,
         .this = caller_frame.this,
+        .captures = &.{},
     };
     defer frame.deinit(vm);
 

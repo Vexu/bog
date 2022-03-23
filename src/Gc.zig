@@ -162,8 +162,12 @@ fn markGray(gc: *Gc) void {
                         }
                     },
                     .frame => |frame| {
-                        _ = frame;
-                        // TODO iterate over stack
+                        for (frame.stack.values()) |val| {
+                            gc.markVal(val);
+                        }
+                        for (frame.captures) |val| {
+                            gc.markVal(val);
+                        }
                     },
                     .iterator => |iter| {
                         gc.markVal(iter.value);
