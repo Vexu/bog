@@ -160,13 +160,18 @@ pub const Inst = struct {
         // extra[1] == value
         set,
 
+        /// uses Data.jump_condition
+        /// Operand is where the error value should be stored
+        /// and offset is where the VM should jump to handle the error.
+        push_err_handler,
+        pop_err_handler,
+
         // uses Data.jump
         jump,
         // use Data.jump_condition
         jump_if_true,
         jump_if_false,
         jump_if_null,
-        jump_if_error,
         /// if operand is not an error jumps,
         /// otherwise unwraps the error
         unwrap_error_or_jump,
@@ -187,6 +192,7 @@ pub const Inst = struct {
         // use Data.un
         ret,
         ret_null,
+        throw,
     };
 
     pub const Data = union {
@@ -367,6 +373,7 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
             .append => std.debug.print("{}.append({})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
             .as, .is => std.debug.print("{} {s}\n", .{ data[i].bin_ty.operand, @tagName(data[i].bin_ty.ty) }),
             .ret,
+            .throw,
             .negate,
             .bool_not,
             .bit_not,
@@ -381,9 +388,12 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
             .jump_if_false,
             .unwrap_error_or_jump,
             .jump_if_null,
-            .jump_if_error,
             .iter_next,
-            => std.debug.print("{d} cond {}\n", .{ data[i].jump_condition.offset, data[i].jump_condition.operand }),
+            .push_err_handler,
+            => std.debug.print(
+                "{d} cond {}\n",
+                .{ data[i].jump_condition.offset, data[i].jump_condition.operand },
+            ),
             .call => {
                 const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
                 std.debug.print("{}(", .{extra[0]});
@@ -392,7 +402,11 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
             },
             .call_one => std.debug.print("{}({})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
             .call_zero => std.debug.print("{}()\n", .{data[i].un}),
-            .ret_null, .build_error_null, .load_this => std.debug.print("\n", .{}),
+            .ret_null,
+            .build_error_null,
+            .load_this,
+            .pop_err_handler,
+            => std.debug.print("\n", .{}),
         }
     }
 }

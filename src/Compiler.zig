@@ -32,7 +32,6 @@ unresolved_globals: std.ArrayListUnmanaged(UnresolvedGlobal) = .{},
 list_buf: std.ArrayListUnmanaged(Ref) = .{},
 unwrap_jump_buf: JumpList = .{},
 cur_loop: ?*Loop = null,
-cur_try: ?*Try = null,
 cur_fn: ?*Fn = null,
 cur_line: u32 = 1,
 prev_line_offset: u32 = 0,
@@ -710,12 +709,7 @@ fn genThrow(c: *Compiler, node: Node.Index) !void {
     const operand_val = try c.genNode(operand, .value);
     const operand_ref = try c.makeRuntime(operand_val, operand);
     const err_ref = try c.addUn(.build_error, operand_ref, node);
-    if (c.cur_try) |try_scope| {
-        _ = try c.addBin(.move, try_scope.err_ref, err_ref, node);
-        try try_scope.jumps.append(c.gpa, try c.addUn(.jump, undefined, node));
-    } else {
-        _ = try c.addUn(.ret, err_ref, node);
-    }
+    _ = try c.addUn(.throw, err_ref, node);
 }
 
 fn genReturn(c: *Compiler, node: Node.Index) !void {
@@ -773,11 +767,6 @@ fn genFor(c: *Compiler, node: Node.Index, res: Result) Error!Value {
 
     // create the iterator
     const iter_ref = try c.addUn(.iter_init, cond_ref, for_expr.cond);
-    if (c.cur_try) |try_scope| {
-        _ = try c.addBin(.move, try_scope.err_ref, iter_ref, for_expr.cond);
-        try try_scope.jumps.append(c.gpa, try c.addJump(.jump_if_error, iter_ref, for_expr.cond));
-    }
-
     var loop = Loop{
         .first_inst = @intCast(u32, c.code.items.len),
     };
@@ -1099,38 +1088,27 @@ fn genTry(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         },
     };
 
-    var try_scope = Try{
-        .err_ref = try c.makeRuntime(Value.@"null", node),
-    };
-
-    const old_try = c.cur_try;
-    defer c.cur_try = old_try;
-    c.cur_try = &try_scope;
+    const err_ref = try c.makeRuntime(Value.@"null", node);
+    const err_handler_inst = try c.addJump(.push_err_handler, err_ref, node);
 
     _ = try c.genNode(cond, sub_res);
 
     // no longer in try scope
-    c.cur_try = old_try;
-
-    if (try_scope.jumps.items.len == 0) {
-        // no possible error to be handled
-        return sub_res.toVal();
-    }
+    _ = try c.addUn(.pop_err_handler, undefined, node);
+    c.finishJump(err_handler_inst);
 
     // if no error jump over all catchers
-    const skip_all = try c.addJump(.unwrap_error_or_jump, try_scope.err_ref, cond);
-
-    for (try_scope.jumps.items) |jump| {
-        c.finishJump(jump);
-    }
-    try_scope.jumps.items.len = 0;
-    try try_scope.jumps.append(c.gpa, skip_all);
+    const skip_all = try c.addJump(.unwrap_error_or_jump, err_ref, cond);
 
     const scope_count = c.scopes.items.len;
     defer c.scopes.items.len = scope_count;
 
-    const jump_buf_top = c.unwrap_jump_buf.items.len;
-    defer c.unwrap_jump_buf.items.len = jump_buf_top;
+    const jump_buf_start = c.unwrap_jump_buf.items.len;
+    var jump_buf_top = jump_buf_start;
+    defer c.unwrap_jump_buf.items.len = jump_buf_start;
+
+    try c.unwrap_jump_buf.append(c.gpa, skip_all);
+    jump_buf_top += 1;
 
     var seen_catch_all = false;
     for (catches) |catcher, catcher_i| {
@@ -1147,12 +1125,12 @@ fn genTry(c: *Compiler, node: Node.Index, res: Result) Error!Value {
                     .discard_expr => return c.reportErr("use plain 'catch' instead of 'catch let _'", capture),
                     else => {},
                 }
-                try c.genTryUnwrap(capture, &.{ .ref = try_scope.err_ref });
+                try c.genTryUnwrap(capture, &.{ .ref = err_ref });
             } else {
                 const capture_val = try c.genNode(capture, .value);
                 const capture_ref = try c.makeRuntime(capture_val, capture);
                 // if not equal to the error value jump over this handler
-                const eq_ref = try c.addBin(.equal, capture_ref, try_scope.err_ref, capture);
+                const eq_ref = try c.addBin(.equal, capture_ref, err_ref, capture);
                 try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, eq_ref, capture));
             }
         } else {
@@ -1162,24 +1140,31 @@ fn genTry(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         const expr = data[catcher].bin.rhs;
         _ = try c.genNode(expr, sub_res);
 
+        var exit_handler: ?Ref = null;
+
         // exit this handler (unless it's the last one)
         if (catcher_i + 1 != catches.len) {
-            try try_scope.jumps.append(c.gpa, try c.addUn(.jump, undefined, expr));
+            exit_handler = try c.addUn(.jump, undefined, expr);
         }
 
         // jump over this handler if the value doesn't match
         for (c.unwrap_jump_buf.items[jump_buf_top..]) |some| {
             c.finishJump(some);
         }
+
+        if (exit_handler) |some| {
+            try c.unwrap_jump_buf.append(c.gpa, some);
+            jump_buf_top += 1;
+        }
     }
 
     // return uncaught errors
     if (!seen_catch_all) {
-        _ = try c.addUn(.ret, try_scope.err_ref, node);
+        _ = try c.addUn(.ret, err_ref, node);
     }
 
     // exit try-catch
-    for (try_scope.jumps.items) |jump| {
+    for (c.unwrap_jump_buf.items[jump_buf_start..]) |jump| {
         c.finishJump(jump);
     }
     return sub_res.toVal();
@@ -1225,17 +1210,16 @@ fn genAs(c: *Compiler, node: Node.Index) Error!Value {
     const type_id = type_id_map.get(type_str) orelse
         return c.reportErr("expected a type name", ty_tok);
 
+    switch (type_id) {
+        .@"null", .int, .num, .bool, .str, .tuple, .map, .list => {},
+        else => return c.reportErr("invalid cast type", ty_tok),
+    }
+
     if (lhs.isRt()) {
         const cast_ref = try c.addInst(.as, .{ .bin_ty = .{
             .operand = lhs.getRt(),
             .ty = type_id,
         } }, ty_tok);
-
-        // `as` can result in a type error
-        if (c.cur_try) |try_scope| {
-            _ = try c.addBin(.move, try_scope.err_ref, cast_ref, node);
-            try try_scope.jumps.append(c.gpa, try c.addJump(.jump_if_error, cast_ref, node));
-        }
         return Value{ .ref = cast_ref };
     }
 
@@ -1935,18 +1919,15 @@ fn genFn(c: *Compiler, node: Node.Index) Error!Value {
 
     const old_code = c.code;
     const scope_count = c.scopes.items.len;
-    const old_try = c.cur_try;
     const old_loop = c.cur_loop;
     const old_fn = c.cur_fn;
     defer {
         c.code = old_code;
         c.scopes.items.len = scope_count;
-        c.cur_try = old_try;
         c.cur_loop = old_loop;
         c.cur_fn = old_fn;
     }
     c.code = &func.code;
-    c.cur_try = null;
     c.cur_loop = null;
     c.cur_fn = &func;
 
@@ -2040,11 +2021,6 @@ fn genCall(c: *Compiler, node: Node.Index) Error!Value {
         2 => try c.addBin(.call_one, arg_refs[0], arg_refs[1], node),
         else => try c.addExtra(.call, arg_refs, node),
     };
-
-    if (c.cur_try) |try_scope| {
-        _ = try c.addBin(.move, try_scope.err_ref, res_ref, node);
-        try try_scope.jumps.append(c.gpa, try c.addJump(.jump_if_error, res_ref, node));
-    }
 
     return Value{ .ref = res_ref };
 }
@@ -2151,11 +2127,6 @@ fn genFormatString(c: *Compiler, node: Node.Index) Error!Value {
         2 => try c.addBin(.call_one, arg_refs[0], arg_refs[1], node),
         else => try c.addExtra(.call, arg_refs, node),
     };
-
-    if (c.cur_try) |try_scope| {
-        _ = try c.addBin(.move, try_scope.err_ref, res_ref, node);
-        try try_scope.jumps.append(c.gpa, try c.addJump(.jump_if_error, res_ref, node));
-    }
 
     return Value{ .ref = res_ref };
 }
