@@ -191,6 +191,15 @@ const Value = union(enum) {
             return c.reportErr("expected a number", node);
         }
     }
+
+    fn checkZero(val: Value, c: *Compiler, node: Node.Index) !void {
+        switch (val) {
+            .int => |v| if (v != 0) return,
+            .num => |v| if (v != 0) return,
+            else => unreachable,
+        }
+        return c.reportErr("division by zero", node);
+    }
 };
 
 pub const Error = error{CompileError} || Allocator.Error;
@@ -655,7 +664,14 @@ fn genDecl(c: *Compiler, node: Node.Index) !void {
 fn genThrow(c: *Compiler, node: Node.Index) !void {
     const data = c.tree.nodes.items(.data);
     const operand = try c.genNode(data[node].un, .value);
-    _ = try c.addUn(.throw, try c.makeRuntime(operand));
+    const operand_ref = try c.makeRuntime(operand);
+    const err_ref = try c.addUn(.build_error, operand_ref);
+    if (c.cur_try) |try_scope| {
+        _ = try c.addBin(.move, try_scope.err_ref, err_ref);
+        try try_scope.jumps.append(c.gpa, try c.addUn(.jump, undefined));
+    } else {
+        _ = try c.addUn(.ret, err_ref);
+    }
 }
 
 fn genReturn(c: *Compiler, node: Node.Index) !void {
@@ -934,8 +950,14 @@ fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
                 expr = data[case].un;
             },
             .match_case_let => {
+                const capture = data[case].bin.lhs;
                 expr = data[case].bin.rhs;
-                try c.genTryUnwrap(data[case].bin.lhs, &.{ .ref = cond_ref });
+                switch (ids[c.getLastNode(capture)]) {
+                    .ident_expr, .mut_ident_expr => seen_catch_all = true,
+                    .discard_expr => return c.reportErr("use plain '_' instead of 'let _'", capture),
+                    else => {},
+                }
+                try c.genTryUnwrap(capture, &.{ .ref = cond_ref });
             },
             .match_case,
             .match_case_one,
@@ -1058,13 +1080,18 @@ fn genTry(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     var seen_catch_all = false;
     for (catches) |catcher, catcher_i| {
         if (seen_catch_all) {
-            return c.reportErr("additional handlers after catch-all handler", catcher);
+            return c.reportErr("additional handlers after a catch-all handler", catcher);
         }
 
         c.unwrap_jump_buf.items.len = jump_buf_top;
         const capture = data[catcher].bin.lhs;
         if (capture != 0) {
             if (ids[catcher] == .catch_let_expr) {
+                switch (ids[c.getLastNode(capture)]) {
+                    .ident_expr, .mut_ident_expr => seen_catch_all = true,
+                    .discard_expr => return c.reportErr("use plain 'catch' instead of 'catch let _'", capture),
+                    else => {},
+                }
                 try c.genTryUnwrap(capture, &.{ .ref = try_scope.err_ref });
             } else {
                 const capture_val = try c.genNode(capture, .value);
@@ -1530,8 +1557,12 @@ fn genArithmetic(c: *Compiler, node: Node.Index) Error!Value {
                     .int = std.math.mul(i64, lhs_val.int, rhs_val.int) catch break :rt,
                 };
             },
-            .div => return Value{ .num = lhs_val.getNum() / rhs_val.getNum() },
+            .div => {
+                try rhs_val.checkZero(c, rhs);
+                return Value{ .num = lhs_val.getNum() / rhs_val.getNum() };
+            },
             .div_floor => {
+                try rhs_val.checkZero(c, rhs);
                 if (needNum(lhs_val, rhs_val)) {
                     return Value{ .int = @floatToInt(i64, @divFloor(lhs_val.getNum(), rhs_val.getNum())) };
                 }
@@ -1540,6 +1571,7 @@ fn genArithmetic(c: *Compiler, node: Node.Index) Error!Value {
                 };
             },
             .mod => {
+                try rhs_val.checkZero(c, rhs);
                 if (needNum(lhs_val, rhs_val)) {
                     return Value{ .num = @rem(lhs_val.getNum(), rhs_val.getNum()) };
                 }
@@ -1749,6 +1781,10 @@ fn genError(c: *Compiler, node: Node.Index) Error!Value {
         return Value{ .ref = ref };
     }
     const operand_val = try c.genNode(data[node].un, .value);
+    if (operand_val == .@"null") {
+        const ref = try c.addUn(.build_error_null, undefined);
+        return Value{ .ref = ref };
+    }
     const operand_ref = try c.makeRuntime(operand_val);
 
     const ref = try c.addUn(.build_error, operand_ref);

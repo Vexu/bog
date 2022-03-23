@@ -186,9 +186,6 @@ pub const Inst = struct {
         // use Data.un
         ret,
         ret_null,
-        throw,
-
-        _,
     };
 
     pub const Data = union {
@@ -344,9 +341,9 @@ fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
                 const len = @enumToInt(data[i].bin.rhs);
                 std.debug.print("{} {d}\n", .{ operand, len });
             },
-            .load_global => std.debug.print("GLOBAL({d})\n", .{data[i].un}),
+            .load_global => std.debug.print("GLOBAL({})\n", .{data[i].un}),
             .load_capture => std.debug.print("CAPTURE({d})\n", .{@enumToInt(data[i].un)}),
-            .store_capture => std.debug.print("CAPTURE({d}) = {}\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
+            .store_capture => std.debug.print("CAPTURE({}) = {}\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
             .copy,
             .move,
             .get,
@@ -383,7 +380,6 @@ fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
             .discard,
             .build_error,
             .copy_un,
-            .throw,
             => std.debug.print("{}\n", .{data[i].un}),
             .jump => std.debug.print("{d}\n", .{data[i].jump}),
             .jump_if_true,
@@ -402,7 +398,6 @@ fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
             .call_one => std.debug.print("{}({})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
             .call_zero => std.debug.print("{}()\n", .{data[i].un}),
             .ret_null, .build_error_null, .load_this => std.debug.print("\n", .{}),
-            _ => unreachable,
         }
     }
 }
