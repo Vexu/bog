@@ -16,7 +16,8 @@ gc: Gc,
 
 errors: Errors,
 
-imports: std.StringHashMapUnmanaged(fn (*Vm) Vm.Error!*bog.Value) = .{},
+/// Functions that act like modules, called by `import`ing a package by the name.
+imports: std.StringHashMapUnmanaged(fn (Context) Vm.Error!*Value) = .{},
 
 /// All currently loaded packages and files.
 imported_modules: std.StringHashMapUnmanaged(*Bytecode) = .{},
@@ -155,8 +156,8 @@ pub fn deinit(vm: *Vm) void {
 // TODO we might not want to require `importable` to be comptime
 pub fn addPackage(vm: *Vm, name: []const u8, comptime importable: anytype) Allocator.Error!void {
     try vm.imports.putNoClobber(vm.gc.gpa, name, struct {
-        fn func(_vm: *Vm) Vm.Error!*bog.Value {
-            return bog.Value.zigToBog(_vm, importable);
+        fn func(ctx: Context) Vm.Error!*bog.Value {
+            return bog.Value.zigToBog(ctx.vm, importable);
         }
     }.func);
 }
@@ -1061,7 +1062,7 @@ fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) !*Value {
         try vm.importFile(id)
     else {
         if (vm.imports.get(id)) |some| {
-            return some(vm);
+            return some(caller_frame.ctx(vm));
         }
         return vm.fatal("no such package");
     };

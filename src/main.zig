@@ -68,15 +68,15 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
     const S = struct {
         var _args: [][]const u8 = undefined;
 
-        fn argsToBog(_vm: *bog.Vm) bog.Vm.Error!*bog.Value {
-            const ret = try _vm.gc.alloc();
+        fn argsToBog(ctx: bog.Vm.Context) bog.Vm.Error!*bog.Value {
+            const ret = try ctx.vm.gc.alloc();
             ret.* = .{ .list = .{} };
             var list = &ret.list;
-            errdefer list.deinit(_vm.gc.gpa);
-            try list.ensureTotalCapacity(_vm.gc.gpa, _args.len);
+            errdefer list.deinit(ctx.vm.gc.gpa);
+            try list.ensureTotalCapacity(ctx.vm.gc.gpa, _args.len);
 
             for (_args) |arg| {
-                const str = try _vm.gc.alloc();
+                const str = try ctx.vm.gc.alloc();
                 str.* = bog.Value.string(arg);
                 list.appendAssumeCapacity(str);
             }
