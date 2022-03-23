@@ -86,7 +86,7 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
     S._args = args[0..];
     try vm.imports.putNoClobber(vm.gc.gpa, "args", S.argsToBog);
 
-    const res = vm.compileAndExec(file_name) catch |e| switch (e) {
+    const res = vm.compileAndRun(file_name) catch |e| switch (e) {
         error.RuntimeError => {
             vm.errors.render("TODO", std.io.getStdErr().writer()) catch {};
             process.exit(1);

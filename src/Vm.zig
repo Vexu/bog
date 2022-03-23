@@ -24,6 +24,7 @@ imported_modules: std.StringHashMapUnmanaged(*Bytecode) = .{},
 options: Options = .{},
 
 last_get: *Value = Value.Null,
+call_depth: u32 = 0,
 
 const max_depth = 512;
 
@@ -65,13 +66,26 @@ pub const Frame = struct {
 
     pub fn newVal(f: *Frame, vm: *Vm, ref: Ref) !*Value {
         const res = try f.newRef(vm, ref);
+        if (res.*) |some| {
+            // attempt to use old value for better performance in loops
+            switch (some.*) {
+                // simple values can be reused
+                .int, .num, .range, .native => return some,
+                // if string doesn't own it's contents it can be reused
+                .str => |s| if (s.capacity == 0) return some,
+                else => {},
+            }
+        }
+        // allocate a new value if previous cannot be used or there isn't one
         res.* = try vm.gc.alloc();
         return res.*.?;
     }
 
     pub fn newRef(f: *Frame, vm: *Vm, ref: Ref) !*?*Value {
         const gop = try f.stack.getOrPut(vm.gc.gpa, @enumToInt(ref));
-        return @ptrCast(*?*Value, gop.value_ptr);
+        const casted = @ptrCast(*?*Value, gop.value_ptr);
+        if (!gop.found_existing) casted.* = null;
+        return casted;
     }
 
     pub fn refAssert(f: *Frame, ref: Ref) **Value {
@@ -148,7 +162,7 @@ pub fn addStdNoIo(vm: *Vm) Allocator.Error!void {
 }
 
 /// Compiles and executes the file given by `file_path`.
-pub fn compileAndExec(vm: *Vm, file_path: []const u8) !*bog.Value {
+pub fn compileAndRun(vm: *Vm, file_path: []const u8) !*Value {
     const mod = try vm.importFile(file_path);
 
     var frame = Frame{
@@ -787,7 +801,76 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .call,
             .call_one,
             .call_zero,
-            => @panic("TODO"),
+            => {
+                var buf: [1]Ref = undefined;
+                var args: []const Ref = &.{};
+                var callee: *Value = undefined;
+                switch (ops[inst]) {
+                    .call => {
+                        const extra = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
+                        callee = f.val(extra[0]);
+                        args = extra[1..];
+                    },
+                    .call_one => {
+                        callee = f.val(data[inst].bin.lhs);
+                        buf[0] = data[inst].bin.rhs;
+                        args = &buf;
+                    },
+                    .call_zero => callee = f.val(data[inst].un),
+                    else => unreachable,
+                }
+                if (callee.* == .native) {
+                    if (true) @panic("TODO native calls");
+                } else if (callee.* == .func) {
+                    if (callee.func.info.args != args.len) {
+                        const str = try Value.String.init(
+                            vm.gc.gpa,
+                            "expected {} args, got {}",
+                            .{ callee.func.info.args, args.len },
+                        );
+                        return vm.fatalExtra(str);
+                    }
+
+                    if (vm.call_depth > max_depth) {
+                        return vm.fatal("maximum recursion depth exceeded");
+                    }
+                    vm.call_depth += 1;
+                    defer vm.call_depth -= 1;
+
+                    var new_frame = Frame{
+                        .mod = mod,
+                        .body = callee.func.body[0..callee.func.body_len],
+                        .caller_frame = f,
+                        .this = f.this,
+                        .captures = &.{},
+                    };
+                    defer new_frame.deinit(vm);
+
+                    try new_frame.stack.ensureUnusedCapacity(vm.gc.gpa, args.len);
+
+                    for (args) |arg_ref, i| {
+                        new_frame.stack.putAssumeCapacity(@intCast(u32, i), f.val(arg_ref));
+                    }
+
+                    var frame_val = try vm.gc.alloc();
+                    frame_val.* = .{ .frame = &new_frame };
+
+                    const returned = try f.newRef(vm, ref);
+                    returned.* = try vm.run(&new_frame);
+                } else {
+                    const returned = try f.newRef(vm, ref);
+                    returned.* = try vm.typeError(.func, callee.*);
+                }
+                f.this = null;
+                const returned = f.val(ref);
+                if (returned.* == .err) {
+                    if (f.err_handlers.get()) |handler| {
+                        const handler_operand = f.refAssert(handler.operand);
+                        handler_operand.* = returned;
+                        ip = handler.offset;
+                    }
+                }
+            },
             .ret => return f.val(data[inst].un),
             .ret_null => return Value.Null,
             .throw => {

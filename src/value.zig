@@ -196,7 +196,7 @@ pub const Value = union(Type) {
     pub fn deinit(value: *Value, allocator: Allocator) void {
         switch (value.*) {
             .bool, .@"null" => return,
-            .frame => unreachable, // TODO
+            .frame => {}, // frames are managed by the VM
             .int, .num, .native, .tagged, .range, .iterator, .err => {},
             .tuple => |t| allocator.free(t),
             .map => |*m| m.deinit(allocator),

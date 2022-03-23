@@ -58,8 +58,6 @@ pub fn compile(gpa: Allocator, source: []const u8, errors: *Errors) (Compiler.Er
     defer compiler.deinit();
 
     for (tree.root_nodes) |node| {
-        // try compiler.addLineInfo(node);
-
         _ = try compiler.genNode(node, .discard);
     }
     {
