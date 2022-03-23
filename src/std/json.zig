@@ -70,9 +70,9 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
             }
             return val;
         },
-        .True => return &Value.True,
-        .False => return &Value.False,
-        .Null => return &Value.None,
+        .True => return Value.True,
+        .False => return Value.False,
+        .Null => return Value.Null,
     }
 }
 

@@ -27,12 +27,6 @@ pub fn main() !void {
             if (mem.eql(u8, args[1], "debug:tokens")) {
                 return debugTokens(gpa, args[2..]);
             }
-            if (mem.eql(u8, args[1], "debug:write")) {
-                return debugWrite(gpa, args[2..]);
-            }
-            if (mem.eql(u8, args[1], "debug:read")) {
-                return debugRead(gpa, args[2..]);
-            }
         }
         if (!mem.startsWith(u8, "-", args[1])) {
             return run(gpa, args[1..]);
@@ -92,31 +86,11 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
     S._args = args[0..];
     try vm.imports.putNoClobber(vm.gc.gpa, "args", S.argsToBog);
 
-    const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => |err| {
-            fatal("unable to open '{s}': {}", .{ file_name, err });
-        },
-    };
-    defer gpa.free(source);
-
-    var module = bog.Module.read(source) catch |e| switch (e) {
-        // not a bog bytecode file
-        error.InvalidMagic => null,
-        else => |err| fatal("cannot execute file '{s}': {}", .{ file_name, err }),
-    };
-
-    // TODO this doesn't cast nicely for some reason
-    const res_with_err = (if (module) |*some| blk: {
-        vm.ip = some.entry;
-        break :blk vm.exec(some);
-    } else vm.run(source));
-    const res = res_with_err catch |e| switch (e) {
-        error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
-            vm.errors.render(source, std.io.getStdErr().writer()) catch {};
+    const res = vm.compileAndExec(file_name) catch |e| switch (e) {
+        error.RuntimeError => {
+            vm.errors.render("TODO", std.io.getStdErr().writer()) catch {};
             process.exit(1);
         },
-        error.MalformedByteCode => if (is_debug) @panic("malformed") else fatal("attempted to execute invalid bytecode", .{}),
         error.OutOfMemory => return error.OutOfMemory,
     };
 
@@ -135,7 +109,7 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
             try stderr.writeAll("\n");
             process.exit(1);
         },
-        .none => {},
+        .@"null" => {},
         else => fatal("invalid return type '{s}'", .{@tagName(res.*)}),
     }
 }
@@ -229,9 +203,6 @@ const usage_debug =
 ;
 
 fn debugDump(gpa: std.mem.Allocator, args: [][]const u8) !void {
-    if (true) {
-        @panic("TODO re-enable debugDump");
-    }
     const file_name = getFileName(usage_debug, args);
 
     const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
@@ -254,7 +225,7 @@ fn debugDump(gpa: std.mem.Allocator, args: [][]const u8) !void {
     };
     defer module.deinit(gpa);
 
-    try module.dump(gpa, std.io.getStdOut().writer());
+    module.dump(module.main);
 }
 
 fn debugTokens(gpa: std.mem.Allocator, args: [][]const u8) !void {
@@ -287,98 +258,19 @@ fn debugTokens(gpa: std.mem.Allocator, args: [][]const u8) !void {
         switch (id) {
             .nl,
             .eof,
-            .indent_1,
-            .indent_2,
-            .indent_3,
-            .indent_4,
-            .indent_5,
-            .indent_6,
-            .indent_7,
-            .indent_8,
-            .indent_9,
-            .indent_10,
-            .indent_11,
-            .indent_12,
-            .indent_13,
-            .indent_14,
-            .indent_15,
-            .indent_16,
-            .indent_17,
-            .indent_18,
-            .indent_19,
-            .indent_20,
-            .indent_21,
-            .indent_22,
-            .indent_23,
-            .indent_24,
-            .indent_25,
-            .indent_26,
-            .indent_27,
-            .indent_28,
-            .indent_29,
-            .indent_30,
-            .indent_31,
-            .indent_32,
+            // zig fmt: off
+            .indent_1, .indent_2, .indent_3, .indent_4, .indent_5,
+            .indent_6, .indent_7, .indent_8, .indent_9, .indent_10,
+            .indent_11, .indent_12, .indent_13, .indent_14, .indent_15,
+            .indent_16, .indent_17, .indent_18, .indent_19, .indent_20,
+            .indent_21, .indent_22, .indent_23, .indent_24, .indent_25,
+            .indent_26, .indent_27, .indent_28, .indent_29, .indent_30,
+            .indent_31, .indent_32,
+            // zig fmt: on
             => try stream.print("{s}\n", .{@tagName(id)}),
             else => try stream.print("{s} |{s}|\n", .{ @tagName(id), source[starts[i]..ends[i]] }),
         }
     }
-}
-
-const usage_debug_write =
-    \\usage: bog debug:write [file] [out]
-    \\
-;
-
-fn debugWrite(gpa: std.mem.Allocator, args: [][]const u8) !void {
-    if (true) {
-        @panic("TODO re-enable debugWrite");
-    }
-    if (args.len != 2) {
-        fatal("{s}", .{usage_debug_write});
-    }
-    const file_name = args[0];
-
-    const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => |err| {
-            fatal("unable to open '{s}': {}", .{ file_name, err });
-        },
-    };
-    defer gpa.free(source);
-
-    var errors = bog.Errors.init(gpa);
-    defer errors.deinit();
-
-    var module = bog.compile(gpa, source, &errors) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.TokenizeError, error.ParseError, error.CompileError => {
-            try errors.render(source, std.io.getStdErr().writer());
-            process.exit(1);
-        },
-    };
-    defer module.deinit(gpa);
-
-    const file = try std.fs.cwd().createFile(args[1], .{});
-    defer file.close();
-
-    try module.write(file.writer());
-}
-
-fn debugRead(gpa: std.mem.Allocator, args: [][]const u8) !void {
-    const file_name = getFileName(usage_debug, args);
-
-    const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => |err| {
-            fatal("unable to open '{s}': {}", .{ file_name, err });
-        },
-    };
-    defer gpa.free(source);
-
-    const module = try bog.Module.read(source);
-
-    try module.dump(gpa, std.io.getStdOut().writer());
 }
 
 comptime {

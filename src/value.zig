@@ -3,11 +3,9 @@ const mem = std.mem;
 const Allocator = mem.Allocator;
 const bog = @import("bog.zig");
 const Vm = bog.Vm;
-const Module = bog.Module;
-const util = @import("util.zig");
 
 pub const Type = enum(u8) {
-    none = 0,
+    @"null",
     int,
     num,
     bool,
@@ -20,12 +18,14 @@ pub const Type = enum(u8) {
     func,
     tagged,
 
+    /// A called function during execution.
+    frame,
+
     /// pseudo type user should not have access to via valid bytecode
     iterator,
 
     /// native being separate from .func is an implementation detail
     native,
-    _,
 };
 
 pub const Value = union(Type) {
@@ -42,15 +42,17 @@ pub const Value = union(Type) {
     },
     str: String,
     func: struct {
-        /// offset to the functions first instruction
-        offset: u32,
-        arg_count: u8,
+        info: bog.Bytecode.Inst.Data.FnInfo,
+        body_len: u32,
+        /// `len` broken into body_len to save space
+        body: [*]const bog.Bytecode.Ref,
+        /// `len` stored in `info`
+        captures: [*]*Value,
 
         /// module in which this function exists
-        module: *Module,
-
-        captures: []*Value,
+        module: *bog.Bytecode,
     },
+    frame: *Vm.Frame,
     native: Native,
     tagged: struct {
         name: []const u8,
@@ -67,7 +69,7 @@ pub const Value = union(Type) {
             switch (iter.value.*) {
                 .tuple => |tuple| {
                     if (iter.i.u == tuple.len) {
-                        res.* = &Value.None;
+                        res.* = Value.Null;
                         return;
                     }
 
@@ -76,7 +78,7 @@ pub const Value = union(Type) {
                 },
                 .list => |*list| {
                     if (iter.i.u == list.items.len) {
-                        res.* = &Value.None;
+                        res.* = Value.Null;
                         return;
                     }
 
@@ -85,7 +87,7 @@ pub const Value = union(Type) {
                 },
                 .str => |*str| {
                     if (iter.i.u == str.data.len) {
-                        res.* = &Value.None;
+                        res.* = Value.Null;
                         return;
                     }
                     if (res.* == null)
@@ -103,7 +105,7 @@ pub const Value = union(Type) {
                 },
                 .map => |*map| {
                     if (iter.i.u == map.count()) {
-                        res.* = &Value.None;
+                        res.* = Value.Null;
                         return;
                     }
 
@@ -123,7 +125,7 @@ pub const Value = union(Type) {
                 },
                 .range => {
                     if (iter.i.i >= iter.value.range.end) {
-                        res.* = &Value.None;
+                        res.* = Value.Null;
                         return;
                     }
                     if (res.* == null)
@@ -141,7 +143,7 @@ pub const Value = union(Type) {
 
     /// always memoized
     bool: bool,
-    none,
+    @"null",
 
     pub const String = @import("String.zig");
 
@@ -151,8 +153,9 @@ pub const Value = union(Type) {
             return Value.hash(v);
         }
 
-        pub fn eql(self: @This(), a: *const Value, b: *const Value) bool {
+        pub fn eql(self: @This(), a: *const Value, b: *const Value, b_index: usize) bool {
             _ = self;
+            _ = b_index;
             return Value.eql(a, b);
         }
     };
@@ -164,9 +167,13 @@ pub const Value = union(Type) {
         func: fn (*Vm, []*Value) Vm.Error!*Value,
     };
 
-    pub var None = Value{ .none = {} };
-    pub var True = Value{ .bool = true };
-    pub var False = Value{ .bool = false };
+    var null_base = Value{ .@"null" = {} };
+    var true_base = Value{ .bool = true };
+    var false_base = Value{ .bool = false };
+
+    pub const Null = &null_base;
+    pub const True = &true_base;
+    pub const False = &false_base;
 
     pub fn string(data: anytype) Value {
         return switch (@TypeOf(data)) {
@@ -188,13 +195,14 @@ pub const Value = union(Type) {
     /// Does not free values recursively.
     pub fn deinit(value: *Value, allocator: Allocator) void {
         switch (value.*) {
-            .bool, .none => return,
+            .bool, .@"null" => return,
+            .frame => unreachable, // TODO
             .int, .num, .native, .tagged, .range, .iterator, .err => {},
             .tuple => |t| allocator.free(t),
             .map => |*m| m.deinit(allocator),
             .list => |*l| l.deinit(allocator),
             .str => |*s| s.deinit(allocator),
-            .func => |*f| allocator.free(f.captures),
+            .func => |*f| allocator.free(f.captures[0..f.info.captures]),
         }
         value.* = undefined;
     }
@@ -207,7 +215,8 @@ pub const Value = union(Type) {
         autoHash(&hasher, @as(Type, key.*));
         switch (key.*) {
             .iterator => unreachable,
-            .none => {},
+            .frame => unreachable, // TODO
+            .@"null" => {},
             .int => |int| autoHash(&hasher, int),
             .num => {},
             .bool => |b| autoHash(&hasher, b),
@@ -233,8 +242,8 @@ pub const Value = union(Type) {
                 autoHash(&hasher, range.step);
             },
             .func => |*func| {
-                autoHash(&hasher, func.offset);
-                autoHash(&hasher, func.arg_count);
+                autoHash(&hasher, func.body);
+                autoHash(&hasher, func.info);
                 autoHash(&hasher, func.module);
             },
             .native => |*func| {
@@ -265,7 +274,8 @@ pub const Value = union(Type) {
         }
         return switch (a.*) {
             .iterator, .int, .num => unreachable,
-            .none => true,
+            .frame => unreachable, // TODO
+            .@"null" => true,
             .bool => |bool_val| bool_val == b.bool,
             .str => |s| s.eql(b.str),
             .tuple => |t| {
@@ -291,9 +301,8 @@ pub const Value = union(Type) {
                     r.step == b.range.step;
             },
             .func => |*f| {
-                return f.offset == b.func.offset and
-                    f.arg_count == b.func.arg_count and
-                    f.module == b.func.module;
+                const b_f = b.func;
+                return f.module == b_f.module and f.body == b_f.body;
             },
             .native => |*n| n.func == b.native.func,
             .tagged => |*t| {
@@ -310,7 +319,7 @@ pub const Value = union(Type) {
             .int => |i| try writer.print("{}", .{i}),
             .num => |n| try writer.print("{d}", .{n}),
             .bool => |b| try writer.writeAll(if (b) "true" else "false"),
-            .none => try writer.writeAll("()"),
+            .@"null" => try writer.writeAll("null"),
             .range => |*r| {
                 try writer.print("{}:{}:{}", .{ r.start, r.end, r.step });
             },
@@ -366,7 +375,10 @@ pub const Value = union(Type) {
             },
             .str => |s| try s.dump(writer),
             .func => |*f| {
-                try writer.print("fn({})@0x{X}[{}]", .{ f.arg_count, f.offset, f.captures.len });
+                try writer.print("fn({})@0x{X}[{}]", .{ f.info.args, f.body[0], f.info.captures });
+            },
+            .frame => {
+                try writer.writeAll("frame"); // TODO
             },
             .native => |*n| {
                 try writer.print("native({})@0x{}", .{ n.arg_count, @ptrToInt(n.func) });
@@ -505,8 +517,8 @@ pub const Value = union(Type) {
 
     /// `type_id` must be valid and cannot be .err, .range, .func or .native
     pub fn as(val: *Value, vm: *Vm, type_id: Type) Vm.Error!*Value {
-        if (type_id == .none) {
-            return &Value.None;
+        if (type_id == .@"null") {
+            return Value.Null;
         }
         if (val.* == type_id) {
             return val;
@@ -525,7 +537,7 @@ pub const Value = union(Type) {
                 else => return vm.errorFmt("cannot cast {s} to bool", .{@tagName(val.*)}),
             };
 
-            return if (bool_res) &Value.True else &Value.False;
+            return if (bool_res) Value.True else Value.False;
         } else if (type_id == .str) {
             return String.from(val, vm);
         }
@@ -550,7 +562,7 @@ pub const Value = union(Type) {
                     else => return vm.errorFmt("cannot cast {s} to num", .{@tagName(val.*)}),
                 },
             },
-            .str, .bool, .none => unreachable,
+            .str, .bool, .@"null" => unreachable,
             .tuple,
             .map,
             .list,
@@ -620,8 +632,8 @@ pub const Value = union(Type) {
         }
 
         switch (@TypeOf(val)) {
-            void => return &Value.None,
-            bool => return if (val) &Value.True else &Value.False,
+            void => return Value.Null,
+            bool => return if (val) Value.True else Value.False,
             *Value => return val,
             Value => {
                 const ret = try vm.gc.alloc();
@@ -723,7 +735,7 @@ pub const Value = union(Type) {
                     tag.* = .{
                         .tagged = .{
                             .name = @tagName(val),
-                            .value = &None,
+                            .value = &Null,
                         },
                     };
                     return tag;
@@ -731,7 +743,7 @@ pub const Value = union(Type) {
                 .Optional => if (val) |some| {
                     return zigToBog(vm, some);
                 } else {
-                    return &Value.None;
+                    return Value.Null;
                 },
                 else => @compileError("unsupported type: " ++ @typeName(@TypeOf(val))),
             },
@@ -747,8 +759,8 @@ pub const Value = union(Type) {
 
         return switch (T) {
             void => {
-                if (val.* != .none)
-                    return vm.fatal("expected none");
+                if (val.* != .@"null")
+                    return vm.fatal("expected null");
             },
             bool => {
                 if (val.* != .bool)
@@ -809,7 +821,7 @@ pub const Value = union(Type) {
                         return vm.fatal("expected tag");
                     const e = std.meta.stringToEnum(T, val.tagged.name) orelse
                         return vm.fatal("no value by such name");
-                    if (val.tagged.value.* != .none)
+                    if (val.tagged.value.* != .@"null")
                         return vm.fatal("expected no value");
                     return e;
                 },
@@ -820,7 +832,7 @@ pub const Value = union(Type) {
 
     pub fn jsonStringify(val: Value, options: std.json.StringifyOptions, writer: anytype) @TypeOf(writer).Error!void {
         switch (val) {
-            .none => try writer.writeAll("null"),
+            .@"null" => try writer.writeAll("null"),
             .tuple => |t| {
                 try writer.writeByte('[');
                 for (t) |e, i| {
@@ -869,6 +881,7 @@ pub const Value = union(Type) {
                 try val.dump(writer, 0);
                 try writer.writeByte('\"');
             },
+            .frame => unreachable, // TODO
             .iterator => unreachable,
         }
     }

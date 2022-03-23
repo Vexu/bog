@@ -20,18 +20,11 @@ const value = @import("value.zig");
 pub const Value = value.Value;
 pub const Type = value.Type;
 
-const vm = @import("vm.zig");
-pub const Vm = vm.Vm;
+pub const Vm = @import("Vm.zig");
 
 pub const Gc = @import("Gc.zig");
 
 pub const Bytecode = @import("Bytecode.zig");
-
-const bytecode = @import("bytecode.zig");
-pub const Op = bytecode.Op;
-pub const Module = bytecode.Module;
-pub const RegRef = bytecode.RegRef;
-pub const Instruction = bytecode.Instruction;
 
 pub const repl = @import("repl.zig");
 
@@ -39,9 +32,6 @@ pub const std = @import("std.zig");
 
 /// file extension of bog text files
 pub const extension = ".bog";
-
-/// file extension of bog bytecode files, 'byte bog'
-pub const bytecode_extension = ".bbog";
 
 pub const version = zig_std.builtin.Version{
     .major = 0,

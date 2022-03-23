@@ -131,13 +131,13 @@ pub fn set(str: *String, vm: *Vm, index: *const Value, new_val: *const Value) Vm
 }
 
 pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {
-    if (type_id == .none) {
-        return &Value.None;
+    if (type_id == .@"null") {
+        return Value.Null;
     } else if (type_id == .bool) {
         if (mem.eql(u8, str.data, "true"))
-            return &Value.True
+            return Value.True
         else if (mem.eql(u8, str.data, "false"))
-            return &Value.False
+            return Value.False
         else
             return vm.errorVal("cannot cast string to bool");
     }
@@ -145,12 +145,12 @@ pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {
     const new_val = try vm.gc.alloc();
     new_val.* = switch (type_id) {
         .int => .{
-            .int = @import("util.zig").parseInt(str.data) catch
-                return vm.errorVal("cannot cast string to int"),
+            .int = std.fmt.parseInt(i64, str.data, 0) catch |err|
+                return vm.errorFmt("cannot cast string to int: {s}", .{@errorName(err)}),
         },
         .num => .{
-            .num = @import("util.zig").parseNum(str.data) catch
-                return vm.errorVal("cannot cast string to num"),
+            .num = std.fmt.parseFloat(f64, str.data) catch |err|
+                return vm.errorFmt("cannot cast string to num: {s}", .{@errorName(err)}),
         },
         .bool => unreachable,
         .str => unreachable, // already string
@@ -166,8 +166,8 @@ pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {
 pub fn from(val: *Value, vm: *Vm) Vm.Error!*Value {
     const str = try vm.gc.alloc();
 
-    if (val.* == .none) {
-        str.* = Value.string("none");
+    if (val.* == .@"null") {
+        str.* = Value.string("null");
     } else if (val.* == .bool) {
         str.* = if (val.bool)
             Value.string("true")

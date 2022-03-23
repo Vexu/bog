@@ -46,7 +46,7 @@ pub const Repl = struct {
 
     const tokenize = @import("tokenizer.zig").tokenizeRepl;
     const parse = @import("parser.zig").parseRepl;
-    const compile = @import("compiler.zig").compileRepl;
+    const compile = @import("Compiler.zig").compileRepl;
 
     fn init(gpa: Allocator, vm: *Vm, mod: *bog.Compiler.Fn, arena: *std.heap.ArenaAllocator) !Repl {
         const buffer = try ArrayList(u8).initCapacity(gpa, std.mem.page_size);

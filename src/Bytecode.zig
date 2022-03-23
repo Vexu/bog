@@ -7,7 +7,6 @@ const Type = bog.Type;
 
 const Bytecode = @This();
 
-name: []const u8,
 code: Inst.List.Slice,
 extra: []const Ref,
 
@@ -15,6 +14,16 @@ main: []const Ref,
 
 strings: []const u8,
 debug_info: DebugInfo,
+
+pub fn deinit(b: *Bytecode, gpa: Allocator) void {
+    gpa.free(b.extra);
+    gpa.free(b.main);
+    gpa.free(b.strings);
+    gpa.free(b.debug_info.lines);
+    gpa.free(b.debug_info.file_path);
+    b.code.deinit(gpa);
+    b.* = undefined;
+}
 
 pub const max_params = 32;
 

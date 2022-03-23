@@ -72,13 +72,12 @@ pub fn compile(gpa: Allocator, source: []const u8, errors: *Errors) (Compiler.Er
     try compiler.resolveGlobals();
 
     return Bytecode{
-        .name = "",
         .code = compiler.instructions.toOwnedSlice(),
         .extra = compiler.extra.toOwnedSlice(gpa),
         .strings = compiler.strings.toOwnedSlice(gpa),
         .main = code.toOwnedSlice(gpa),
         .debug_info = .{
-            .file_path = "TODO",
+            .file_path = "",
             .lines = compiler.lines.toOwnedSlice(gpa),
         },
     };
