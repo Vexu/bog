@@ -397,6 +397,9 @@ const Result = union(enum) {
     /// No value is expected if some is given it will be discarded
     discard,
 
+    /// A returnable value is expected
+    ret,
+
     /// returns .empty if res != .rt
     fn toVal(res: Result) Value {
         return if (res == .ref) .{ .ref = res.ref } else .empty;
@@ -410,8 +413,7 @@ fn wrapResult(c: *Compiler, node: Node.Index, val: Value, res: Result) Error!Val
     if (res == .discard and val.isRt()) {
         // discard unused runtime value
         _ = try c.addUn(.discard, val.getRt());
-    }
-    if (res == .ref) {
+    } else if (res == .ref) {
         const val_ref = try c.makeRuntime(val);
         if (val_ref == res.ref) return val;
         if (val == .mut) {
@@ -420,6 +422,8 @@ fn wrapResult(c: *Compiler, node: Node.Index, val: Value, res: Result) Error!Val
             _ = try c.addBin(.move, res.ref, val_ref);
         }
         return Value{ .ref = res.ref };
+    } else if (res == .ret) {
+        _ = try c.addUn(.ret, try c.makeRuntime(val));
     }
     return val;
 }
@@ -677,8 +681,8 @@ fn genThrow(c: *Compiler, node: Node.Index) !void {
 fn genReturn(c: *Compiler, node: Node.Index) !void {
     const data = c.tree.nodes.items(.data);
     if (data[node].un != 0) {
-        const operand = try c.genNode(data[node].un, .value);
-        _ = try c.addUn(.ret, try c.makeRuntime(operand));
+        // handled by result location
+        _ = try c.genNode(data[node].un, .ret);
     } else {
         _ = try c.addUn(.ret_null, undefined);
     }
@@ -712,7 +716,7 @@ fn createListComprehension(c: *Compiler, ref: ?Ref) !Result {
 fn genFor(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     const sub_res = switch (res) {
         .discard => res,
-        .value => try c.createListComprehension(null),
+        .value, .ret => try c.createListComprehension(null),
         .ref => |ref| try c.createListComprehension(ref),
     };
     const for_expr = Tree.For.get(c.tree.*, node);
@@ -768,13 +772,18 @@ fn genFor(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     for (loop.breaks.items) |@"break"| {
         c.finishJump(@"break");
     }
-    return sub_res.toVal();
+    if (res == .ret) {
+        _ = try c.addUn(.ret, sub_res.ref);
+        return Value.empty;
+    } else {
+        return sub_res.toVal();
+    }
 }
 
 fn genWhile(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     const sub_res = switch (res) {
         .discard => res,
-        .value => try c.createListComprehension(null),
+        .value, .ret => try c.createListComprehension(null),
         .ref => |ref| try c.createListComprehension(ref),
     };
     const while_expr = Tree.While.get(c.tree.*, node);
@@ -838,7 +847,12 @@ fn genWhile(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         c.finishJump(@"break");
     }
 
-    return sub_res.toVal();
+    if (res == .ret) {
+        _ = try c.addUn(.ret, sub_res.ref);
+        return Value.empty;
+    } else {
+        return sub_res.toVal();
+    }
 }
 
 fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
@@ -871,7 +885,7 @@ fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         try c.unwrap_jump_buf.append(c.gpa, skip_jump);
     }
     const sub_res = switch (res) {
-        .ref, .discard => res,
+        .ref, .discard, .ret => res,
         .value => val: {
             // add a dummy instruction we can store the value into
             const res_ref = Bytecode.indexToRef(c.instructions.len);
@@ -912,7 +926,7 @@ fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
 
 fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     const sub_res = switch (res) {
-        .ref, .discard => res,
+        .ref, .discard, .ret => res,
         .value => val: {
             // add a dummy instruction we can store the value into
             const res_ref = Bytecode.indexToRef(c.instructions.len);
@@ -1035,7 +1049,7 @@ fn genTry(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     const catches = items[1..];
 
     const sub_res = switch (res) {
-        .ref, .discard => res,
+        .ref, .discard, .ret => res,
         .value => val: {
             // add a dummy instruction we can store the value into
             const res_ref = Bytecode.indexToRef(c.instructions.len);
@@ -1321,6 +1335,17 @@ fn genBoolAnd(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         return c.genNode(rhs, res);
     }
 
+    if (res == .ret) {
+        const lhs_ref = try c.makeRuntime(lhs_val);
+
+        const ret_skip = try c.addJump(.jump_if_true, lhs_ref);
+        _ = try c.addUn(.ret, lhs_ref);
+        c.finishJump(ret_skip);
+
+        _ = try c.genNode(rhs, res);
+        return Value{ .empty = {} };
+    }
+
     const lhs_ref = if (lhs_val == .mut)
         try c.addUn(.copy_un, lhs_val.mut)
     else
@@ -1344,6 +1369,17 @@ fn genBoolOr(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         const l_bool = try lhs_val.getBool(c, lhs);
         if (l_bool) return lhs_val;
         return c.genNode(rhs, res);
+    }
+
+    if (res == .ret) {
+        const lhs_ref = try c.makeRuntime(lhs_val);
+
+        const ret_skip = try c.addJump(.jump_if_false, lhs_ref);
+        _ = try c.addUn(.ret, lhs_ref);
+        c.finishJump(ret_skip);
+
+        _ = try c.genNode(rhs, res);
+        return Value{ .empty = {} };
     }
 
     const lhs_ref = if (lhs_val == .mut)
