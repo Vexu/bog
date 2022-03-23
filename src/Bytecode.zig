@@ -143,6 +143,15 @@ pub const Inst = struct {
         unwrap_error,
         // uses Data.str, @tag(A) => A
         unwrap_tagged,
+        unwrap_tagged_or_null,
+
+        // uses Data.bin
+        // returns null if lhs is not tuple/list or if its len is not equal to @enumToInt(rhs)
+        list_len,
+        tuple_len,
+        // same as above but return error on false
+        assert_list_len,
+        assert_tuple_len,
 
         // use Data.bin
         get,
@@ -276,7 +285,7 @@ fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
             .primitive => std.debug.print("{s}\n", .{@tagName(data[i].primitive)}),
             .int => std.debug.print("{d}\n", .{data[i].int}),
             .num => std.debug.print("{d}\n", .{data[i].num}),
-            .import, .str, .unwrap_tagged => {
+            .import, .str, .unwrap_tagged, .unwrap_tagged_or_null => {
                 const str = b.strings[data[i].str.offset..][0..data[i].str.len];
                 std.debug.print("{s}\n", .{str});
             },
@@ -325,6 +334,15 @@ fn dumpExtra(b: *Bytecode, body: []const Ref, level: u32) void {
                 const end = b.extra[data[i].range.extra];
                 const step = b.extra[data[i].range.extra + 1];
                 std.debug.print("{}:{}:{}\n", .{ start, end, step });
+            },
+            .tuple_len,
+            .list_len,
+            .assert_list_len,
+            .assert_tuple_len,
+            => {
+                const operand = data[i].bin.lhs;
+                const len = @enumToInt(data[i].bin.rhs);
+                std.debug.print("{} {d}\n", .{ operand, len });
             },
             .load_global => std.debug.print("GLOBAL({d})\n", .{data[i].un}),
             .load_capture => std.debug.print("CAPTURE({d})\n", .{@enumToInt(data[i].un)}),

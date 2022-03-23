@@ -29,6 +29,7 @@ scopes: std.ArrayListUnmanaged(Scope) = .{},
 globals: std.ArrayListUnmanaged(Symbol) = .{},
 unresolved_globals: std.ArrayListUnmanaged(UnresolvedGlobal) = .{},
 list_buf: std.ArrayListUnmanaged(Ref) = .{},
+unwrap_jump_buf: JumpList = .{},
 cur_loop: ?*Loop = null,
 cur_try: ?*Try = null,
 cur_fn: ?*Fn = null,
@@ -77,6 +78,7 @@ pub fn deinit(c: *Compiler) void {
     c.globals.deinit(c.gpa);
     c.unresolved_globals.deinit(c.gpa);
     c.list_buf.deinit(c.gpa);
+    c.unwrap_jump_buf.deinit(c.gpa);
     c.instructions.deinit(c.gpa);
     c.extra.deinit(c.gpa);
     c.strings.deinit(c.gpa);
@@ -829,24 +831,13 @@ fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     const scope_count = c.scopes.items.len;
     defer c.scopes.items.len = scope_count;
 
-    var if_skip: Ref = undefined;
+    const jump_buf_top = c.unwrap_jump_buf.items.len;
+    defer c.unwrap_jump_buf.items.len = jump_buf_top;
 
     const cond_val = try c.genNode(if_expr.cond, .value);
     if (if_expr.capture) |capture| {
-        if (cond_val.isRt()) {
-            // jump past if_body if cond == .none
-            if_skip = try c.addJump(.jump_if_null, cond_val.getRt());
-        } else if (cond_val == .@"null") {
-            if (if_expr.else_body) |some| {
-                return c.genNode(some, res);
-            }
-
-            const res_val = Value{ .@"null" = {} };
-            return c.wrapResult(node, res_val, res);
-        }
         const cond_ref = try c.makeRuntime(cond_val);
-
-        try c.genLval(capture, .{ .let = &.{ .ref = cond_ref } });
+        try c.genTryUnwrap(capture, &.{ .ref = cond_ref });
     } else if (!cond_val.isRt()) {
         const bool_val = try cond_val.getBool(c, if_expr.cond);
 
@@ -860,7 +851,8 @@ fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         return c.wrapResult(node, res_val, res);
     } else {
         // jump past if_body if cond == false
-        if_skip = try c.addJump(.jump_if_false, cond_val.getRt());
+        const skip_jump = try c.addJump(.jump_if_false, cond_val.getRt());
+        try c.unwrap_jump_buf.append(c.gpa, skip_jump);
     }
     const sub_res = switch (res) {
         .ref, .discard => res,
@@ -881,7 +873,10 @@ fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     else
         null;
 
-    c.finishJump(if_skip);
+    for (c.unwrap_jump_buf.items[jump_buf_top..]) |skip| {
+        c.finishJump(skip);
+    }
+
     // end capture scope
     c.scopes.items.len = scope_count;
 
@@ -918,8 +913,9 @@ fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     const cond_val = try c.genNode(cases[0], .value);
     const cond_ref = try c.makeRuntime(cond_val);
 
-    var jumps: JumpList = .{};
-    defer jumps.deinit(c.gpa);
+    const jump_buf_start = c.unwrap_jump_buf.items.len;
+    var jump_buf_top = jump_buf_start;
+    defer c.unwrap_jump_buf.items.len = jump_buf_start;
 
     var seen_catch_all = false;
     for (cases[1..]) |case, case_i| {
@@ -931,18 +927,15 @@ fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         defer c.scopes.items.len = scope_count;
 
         var expr: Node.Index = undefined;
-        var case_skip: ?Ref = null;
-
+        c.unwrap_jump_buf.items.len = jump_buf_top;
         switch (ids[case]) {
             .match_case_catch_all => {
                 seen_catch_all = true;
                 expr = data[case].un;
             },
             .match_case_let => {
-                seen_catch_all = true;
                 expr = data[case].bin.rhs;
-
-                try c.genLval(case, .{ .let = &.{ .ref = cond_ref } });
+                try c.genTryUnwrap(data[case].bin.lhs, &.{ .ref = cond_ref });
             },
             .match_case,
             .match_case_one,
@@ -956,23 +949,23 @@ fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
                     const item_ref = try c.makeRuntime(item_val);
                     // if not equal to the error value jump over this handler
                     const eq_ref = try c.addBin(.equal, item_ref, cond_ref);
-                    case_skip = try c.addJump(.jump_if_false, eq_ref);
+                    try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, eq_ref));
                 } else {
-                    var success_jumps: JumpList = .{};
-                    defer success_jumps.deinit(c.gpa);
-
                     for (items[0 .. items.len - 1]) |item| {
                         const item_val = try c.genNode(item, .value);
                         const item_ref = try c.makeRuntime(item_val);
 
                         const eq_ref = try c.addBin(.equal, item_ref, cond_ref);
-                        try success_jumps.append(c.gpa, try c.addJump(.jump_if_true, eq_ref));
+                        try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_true, eq_ref));
                     }
-                    case_skip = try c.addUn(.jump, undefined);
+                    const exit_jump = try c.addUn(.jump, undefined);
 
-                    for (success_jumps.items) |some| {
+                    for (c.unwrap_jump_buf.items[jump_buf_top..]) |some| {
                         c.finishJump(some);
                     }
+
+                    c.unwrap_jump_buf.items.len = jump_buf_top;
+                    try c.unwrap_jump_buf.append(c.gpa, exit_jump);
                 }
             },
             else => unreachable,
@@ -982,13 +975,20 @@ fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         _ = try c.genNode(expr, sub_res);
 
         // exit match (unless it's this is the last case)
-        if (case_i + 2 != cases.len) {
-            try jumps.append(c.gpa, try c.addUn(.jump, undefined));
-        }
+        const exit_jump = if (case_i + 2 != cases.len)
+            try c.addUn(.jump, undefined)
+        else
+            null;
 
         // jump over this case if the value doesn't match
-        if (case_skip) |some| {
+        for (c.unwrap_jump_buf.items[jump_buf_top..]) |some| {
             c.finishJump(some);
+        }
+
+        c.unwrap_jump_buf.items.len = jump_buf_top;
+        if (exit_jump) |some| {
+            try c.unwrap_jump_buf.append(c.gpa, some);
+            jump_buf_top += 1;
         }
     }
 
@@ -998,7 +998,7 @@ fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     }
 
     // exit match
-    for (jumps.items) |jump| {
+    for (c.unwrap_jump_buf.items[jump_buf_start..]) |jump| {
         c.finishJump(jump);
     }
     return sub_res.toVal();
@@ -1052,25 +1052,26 @@ fn genTry(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     const scope_count = c.scopes.items.len;
     defer c.scopes.items.len = scope_count;
 
+    const jump_buf_top = c.unwrap_jump_buf.items.len;
+    defer c.unwrap_jump_buf.items.len = jump_buf_top;
+
     var seen_catch_all = false;
     for (catches) |catcher, catcher_i| {
         if (seen_catch_all) {
             return c.reportErr("additional handlers after catch-all handler", catcher);
         }
 
-        var catch_skip: ?Ref = null;
+        c.unwrap_jump_buf.items.len = jump_buf_top;
         const capture = data[catcher].bin.lhs;
         if (capture != 0) {
             if (ids[catcher] == .catch_let_expr) {
-                seen_catch_all = true;
-
-                try c.genLval(capture, .{ .let = &.{ .ref = try_scope.err_ref } });
+                try c.genTryUnwrap(capture, &.{ .ref = try_scope.err_ref });
             } else {
                 const capture_val = try c.genNode(capture, .value);
                 const capture_ref = try c.makeRuntime(capture_val);
                 // if not equal to the error value jump over this handler
                 const eq_ref = try c.addBin(.equal, capture_ref, try_scope.err_ref);
-                catch_skip = try c.addJump(.jump_if_false, eq_ref);
+                try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, eq_ref));
             }
         } else {
             seen_catch_all = true;
@@ -1084,7 +1085,7 @@ fn genTry(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         }
 
         // jump over this handler if the value doesn't match
-        if (catch_skip) |some| {
+        for (c.unwrap_jump_buf.items[jump_buf_top..]) |some| {
             c.finishJump(some);
         }
     }
@@ -2067,9 +2068,10 @@ fn genLval(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
         => try c.genLvalRange(node, lval),
         .tuple_expr,
         .tuple_expr_two,
+        => return c.genLvalTupleList(node, lval, .assert_tuple_len),
         .list_expr,
         .list_expr_two,
-        => return c.genLvalTupleList(node, lval),
+        => return c.genLvalTupleList(node, lval, .assert_list_len),
         .map_expr,
         .map_expr_two,
         => return c.genLvalMap(node, lval),
@@ -2138,10 +2140,17 @@ fn genLvalEnum(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
 
     const tokens = c.tree.nodes.items(.token);
     const slice = c.tree.tokenSlice(tokens[node]);
-    const unwrapped_ref = try c.addInst(.unwrap_tagged, .{ .str = .{
-        .len = @intCast(u32, slice.len),
-        .offset = try c.putString(slice),
-    } });
+    const str_offset = try c.putString(slice);
+
+    const extra = @intCast(u32, c.extra.items.len);
+    try c.extra.append(c.gpa, val.getRt());
+    try c.extra.append(c.gpa, @intToEnum(Ref, str_offset));
+    const unwrapped_ref = try c.addInst(.unwrap_tagged, .{
+        .extra = .{
+            .extra = extra,
+            .len = @intCast(u32, slice.len),
+        },
+    });
 
     const rhs_val = Value{ .ref = unwrapped_ref };
     try c.genLval(data[node].un, switch (lval) {
@@ -2205,7 +2214,7 @@ fn genLValRangePart(c: *Compiler, node: Node.Index, range_ref: Ref, lval: Lval, 
     });
 }
 
-fn genLvalTupleList(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
+fn genLvalTupleList(c: *Compiler, node: Node.Index, lval: Lval, op: Bytecode.Inst.Op) Error!void {
     const res = switch (lval) {
         .let, .assign => |val| val,
         .aug_assign => return c.reportErr("invalid left hand side to augmented assignment", node),
@@ -2218,6 +2227,8 @@ fn genLvalTupleList(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
     var buf: [2]Node.Index = undefined;
     const items = c.tree.nodeItems(node, &buf);
     const ids = c.tree.nodes.items(.id);
+
+    _ = try c.addBin(op, container_ref, @intToEnum(Ref, items.len));
 
     for (items) |item, i| {
         const last_node = c.getLastNode(item);
@@ -2288,6 +2299,181 @@ fn genLvalMap(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
             .assign => .{ .assign = &res_val },
             else => unreachable,
         });
+    }
+}
+
+fn genTryUnwrap(c: *Compiler, node: Node.Index, val: *const Value) Error!void {
+    const ids = c.tree.nodes.items(.id);
+    switch (ids[node]) {
+        .paren_expr => {
+            const data = c.tree.nodes.items(.data);
+            try c.genTryUnwrap(data[node].un, val);
+        },
+        .ident_expr => try c.genLvalIdent(node, .{ .let = val }, false),
+        .mut_ident_expr => try c.genLvalIdent(node, .{ .let = val }, true),
+        .discard_expr => {
+            // no op
+        },
+        .enum_expr => try c.genTryUnwrapEnum(node, val),
+        .error_expr => try c.genTryUnwrapError(node, val),
+        .range_expr,
+        .range_expr_end,
+        .range_expr_step,
+        => try c.genTryUnwrapRange(node, val),
+        .tuple_expr,
+        .tuple_expr_two,
+        => return c.genTryUnwrapTupleList(node, val, .tuple_len),
+        .list_expr,
+        .list_expr_two,
+        => return c.genTryUnwrapTupleList(node, val, .list_len),
+        .map_expr,
+        .map_expr_two,
+        => return c.genTryUnwrapMap(node, val),
+        else => return c.reportErr("invalid left-hand side to declaration", node),
+    }
+}
+
+fn genTryUnwrapEnum(c: *Compiler, node: Node.Index, val: *const Value) Error!void {
+    if (!val.isRt()) {
+        return c.reportErr("expected a tagged value", node);
+    }
+    const data = c.tree.nodes.items(.data);
+    if (data[node].un == 0) {
+        return c.reportErr("expected a destructuring", node);
+    }
+
+    const tokens = c.tree.nodes.items(.token);
+    const slice = c.tree.tokenSlice(tokens[node]);
+    const str_offset = try c.putString(slice);
+
+    const extra = @intCast(u32, c.extra.items.len);
+    try c.extra.append(c.gpa, val.getRt());
+    try c.extra.append(c.gpa, @intToEnum(Ref, str_offset));
+    const unwrapped_ref = try c.addInst(.unwrap_tagged_or_null, .{
+        .extra = .{
+            .extra = extra,
+            .len = @intCast(u32, slice.len),
+        },
+    });
+    try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_null, unwrapped_ref));
+
+    try c.genTryUnwrap(data[node].un, &.{ .ref = unwrapped_ref });
+}
+
+fn genTryUnwrapError(c: *Compiler, node: Node.Index, val: *const Value) Error!void {
+    if (!val.isRt()) {
+        return c.reportErr("expected an error", node);
+    }
+    const data = c.tree.nodes.items(.data);
+    if (data[node].un == 0) {
+        return c.reportErr("expected a destructuring", node);
+    }
+    const unwrapped_ref = try c.addJump(.unwrap_error_or_jump, val.getRt());
+    try c.unwrap_jump_buf.append(c.gpa, unwrapped_ref);
+
+    try c.genTryUnwrap(data[node].un, &.{ .ref = unwrapped_ref });
+}
+
+fn genTryUnwrapRange(c: *Compiler, node: Node.Index, val: *const Value) Error!void {
+    const range = Tree.Range.get(c.tree.*, node);
+    if (!val.isRt()) {
+        return c.reportErr("expected a range", node);
+    }
+    const range_ref = val.getRt();
+
+    const is_range_ref = try c.addInst(.is, .{
+        .bin_ty = .{ .operand = range_ref, .ty = .range },
+    });
+    try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, is_range_ref));
+
+    try c.genUnwrapRangePart(range.start, range_ref, "start");
+    if (range.end) |some| {
+        try c.genUnwrapRangePart(some, range_ref, "end");
+    }
+    if (range.step) |some| {
+        try c.genUnwrapRangePart(some, range_ref, "step");
+    }
+}
+
+fn genUnwrapRangePart(c: *Compiler, node: Node.Index, range_ref: Ref, part: []const u8) Error!void {
+    var name_val = Value{ .str = part };
+    var name_ref = try c.makeRuntime(name_val);
+
+    const res_ref = try c.addBin(.get, range_ref, name_ref);
+    try c.genTryUnwrap(node, &.{ .ref = res_ref });
+}
+
+fn genTryUnwrapTupleList(c: *Compiler, node: Node.Index, val: *const Value, op: Bytecode.Inst.Op) Error!void {
+    if (!val.isRt()) {
+        return c.reportErr("expected a tuple/list", node);
+    }
+    const container_ref = val.getRt();
+
+    var buf: [2]Node.Index = undefined;
+    const items = c.tree.nodeItems(node, &buf);
+    const ids = c.tree.nodes.items(.id);
+
+    const len_ref = try c.addBin(op, val.getRt(), @intToEnum(Ref, items.len));
+    try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, len_ref));
+
+    for (items) |item, i| {
+        const last_node = c.getLastNode(item);
+        if (ids[last_node] == .discard_expr) {
+            continue;
+        }
+
+        const index_ref = try c.makeRuntime(Value{ .int = @intCast(u32, i) });
+        const res_ref = try c.addBin(.get, container_ref, index_ref);
+
+        try c.genTryUnwrap(item, &.{ .ref = res_ref });
+    }
+}
+
+fn genTryUnwrapMap(c: *Compiler, node: Node.Index, val: *const Value) Error!void {
+    if (!val.isRt()) {
+        return c.reportErr("expected a map", node);
+    }
+    const container_ref = val.getRt();
+
+    var buf: [2]Node.Index = undefined;
+    const items = c.tree.nodeItems(node, &buf);
+    const tok_ids = c.tree.tokens.items(.id);
+    const data = c.tree.nodes.items(.data);
+
+    for (items) |item| {
+        var key: Ref = undefined;
+        if (data[item].bin.lhs != 0) {
+            const last_node = c.getLastNode(data[item].bin.lhs);
+            if (tok_ids[last_node] == .identifier) {
+                // `ident = value` is equal to `"ident" = value`
+                const ident = c.tree.firstToken(last_node);
+                const str = c.tree.tokenSlice(ident);
+                key = try c.addInst(.str, .{ .str = .{
+                    .len = @intCast(u32, str.len),
+                    .offset = try c.putString(str),
+                } });
+            } else {
+                var key_val = try c.genNode(data[item].bin.lhs, .value);
+                key = try c.makeRuntime(key_val);
+            }
+        } else {
+            const last_node = c.getLastNode(data[item].bin.rhs);
+            if (tok_ids[last_node] == .identifier) {
+                return c.reportErr("expected a key", item);
+            }
+            // `ident` is equal to `"ident" = ident`
+            const ident = c.tree.firstToken(last_node);
+            const str = c.tree.tokenSlice(ident);
+            key = try c.addInst(.str, .{ .str = .{
+                .len = @intCast(u32, str.len),
+                .offset = try c.putString(str),
+            } });
+        }
+
+        const res_ref = try c.addBin(.get_or_null, container_ref, key);
+        try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_null, res_ref));
+
+        try c.genTryUnwrap(data[item].bin.rhs, &.{ .ref = res_ref });
     }
 }
 
