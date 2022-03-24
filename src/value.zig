@@ -357,7 +357,7 @@ pub const Value = union(Type) {
                         if (i != 0)
                             try writer.writeAll(", ");
                         try entry.key_ptr.*.dump(writer, level - 1);
-                        try writer.writeAll(": ");
+                        try writer.writeAll(" = ");
                         try entry.value_ptr.*.dump(writer, level - 1);
                     }
                     try writer.writeByte('}');

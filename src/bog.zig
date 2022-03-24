@@ -67,6 +67,7 @@ pub const Errors = struct {
             err.msg.deinit(self.arena.child_allocator);
         }
         self.list.deinit(self.arena.child_allocator);
+        self.arena.deinit();
     }
 
     pub fn add(

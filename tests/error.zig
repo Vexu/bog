@@ -11,43 +11,44 @@ test "unexpected token" {
     try expectError(
         \\if (a b
     ,
-        \\expected ')', found 'Identifier'
+        \\expected ',', found 'Identifier'
     );
 }
 
-test "unexpected arg count" {
-    try expectError(
-        \\const foo = fn (a, b) a + b
-        \\foo(1)
-    ,
-        \\expected 2 args, got 1
-    );
-}
+// test "unexpected arg count" {
+//     try expectError(
+//         \\const foo = fn (a, b) a + b
+//         \\foo(1)
+//     ,
+//         \\expected 2 args, got 1
+//     );
+// }
 
 test "extra cases after catch-all" {
     try expectError(
         \\match (1)
-        \\    let val => ()
-        \\    1 => ()
+        \\    let val => null
+        \\    1 => null
         \\
     ,
         \\additional cases after catch-all case
     );
 }
-test "extra handlers after catch-all" {
-    try expectError(
-        \\const foo = fn() ()
-        \\try
-        \\    foo()
-        \\catch
-        \\    2
-        \\catch (1)
-        \\    3
-        \\
-    ,
-        \\additional handlers after catch-all handler
-    );
-}
+
+// test "extra handlers after catch-all" {
+//     try expectError(
+//         \\const foo = fn() null
+//         \\try
+//         \\    foo()
+//         \\catch
+//         \\    2
+//         \\catch (1)
+//         \\    3
+//         \\
+//     ,
+//         \\additional handlers after catch-all handler
+//     );
+// }
 
 test "invalid tag unwrap" {
     try expectError(
@@ -62,12 +63,12 @@ test "missing capture" {
     try expectError(
         \\let error = [2]
     ,
-        \\expected a capture
+        \\expected a destructuring
     );
     try expectError(
         \\let @foo = [2]
     ,
-        \\expected a capture
+        \\expected a destructuring
     );
 }
 
@@ -124,13 +125,40 @@ fn expectError(source: []const u8, expected: []const u8) !void {
     var vm = Vm.init(std.testing.allocator, .{});
     defer vm.deinit();
 
-    _ = vm.run(source) catch |e| switch (e) {
-        else => @panic("test failure"),
-        error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
+    var mod = bog.compile(vm.gc.gpa, source, "<test buf>", &vm.errors) catch |e| switch (e) {
+        else => return error.UnexpectedError,
+        error.TokenizeError, error.ParseError, error.CompileError => {
             const result = vm.errors.list.items[0].msg;
             try std.testing.expectEqualStrings(expected, result.data);
             return;
         },
     };
-    @panic("test failed: expected error");
+    mod.debug_info.source = "";
+    defer mod.deinit(vm.gc.gpa);
+
+    var frame = bog.Vm.Frame{
+        .mod = &mod,
+        .body = mod.main,
+        .caller_frame = null,
+        .module_frame = undefined,
+        .captures = &.{},
+    };
+    defer frame.deinit(&vm);
+    frame.module_frame = &frame;
+
+    vm.gc.stack_protect_start = @frameAddress();
+
+    var frame_val = try vm.gc.alloc();
+    frame_val.* = .{ .frame = &frame };
+
+    _ = vm.run(&frame) catch |e| switch (e) {
+        else => return error.UnexpectedError,
+        error.FatalError => {
+            const result = vm.errors.list.items[0].msg;
+            try std.testing.expectEqualStrings(expected, result.data);
+            return;
+        },
+    };
+
+    return error.ExpectedError;
 }

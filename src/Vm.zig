@@ -374,9 +374,9 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .build_tagged => {
                 const res = try f.newVal(vm, ref);
-                const arg = f.val(data[inst].un);
+                const arg = f.val(mod.extra[data[inst].extra.extra]);
 
-                const name = mod.strings[data[inst].str.offset..][0..data[inst].str.len];
+                const name = mod.strings[data[inst].extra.extra..][0..data[inst].extra.len];
                 res.* = .{ .tagged = .{
                     .name = name,
                     .value = try vm.gc.dupe(arg),

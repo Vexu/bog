@@ -394,9 +394,13 @@ fn checkRedeclaration(c: *Compiler, tok: TokenIndex) !void {
         const scope = c.scopes.items[i];
         switch (scope) {
             .symbol => |sym| if (std.mem.eql(u8, sym.name, name)) {
-                const msg = try bog.Value.String.init(c.gpa, "redeclaration of '{s}'", .{name});
-                const starts = c.tree.tokens.items(.start);
-                try c.errors.add(msg, c.tree.source, c.tree.path, starts[tok], .err);
+                try c.errors.add(
+                    try bog.Value.String.init(c.gpa, "redeclaration of '{s}'", .{name}),
+                    c.tree.source,
+                    c.tree.path,
+                    tok,
+                    .err,
+                );
                 return error.CompileError;
             },
             else => {},
@@ -415,7 +419,14 @@ fn resolveGlobals(c: *Compiler) !void {
                 break;
             }
         } else {
-            return c.reportErr("use of undeclared identifier", unresolved.tok);
+            try c.errors.add(
+                .{ .data = "use of undeclared identifier" },
+                c.tree.source,
+                c.tree.path,
+                unresolved.tok,
+                .err,
+            );
+            return error.CompileError;
         }
     }
 }
@@ -1808,7 +1819,7 @@ fn genMap(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         }
 
         var value_val = try c.genNode(data[item].bin.lhs, .value);
-        const value_ref = try c.makeRuntime(value_val, data[item].bin.lhs);
+        const value_ref = try c.makeRuntime(value_val, data[item].bin.rhs);
         try c.list_buf.appendSlice(c.gpa, &.{ key, value_ref });
     }
 

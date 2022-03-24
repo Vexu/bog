@@ -1020,7 +1020,7 @@ pub const Tokenizer = struct {
                     'b' => state = .binary_number,
                     'o' => state = .octal_number,
                     'x' => state = .hex_number,
-                    '.', ',' => {
+                    '.' => {
                         state = .number_dot;
                         dot_index = self.it.i - 1;
                     },
@@ -1111,7 +1111,7 @@ pub const Tokenizer = struct {
                 .float_fraction => switch (c) {
                     '0'...'9', '_' => {},
                     'e', 'E' => state = .float_exponent,
-                    '.', ',' => {
+                    '.' => {
                         self.it.i -= 1;
                         res = .number;
                         break;
@@ -1223,6 +1223,7 @@ fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) !void {
     var errors = Errors.init(std.testing.allocator);
     defer errors.deinit();
     var tokenizer = Tokenizer{
+        .path = "<test buf>",
         .tokens = undefined,
         .errors = &errors,
         .repl = false,
@@ -1422,28 +1423,16 @@ test "identifiers" {
 test "numbers" {
     try expectTokens(
         \\0.
-        \\0,
         \\0.0
-        \\0,0
         \\0.0.0
-        \\0,0,0
     , &.{
         .integer,
         .period,
         .nl,
-        .integer,
-        .comma,
-        .nl,
-        .number,
-        .nl,
         .number,
         .nl,
         .number,
         .period,
-        .integer,
-        .nl,
-        .number,
-        .comma,
         .integer,
     });
 }
@@ -1465,7 +1454,7 @@ test "format string" {
         .integer,
         .r_brace,
         .keyword_as,
-        .keyword_str,
+        .identifier,
         .format_end,
         .colon,
     });
