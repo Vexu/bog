@@ -87,11 +87,14 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
     try vm.imports.putNoClobber(vm.gc.gpa, "args", S.argsToBog);
 
     const res = vm.compileAndRun(file_name) catch |e| switch (e) {
-        error.RuntimeError => {
+        error.FatalError, error.TokenizeError, error.ParseError, error.CompileError => {
             vm.errors.render(std.io.getStdErr().writer()) catch {};
             process.exit(1);
         },
         error.OutOfMemory => return error.OutOfMemory,
+        else => {
+            fatal("cannot run '{s}': {s}", .{ file_name, @errorName(e) });
+        },
     };
 
     switch (res.*) {
@@ -205,27 +208,28 @@ const usage_debug =
 fn debugDump(gpa: std.mem.Allocator, args: [][]const u8) !void {
     const file_name = getFileName(usage_debug, args);
 
-    const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => |err| {
-            fatal("unable to open '{s}': {}", .{ file_name, err });
-        },
-    };
-    defer gpa.free(source);
-
     var errors = bog.Errors.init(gpa);
     defer errors.deinit();
+    var mod = mod: {
+        const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => |err| {
+                fatal("unable to open '{s}': {}", .{ file_name, err });
+            },
+        };
+        errdefer gpa.free(source);
 
-    var module = bog.compile(gpa, source, file_name, &errors) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.TokenizeError, error.ParseError, error.CompileError => {
-            try errors.render(std.io.getStdErr().writer());
-            process.exit(1);
-        },
+        break :mod bog.compile(gpa, source, file_name, &errors) catch |e| switch (e) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.TokenizeError, error.ParseError, error.CompileError => {
+                try errors.render(std.io.getStdErr().writer());
+                process.exit(1);
+            },
+        };
     };
-    defer module.deinit(gpa);
+    defer mod.deinit(gpa);
 
-    module.dump(module.main);
+    mod.dump(mod.main);
 }
 
 fn debugTokens(gpa: std.mem.Allocator, args: [][]const u8) !void {

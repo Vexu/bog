@@ -94,7 +94,7 @@ pub const Value = union(Type) {
                         res.* = try ctx.vm.gc.alloc();
 
                     const cp_len = std.unicode.utf8ByteSequenceLength(str.data[iter.i.u]) catch
-                        return ctx.fatal("invalid utf-8 sequence");
+                        return ctx.throw("invalid utf-8 sequence");
                     iter.i.u += cp_len;
 
                     res.*.?.* = .{
@@ -164,8 +164,9 @@ pub const Value = union(Type) {
     pub const List = std.ArrayListUnmanaged(*Value);
     pub const Native = struct {
         arg_count: u8,
-        func: fn (Vm.Context, []const bog.Bytecode.Ref) Vm.Error!*Value,
+        func: fn (Vm.Context, []const bog.Bytecode.Ref) NativeError!*Value,
     };
+    pub const NativeError = Vm.Error || error{Throw};
 
     /// Makes a distinct type which can be used as the parameter of a native function
     /// to easily get the value of `this`.
@@ -405,7 +406,7 @@ pub const Value = union(Type) {
     }
 
     /// Returns value in `container` at `index`.
-    pub fn get(container: *const Value, ctx: Vm.Context, index: *const Value, res: *?*Value) Vm.Error!void {
+    pub fn get(container: *const Value, ctx: Vm.Context, index: *const Value, res: *?*Value) NativeError!void {
         switch (container.*) {
             .tuple => |tuple| switch (index.*) {
                 .int => {
@@ -413,11 +414,11 @@ pub const Value = union(Type) {
                     if (i < 0)
                         i += @intCast(i64, tuple.len);
                     if (i < 0 or i >= tuple.len)
-                        return ctx.fatal("index out of bounds");
+                        return ctx.throw("index out of bounds");
 
                     res.* = tuple[@intCast(u32, i)];
                 },
-                .range => return ctx.fatal("TODO get with ranges"),
+                .range => return ctx.frame.fatal(ctx.vm, "TODO get with ranges"),
                 .str => |*s| {
                     if (res.* == null) {
                         res.* = try ctx.vm.gc.alloc();
@@ -426,10 +427,10 @@ pub const Value = union(Type) {
                     if (mem.eql(u8, s.data, "len")) {
                         res.*.?.* = .{ .int = @intCast(i64, tuple.len) };
                     } else {
-                        return ctx.fatal("no such property");
+                        return ctx.throw("no such property");
                     }
                 },
-                else => return ctx.fatal("invalid index type"),
+                else => return ctx.throw("invalid index type"),
             },
             .list => |*list| switch (index.*) {
                 .int => {
@@ -437,11 +438,11 @@ pub const Value = union(Type) {
                     if (i < 0)
                         i += @intCast(i64, list.items.len);
                     if (i < 0 or i >= list.items.len)
-                        return ctx.fatal("index out of bounds");
+                        return ctx.throw("index out of bounds");
 
                     res.* = list.items[@intCast(u32, i)];
                 },
-                .range => return ctx.fatal("TODO get with ranges"),
+                .range => return ctx.frame.fatal(ctx.vm, "TODO get with ranges"),
                 .str => |*s| {
                     if (res.* == null) {
                         res.* = try ctx.vm.gc.alloc();
@@ -451,19 +452,19 @@ pub const Value = union(Type) {
                         res.*.?.* = .{ .int = @intCast(i64, list.items.len) };
                     } else if (mem.eql(u8, s.data, "append")) {
                         res.* = try zigToBog(ctx.vm, struct {
-                            fn append(_list: This(*List), _vm: *Vm, val: *Value) !void {
-                                try _list.t.append(_vm.gc.gpa, try _vm.gc.dupe(val));
+                            fn append(_list: This(*List), _ctx: Vm.Context, val: *Value) !void {
+                                try _list.t.append(_ctx.vm.gc.gpa, try _ctx.vm.gc.dupe(val));
                             }
                         }.append);
                     } else {
-                        return ctx.fatal("no such property");
+                        return ctx.throw("no such property");
                     }
                 },
-                else => return ctx.fatal("invalid index type"),
+                else => return ctx.throw("invalid index type"),
             },
             .map => |*map| {
                 res.* = map.get(index) orelse
-                    return ctx.fatal("TODO better handling undefined key");
+                    return ctx.throw("TODO better handling undefined key");
             },
             .str => |*str| return str.get(ctx, index, res),
             .iterator => unreachable,
@@ -480,28 +481,28 @@ pub const Value = union(Type) {
                     } else if (mem.eql(u8, s.data, "step")) {
                         res.*.?.* = .{ .int = r.step };
                     } else {
-                        return ctx.fatal("no such property");
+                        return ctx.throw("no such property");
                     }
                 },
-                else => return ctx.fatal("invalid index type"),
+                else => return ctx.throw("invalid index type"),
             },
-            else => return ctx.fatal("invalid subscript type"),
+            else => return ctx.throw("invalid subscript type"),
         }
     }
 
     /// Sets index of container to value. Does a shallow copy if value stored.
-    pub fn set(container: *Value, ctx: Vm.Context, index: *const Value, new_val: *const Value) Vm.Error!void {
+    pub fn set(container: *Value, ctx: Vm.Context, index: *const Value, new_val: *const Value) NativeError!void {
         switch (container.*) {
             .tuple => |tuple| if (index.* == .int) {
                 var i = index.int;
                 if (i < 0)
                     i += @intCast(i64, tuple.len);
                 if (i < 0 or i >= tuple.len)
-                    return ctx.fatal("index out of bounds");
+                    return ctx.throw("index out of bounds");
 
                 tuple[@intCast(u32, i)] = try ctx.vm.gc.dupe(new_val);
             } else {
-                return ctx.fatal("TODO set with ranges");
+                return ctx.frame.fatal(ctx.vm, "TODO set with ranges");
             },
             .map => |*map| {
                 _ = try map.put(ctx.vm.gc.gpa, try ctx.vm.gc.dupe(index), try ctx.vm.gc.dupe(new_val));
@@ -511,20 +512,20 @@ pub const Value = union(Type) {
                 if (i < 0)
                     i += @intCast(i64, list.items.len);
                 if (i < 0 or i >= list.items.len)
-                    return ctx.fatal("index out of bounds");
+                    return ctx.throw("index out of bounds");
 
                 list.items[@intCast(u32, i)] = try ctx.vm.gc.dupe(new_val);
             } else {
-                return ctx.fatal("TODO set with ranges");
+                return ctx.frame.fatal(ctx.vm, "TODO set with ranges");
             },
             .str => |*str| try str.set(ctx, index, new_val),
             .iterator => unreachable,
-            else => return ctx.fatal("invalid subscript type"),
+            else => return ctx.throw("invalid subscript type"),
         }
     }
 
     /// `type_id` must be valid and cannot be .err, .range, .func or .native
-    pub fn as(val: *Value, vm: *Vm, type_id: Type) Vm.Error!*Value {
+    pub fn as(val: *Value, vm: *Vm, type_id: Type) NativeError!*Value {
         if (type_id == .@"null") {
             return Value.Null;
         }
@@ -615,18 +616,18 @@ pub const Value = union(Type) {
         }
     }
 
-    pub fn iterator(val: *const Value, vm: *Vm) Vm.Error!*Value {
+    pub fn iterator(val: *const Value, ctx: Vm.Context) NativeError!*Value {
         var start: ?i64 = null;
         switch (val.*) {
             .range => |*r| start = r.start,
             .str, .tuple, .list, .map => {},
             .iterator => unreachable,
-            else => return vm.errorFmt("cannot iterate {s}", .{@tagName(val.*)}),
+            else => return ctx.throwFmt("cannot iterate {s}", .{@tagName(val.*)}),
         }
-        const iter = try vm.gc.alloc();
+        const iter = try ctx.vm.gc.alloc();
         iter.* = .{
             .iterator = .{
-                .value = try vm.gc.dupe(val),
+                .value = try ctx.vm.gc.dupe(val),
             },
         };
         if (start) |some| iter.iterator.i.i = some;
@@ -634,7 +635,7 @@ pub const Value = union(Type) {
     }
 
     /// Converts Zig value to Bog value. Allocates copy in the gc.
-    pub fn zigToBog(vm: *Vm, val: anytype) Vm.Error!*Value {
+    pub fn zigToBog(vm: *Vm, val: anytype) error{OutOfMemory}!*Value {
         if (comptime std.meta.trait.hasFn("intoBog")(@TypeOf(val))) {
             return try val.intoBog(vm);
         }
@@ -727,10 +728,6 @@ pub const Value = union(Type) {
                 .ErrorUnion => if (val) |some| {
                     return zigToBog(vm, some);
                 } else |e| {
-                    // capture runtime errors
-                    if (@as(anyerror, e) == error.RuntimeError)
-                        return error.RuntimeError;
-
                     // wrap error string
                     const str = try vm.gc.alloc();
                     str.* = Value.string(@errorName(e));
@@ -760,7 +757,7 @@ pub const Value = union(Type) {
 
     /// Converts Bog value to Zig value. Returned string is invalidated
     /// on next garbage collection.
-    pub fn bogToZig(val: *Value, comptime T: type, ctx: Vm.Context) Vm.Error!T {
+    pub fn bogToZig(val: *Value, comptime T: type, ctx: Vm.Context) NativeError!T {
         if (comptime std.meta.trait.hasFn("fromBog")(T)) {
             return try T.fromBog(val, ctx);
         }
@@ -768,72 +765,72 @@ pub const Value = union(Type) {
         return switch (T) {
             void => {
                 if (val.* != .@"null")
-                    return ctx.fatal("expected a null");
+                    return ctx.throw("expected a null");
             },
             bool => {
                 if (val.* != .bool)
-                    return ctx.fatal("expected a bool");
+                    return ctx.throw("expected a bool");
                 return val.bool;
             },
             []const u8 => {
                 if (val.* != .str)
-                    return ctx.fatal("expected a string");
+                    return ctx.throw("expected a string");
                 return val.str.data;
             },
             *Map, *const Map => {
                 if (val.* != .map)
-                    return ctx.fatal("expected a map");
+                    return ctx.throw("expected a map");
                 return &val.map;
             },
             *List, *const List => {
                 if (val.* != .list)
-                    return ctx.fatal("expected a list");
+                    return ctx.throw("expected a list");
                 return &val.list;
             },
             *Value, *const Value => val,
             *String, *const String => {
                 if (val.* != .str)
-                    return ctx.fatal("expected a string");
+                    return ctx.throw("expected a string");
                 return &val.str;
             },
             []*Value, []const *Value, []*const Value, []const *const Value => {
                 switch (val.*) {
                     .tuple => |t| return t,
                     .list => |*l| return l.items,
-                    else => return ctx.fatal("expected a list or a tuple"),
+                    else => return ctx.throw("expected a list or a tuple"),
                 }
             },
             else => switch (@typeInfo(T)) {
                 .Int => if (val.* == .int) blk: {
                     if (val.int < std.math.minInt(T) or val.int > std.math.maxInt(T))
-                        return ctx.fatal("cannot fit int in desired type");
+                        return ctx.throw("cannot fit int in desired type");
                     break :blk @intCast(T, val.int);
                 } else if (val.* == .num)
                     std.math.lossyCast(T, val.num)
                 else
-                    return ctx.fatal("expected int"),
+                    return ctx.throw("expected int"),
                 .Float => |info| switch (info.bits) {
                     32 => if (val.* == .num)
                         @floatCast(f32, val.num)
                     else if (val.* == .int)
                         @intToFloat(f32, val.int)
                     else
-                        return ctx.fatal("expected num"),
+                        return ctx.throw("expected num"),
                     64 => if (val.* == .num)
                         val.num
                     else if (val.* == .int)
                         @intToFloat(f64, val.int)
                     else
-                        return ctx.fatal("expected num"),
+                        return ctx.throw("expected num"),
                     else => @compileError("unsupported float"),
                 },
                 .Enum => {
                     if (val.* != .tagged)
-                        return ctx.fatal("expected tag");
+                        return ctx.throw("expected tag");
                     const e = std.meta.stringToEnum(T, val.tagged.name) orelse
-                        return ctx.fatal("no value by such name");
+                        return ctx.throw("no value by such name");
                     if (val.tagged.value.* != .@"null")
-                        return ctx.fatal("expected no value");
+                        return ctx.throw("expected no value");
                     return e;
                 },
                 else => @compileError("unsupported type: " ++ @typeName(T)),
@@ -908,20 +905,27 @@ fn wrapZigFunc(func: anytype) Value.Native {
         // cannot directly use `func` so declare a pointer to it
         var _func: @TypeOf(func) = undefined;
 
-        fn native(ctx: Vm.Context, bog_args: []const bog.Bytecode.Ref) Vm.Error!*Value {
+        fn native(ctx: Vm.Context, bog_args: []const bog.Bytecode.Ref) Value.NativeError!*Value {
             var args: std.meta.ArgsTuple(@TypeOf(_func)) = undefined;
 
             comptime var bog_arg_i: u8 = 0;
             comptime var vm_passed = false;
+            comptime var this_passed = false;
             inline for (Fn.args) |arg, i| {
                 const ArgT = arg.arg_type.?;
-                if (ArgT == *Vm) {
-                    if (vm_passed) @compileError("function takes more than one *Vm");
-                    args[i] = ctx.vm;
+                if (ArgT == Vm.Context) {
+                    if (vm_passed) @compileError("function takes more than one Vm.Context");
+                    // if (i == 1 and !this_passed)
+                    //     @compileError("Vm.Context must come after Value.This")
+                    // else if (i != 0)
+                    //     @compileError("Vm.Context must be first or second parameter");
+
+                    args[i] = ctx;
                     vm_passed = true;
                 } else if (@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T")) {
                     if (i != 0) @compileError("Value.This must be the first parameter");
                     args[i] = ArgT{ .t = try ctx.this.bogToZig(ArgT.__bog_This_T, ctx) };
+                    this_passed = true;
                 } else {
                     if (bog_arg_i > bog.Bytecode.max_params)
                         @compileError("function takes too many arguments");
@@ -930,7 +934,20 @@ fn wrapZigFunc(func: anytype) Value.Native {
                     bog_arg_i += 1;
                 }
             }
-            return Value.zigToBog(ctx.vm, @call(.{}, _func, args));
+            const res = @call(.{}, _func, args);
+            switch (@typeInfo(@TypeOf(res))) {
+                .ErrorSet => switch (@as(anyerror, res)) {
+                    error.FatalError, error.Throw => |e| return e,
+                    else => return Value.zigToBog(ctx.vm, res),
+                },
+                .ErrorUnion => if (res) |val| {
+                    return Value.zigToBog(ctx.vm, val);
+                } else |err| switch (@as(anyerror, err)) {
+                    error.FatalError, error.Throw => |e| return e,
+                    else => return Value.zigToBog(ctx.vm, res),
+                },
+                else => return Value.zigToBog(ctx.vm, res),
+            }
         }
     };
     S._func = func;
@@ -939,7 +956,7 @@ fn wrapZigFunc(func: anytype) Value.Native {
     comptime var bog_arg_count = 0;
     comptime for (Fn.args) |arg| {
         const ArgT = arg.arg_type.?;
-        if (ArgT != *Vm and !(@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T"))) {
+        if (ArgT != Vm.Context and !(@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T"))) {
             bog_arg_count += 1;
         }
     };

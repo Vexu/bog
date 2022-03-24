@@ -77,10 +77,10 @@ pub fn dump(str: String, writer: anytype) !void {
     try writer.print("\"{}\"", .{std.zig.fmtEscapes(str.data)});
 }
 
-pub fn get(str: *const String, ctx: Vm.Context, index: *const Value, res: *?*Value) Vm.Error!void {
+pub fn get(str: *const String, ctx: Vm.Context, index: *const Value, res: *?*Value) Value.NativeError!void {
     switch (index.*) {
-        .int => return ctx.fatal("TODO get str"),
-        .range => return ctx.fatal("TODO get with ranges"),
+        .int => return ctx.frame.fatal(ctx.vm, "TODO str get int"),
+        .range => return ctx.frame.fatal(ctx.vm, "TODO str get with ranges"),
         .str => |*s| {
             if (res.* == null) {
                 res.* = try ctx.vm.gc.alloc();
@@ -94,27 +94,27 @@ pub fn get(str: *const String, ctx: Vm.Context, index: *const Value, res: *?*Val
                     return;
                 }
             } else {
-                return ctx.fatal("no such property");
+                return ctx.throw("no such property");
             }
         },
-        else => return ctx.fatal("invalid index type"),
+        else => return ctx.throw("invalid index type"),
     }
 }
 
 pub const methods = struct {
-    pub fn append(str: Value.This(*String), vm: *Vm, data: []const u8) !void {
-        var b = builder(vm.gc.gpa);
+    pub fn append(str: Value.This(*String), ctx: Vm.Context, data: []const u8) !void {
+        var b = builder(ctx.vm.gc.gpa);
         errdefer b.cancel();
 
         try b.append(str.t.data);
         try b.append(data);
 
-        str.t.deinit(vm.gc.gpa);
+        str.t.deinit(ctx.vm.gc.gpa);
         str.t.* = b.finish();
     }
 
-    pub fn format(str: Value.This([]const u8), vm: *Vm, args: []const *Value) !*Value {
-        var b = builder(vm.gc.gpa);
+    pub fn format(str: Value.This([]const u8), ctx: Vm.Context, args: []const *Value) !*Value {
+        var b = builder(ctx.vm.gc.gpa);
         errdefer b.cancel();
 
         try b.inner.ensureTotalCapacity(str.t.len);
@@ -142,7 +142,7 @@ pub const methods = struct {
                     try w.writeByte(c);
                 } else {
                     if (arg_i >= args.len) {
-                        return vm.errorVal("too few arguments");
+                        return ctx.throw("not enough arguments to format string");
                     }
                     format_start = i;
                     state = .format;
@@ -162,7 +162,7 @@ pub const methods = struct {
                     switch (fmt_type) {
                         'x', 'X' => {
                             if (args[arg_i].* != .int) {
-                                return vm.typeError(.int, args[arg_i].*);
+                                return ctx.throwFmt("'x' takes an integer as an argument, got '{s}'", .{@tagName(args[arg_i].*)});
                             }
                             try std.fmt.formatInt(args[arg_i].int, 16, @intToEnum(std.fmt.Case, @boolToInt(fmt[0] == 'X')), options, w);
                         },
@@ -172,7 +172,7 @@ pub const methods = struct {
                             try args[arg_i].dump(w, default_dump_depth);
                         },
                         else => {
-                            return vm.errorVal("unknown format specifier");
+                            return ctx.throw("unknown format specifier");
                         },
                     }
 
@@ -182,16 +182,16 @@ pub const methods = struct {
             }
         }
         if (arg_i != args.len) {
-            return vm.errorVal("unused arguments");
+            return ctx.throw("unused arguments");
         }
 
-        const ret = try vm.gc.alloc();
+        const ret = try ctx.vm.gc.alloc();
         ret.* = Value{ .str = b.finish() };
         return ret;
     }
 
-    pub fn join(str: Value.This([]const u8), vm: *Vm, args: []const *Value) !*Value {
-        var b = builder(vm.gc.gpa);
+    pub fn join(str: Value.This([]const u8), ctx: Vm.Context, args: []const *Value) !*Value {
+        var b = builder(ctx.vm.gc.gpa);
         errdefer b.cancel();
         try b.inner.ensureTotalCapacity(args.len * str.t.len);
 
@@ -200,12 +200,12 @@ pub const methods = struct {
                 try b.append(str.t);
             }
             if (arg.* != .str) {
-                return vm.typeError(.str, arg.*);
+                return ctx.throwFmt("join only accepts strings, got '{s}'", .{@tagName(arg.*)});
             }
             try b.append(arg.str.data);
         }
 
-        const ret = try vm.gc.alloc();
+        const ret = try ctx.vm.gc.alloc();
         ret.* = Value{ .str = b.finish() };
         return ret;
     }
@@ -215,7 +215,7 @@ pub fn set(str: *String, ctx: Vm.Context, index: *const Value, new_val: *const V
     _ = str;
     _ = index;
     _ = new_val;
-    return ctx.fatal("TODO set string");
+    return ctx.frame.fatal(ctx.vm, "TODO set string");
 }
 
 pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {

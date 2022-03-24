@@ -43,7 +43,7 @@ pub const Errors = struct {
     list: List = .{},
     arena: zig_std.heap.ArenaAllocator,
 
-    const Kind = enum {
+    pub const Kind = enum {
         err,
         note,
         trace,
@@ -132,7 +132,7 @@ pub const Errors = struct {
 
             try writer.print("{s}\n", .{e.line});
             try writer.writeByteNTimes(' ', e.col_num - 1);
-            try term_util.setColor(.green, writer);
+            if (e.kind != .trace) try term_util.setColor(.green, writer);
             try writer.writeAll("^\n");
             try term_util.setColor(.reset, writer);
             e.msg.deinit(gpa);

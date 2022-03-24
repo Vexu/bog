@@ -3,10 +3,10 @@ const bog = @import("../bog.zig");
 const Value = bog.Value;
 const Vm = bog.Vm;
 
-pub fn parse(str: []const u8, vm: *Vm) !*Value {
+pub fn parse(ctx: Vm.Context, str: []const u8) !*Value {
     var tokens = std.json.TokenStream.init(str);
     const token = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
-    return parseInternal(vm, token, &tokens);
+    return parseInternal(ctx.vm, token, &tokens);
 }
 
 const Error = error{ UnexpectedToken, UnexpectedEndOfJson } || std.mem.Allocator.Error || std.json.TokenStream.Error ||
@@ -76,8 +76,8 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
     }
 }
 
-pub fn stringify(val: *Value, vm: *Vm) !Value.String {
-    var b = Value.String.builder(vm.gc.gpa);
+pub fn stringify(ctx: Vm.Context, val: *Value) !Value.String {
+    var b = Value.String.builder(ctx.vm.gc.gpa);
     errdefer b.cancel();
     try std.json.stringify(val, .{}, b.writer());
     return b.finish();

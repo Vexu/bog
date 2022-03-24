@@ -34,35 +34,35 @@ pub const sqrt2 = math.sqrt2;
 /// 1/sqrt(2)
 pub const sqrt1_2 = math.sqrt1_2;
 
-pub fn ln(vm: *Vm, val: *Value) !*Value {
-    return switch (val.*) {
+pub fn ln(ctx: Vm.Context, val: *Value) !*Value {
+    switch (val.*) {
         // TODO fix zig std
         // .int => |i| Value{
         //     .int = std.math.ln(i),
         // },
         .num => |n| {
-            const res = try vm.gc.alloc();
+            const res = try ctx.vm.gc.alloc();
             res.* = Value{ .num = std.math.ln(n) };
             return res;
         },
-        else => vm.typeError(.num, val.*),
-    };
+        else => return ctx.throwFmt("ln expects a number, got '{s}'", .{@tagName(val.*)}),
+    }
 }
 
-pub fn sqrt(vm: *Vm, val: *Value) !*Value {
+pub fn sqrt(ctx: Vm.Context, val: *Value) !*Value {
     return switch (val.*) {
         .int => |i| {
             _ = i;
-            const res = try vm.gc.alloc();
+            const res = try ctx.vm.gc.alloc();
             res.* = Value{ .int = std.math.sqrt(@intCast(u64, i)) };
             return res;
         },
         .num => |n| {
-            const res = try vm.gc.alloc();
+            const res = try ctx.vm.gc.alloc();
             res.* = Value{ .num = std.math.sqrt(n) };
             return res;
         },
-        else => vm.typeError(.num, val.*),
+        else => return ctx.throwFmt("sqrt expects a number, got '{s}'", .{@tagName(val.*)}),
     };
 }
 
