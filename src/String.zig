@@ -77,27 +77,27 @@ pub fn dump(str: String, writer: anytype) !void {
     try writer.print("\"{}\"", .{std.zig.fmtEscapes(str.data)});
 }
 
-pub fn get(str: *const String, vm: *Vm, index: *const Value, res: *?*Value) Vm.Error!void {
+pub fn get(str: *const String, ctx: Vm.Context, index: *const Value, res: *?*Value) Vm.Error!void {
     switch (index.*) {
-        .int => return vm.fatal("TODO get str"),
-        .range => return vm.fatal("TODO get with ranges"),
+        .int => return ctx.fatal("TODO get str"),
+        .range => return ctx.fatal("TODO get with ranges"),
         .str => |*s| {
             if (res.* == null) {
-                res.* = try vm.gc.alloc();
+                res.* = try ctx.vm.gc.alloc();
             }
 
             if (mem.eql(u8, s.data, "len")) {
                 res.*.?.* = .{ .int = @intCast(i64, str.data.len) };
             } else inline for (@typeInfo(methods).Struct.decls) |method| {
                 if (mem.eql(u8, s.data, method.name)) {
-                    res.* = try Value.zigToBog(vm, @field(methods, method.name));
+                    res.* = try Value.zigToBog(ctx.vm, @field(methods, method.name));
                     return;
                 }
             } else {
-                return vm.fatal("no such property");
+                return ctx.fatal("no such property");
             }
         },
-        else => return vm.fatal("invalid index type"),
+        else => return ctx.fatal("invalid index type"),
     }
 }
 
@@ -211,11 +211,11 @@ pub const methods = struct {
     }
 };
 
-pub fn set(str: *String, vm: *Vm, index: *const Value, new_val: *const Value) Vm.Error!void {
+pub fn set(str: *String, ctx: Vm.Context, index: *const Value, new_val: *const Value) Vm.Error!void {
     _ = str;
     _ = index;
     _ = new_val;
-    return vm.fatal("TODO set string");
+    return ctx.fatal("TODO set string");
 }
 
 pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {
@@ -245,7 +245,7 @@ pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {
         .tuple,
         .map,
         .list,
-        => return vm.fatal("TODO more casts from string"),
+        => return vm.errorVal("TODO more casts from string"),
         else => unreachable,
     };
     return new_val;

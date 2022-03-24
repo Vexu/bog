@@ -38,8 +38,11 @@ prev_line_offset: u32 = 0,
 
 code: *Code,
 
-pub fn compile(gpa: Allocator, source: []const u8, errors: *Errors) (Compiler.Error || bog.Parser.Error || bog.Tokenizer.Error)!Bytecode {
-    var tree = try bog.parse(gpa, source, errors);
+pub fn compile(gpa: Allocator, source: []const u8, path: []const u8, errors: *Errors) (Compiler.Error || bog.Parser.Error || bog.Tokenizer.Error)!Bytecode {
+    const duped_path = try gpa.dupe(u8, path);
+    errdefer gpa.free(duped_path);
+
+    var tree = try bog.parse(gpa, source, duped_path, errors);
     defer tree.deinit(gpa);
 
     var arena_state = std.heap.ArenaAllocator.init(gpa);
@@ -75,8 +78,9 @@ pub fn compile(gpa: Allocator, source: []const u8, errors: *Errors) (Compiler.Er
         .strings = compiler.strings.toOwnedSlice(gpa),
         .main = code.toOwnedSlice(gpa),
         .debug_info = .{
-            .file_path = "",
             .lines = compiler.lines.toOwnedSlice(gpa),
+            .source = source,
+            .path = duped_path,
         },
     };
 }
@@ -392,7 +396,7 @@ fn checkRedeclaration(c: *Compiler, tok: TokenIndex) !void {
             .symbol => |sym| if (std.mem.eql(u8, sym.name, name)) {
                 const msg = try bog.Value.String.init(c.gpa, "redeclaration of '{s}'", .{name});
                 const starts = c.tree.tokens.items(.start);
-                try c.errors.add(msg, starts[tok], .err);
+                try c.errors.add(msg, c.tree.source, c.tree.path, starts[tok], .err);
                 return error.CompileError;
             },
             else => {},
@@ -2706,6 +2710,12 @@ fn parseStrExtra(c: *Compiler, tok: TokenIndex, slice: []const u8, buf: []u8) !u
 fn reportErr(c: *Compiler, msg: []const u8, node: Node.Index) Error {
     @setCold(true);
     const starts = c.tree.tokens.items(.start);
-    try c.errors.add(.{ .data = msg }, starts[c.tree.firstToken(node)], .err);
+    try c.errors.add(
+        .{ .data = msg },
+        c.tree.source,
+        c.tree.path,
+        starts[c.tree.firstToken(node)],
+        .err,
+    );
     return error.CompileError;
 }

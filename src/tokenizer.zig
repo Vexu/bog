@@ -363,9 +363,10 @@ pub const Token = struct {
     }
 };
 
-pub fn tokenize(gpa: mem.Allocator, source: []const u8, errors: *Errors) Tokenizer.Error!Token.List {
+pub fn tokenize(gpa: mem.Allocator, source: []const u8, path: []const u8, errors: *Errors) Tokenizer.Error!Token.List {
     var tokenizer = Tokenizer{
         .errors = errors,
+        .path = path,
         .it = .{
             .i = 0,
             .bytes = source,
@@ -415,6 +416,7 @@ pub fn tokenizeRepl(repl: *@import("repl.zig").Repl) Tokenizer.Error!bool {
 
 pub const Tokenizer = struct {
     errors: *Errors,
+    path: []const u8,
     tokens: Token.List = .{},
     it: unicode.Utf8Iterator,
 
@@ -446,6 +448,8 @@ pub const Tokenizer = struct {
     fn reportErr(self: *Tokenizer, msg: []const u8, c: u21) Error {
         try self.errors.add(
             .{ .data = msg },
+            self.it.bytes,
+            self.path,
             @truncate(u32, self.it.i - (unicode.utf8CodepointSequenceLength(c) catch unreachable)),
             .err,
         );
@@ -1236,7 +1240,7 @@ fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) !void {
         try std.testing.expect(last_token.id == .eof);
         return;
     }
-    errors.render(source, std.io.getStdErr().writer()) catch {};
+    errors.render(std.io.getStdErr().writer()) catch {};
     return error.TestFailed;
 }
 

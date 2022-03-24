@@ -13,6 +13,7 @@ root_nodes: []Node.Index,
 
 /// not owned by the tree
 source: []const u8,
+path: []const u8,
 
 pub fn deinit(tree: *Tree, gpa: Allocator) void {
     tree.tokens.deinit(gpa);

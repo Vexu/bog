@@ -20,7 +20,8 @@ pub fn deinit(b: *Bytecode, gpa: Allocator) void {
     gpa.free(b.main);
     gpa.free(b.strings);
     gpa.free(b.debug_info.lines);
-    gpa.free(b.debug_info.file_path);
+    gpa.free(b.debug_info.path);
+    gpa.free(b.debug_info.source);
     b.code.deinit(gpa);
     b.* = undefined;
 }
@@ -258,7 +259,8 @@ pub const Inst = struct {
 };
 
 pub const DebugInfo = struct {
-    file_path: []const u8,
+    path: []const u8 = "",
+    source: []const u8 = "",
     lines: []const Line,
 
     pub const Line = struct {

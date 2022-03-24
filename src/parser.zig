@@ -10,12 +10,14 @@ const Node = bog.Node;
 const null_node: Node.Index = 0;
 
 /// root : (stmt NL)* EOF
-pub fn parse(gpa: Allocator, source: []const u8, errors: *bog.Errors) (Parser.Error || bog.Tokenizer.Error)!Tree {
-    var tokens = try bog.tokenize(gpa, source, errors);
+pub fn parse(gpa: Allocator, source: []const u8, path: []const u8, errors: *bog.Errors) (Parser.Error || bog.Tokenizer.Error)!Tree {
+    var tokens = try bog.tokenize(gpa, source, path, errors);
     errdefer tokens.deinit(gpa);
 
     var parser = Parser{
         .errors = errors,
+        .source = source,
+        .path = path,
         .tok_ids = tokens.items(.id),
         .tok_starts = tokens.items(.start),
         .extra = std.ArrayList(Node.Index).init(gpa),
@@ -48,6 +50,7 @@ pub fn parse(gpa: Allocator, source: []const u8, errors: *bog.Errors) (Parser.Er
         .extra = parser.extra.toOwnedSlice(),
         .nodes = parser.nodes,
         .source = source,
+        .path = path,
     };
 }
 
@@ -74,6 +77,8 @@ pub const Parser = struct {
     extra: std.ArrayList(Node.Index),
     node_buf: std.ArrayList(Node.Index),
     errors: *bog.Errors,
+    source: []const u8,
+    path: []const u8,
 
     pub const Error = error{ParseError} || Allocator.Error;
 
@@ -927,7 +932,7 @@ pub const Parser = struct {
     }
 
     fn reportErr(p: *Parser, msg: []const u8, tok: Token.Index) Error {
-        try p.errors.add(.{ .data = msg }, p.tok_starts[tok], .err);
+        try p.errors.add(.{ .data = msg }, p.source, p.path, p.tok_starts[tok], .err);
         return error.ParseError;
     }
 
@@ -1025,10 +1030,10 @@ pub const Parser = struct {
     fn expectToken(p: *Parser, id: Token.Id, skip_nl: SkipNl) !Token.Index {
         if (p.eatToken(id, skip_nl)) |tok| return tok;
         try p.errors.add(try @import("String.zig").init(
-            p.errors.list.allocator,
+            p.errors.arena.child_allocator,
             "expected '{s}', found '{s}'",
             .{ Token.string(id), Token.string(p.tok_ids[p.tok_i]) },
-        ), p.tok_starts[p.tok_i], .err);
+        ), p.source, p.path, p.tok_starts[p.tok_i], .err);
         return error.ParseError;
     }
 };

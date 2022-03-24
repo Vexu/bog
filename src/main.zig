@@ -88,7 +88,7 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
 
     const res = vm.compileAndRun(file_name) catch |e| switch (e) {
         error.RuntimeError => {
-            vm.errors.render("TODO", std.io.getStdErr().writer()) catch {};
+            vm.errors.render(std.io.getStdErr().writer()) catch {};
             process.exit(1);
         },
         error.OutOfMemory => return error.OutOfMemory,
@@ -163,9 +163,9 @@ fn fmtFile(gpa: std.mem.Allocator, name: []const u8) FmtError!bool {
     var errors = bog.Errors.init(gpa);
     defer errors.deinit();
 
-    var tree = bog.parse(gpa, source, &errors) catch |e| switch (e) {
+    var tree = bog.parse(gpa, source, name, &errors) catch |e| switch (e) {
         error.TokenizeError, error.ParseError => {
-            try errors.render(source, std.io.getStdErr().writer());
+            try errors.render(std.io.getStdErr().writer());
             return true;
         },
         error.OutOfMemory => return error.OutOfMemory,
@@ -216,10 +216,10 @@ fn debugDump(gpa: std.mem.Allocator, args: [][]const u8) !void {
     var errors = bog.Errors.init(gpa);
     defer errors.deinit();
 
-    var module = bog.compile(gpa, source, &errors) catch |e| switch (e) {
+    var module = bog.compile(gpa, source, file_name, &errors) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.TokenizeError, error.ParseError, error.CompileError => {
-            try errors.render(source, std.io.getStdErr().writer());
+            try errors.render(std.io.getStdErr().writer());
             process.exit(1);
         },
     };
@@ -242,10 +242,10 @@ fn debugTokens(gpa: std.mem.Allocator, args: [][]const u8) !void {
     var errors = bog.Errors.init(gpa);
     defer errors.deinit();
 
-    var tokens = bog.tokenize(gpa, source, &errors) catch |e| switch (e) {
+    var tokens = bog.tokenize(gpa, source, file_name, &errors) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.TokenizeError => {
-            try errors.render(source, std.io.getStdErr().writer());
+            try errors.render(std.io.getStdErr().writer());
             process.exit(1);
         },
     };
