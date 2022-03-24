@@ -197,6 +197,10 @@ pub const Inst = struct {
         call_one,
         /// uses Data.un, operand()
         call_zero,
+        /// Same as `call` but this is passed as the first argument.
+        this_call,
+        /// uses Data.bin, lhs(this)
+        this_call_zero,
 
         // use Data.un
         ret,
@@ -409,7 +413,14 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
                 dumpList(extra[1..]);
                 std.debug.print(")\n", .{});
             },
+            .this_call => {
+                const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
+                std.debug.print("{}.{}(", .{ extra[1], extra[0] });
+                dumpList(extra[2..]);
+                std.debug.print(")\n", .{});
+            },
             .call_one => std.debug.print("{}({})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
+            .this_call_zero => std.debug.print("{}.{}()\n", .{ data[i].bin.rhs, data[i].bin.lhs }),
             .call_zero => std.debug.print("{}()\n", .{data[i].un}),
             .ret_null,
             .build_error_null,

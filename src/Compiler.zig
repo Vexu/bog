@@ -1996,6 +1996,15 @@ fn genCall(c: *Compiler, node: Node.Index) Error!Value {
     if (!callee_val.isRt()) {
         return c.reportErr("attempt to call non function value", callee);
     }
+    const callee_ref = callee_val.getRt();
+
+    const last_node = c.getLastNode(callee);
+    const this = switch (c.tree.nodes.items(.id)[last_node]) {
+        .member_access_expr,
+        .array_access_expr,
+        => c.instructions.items(.data)[Bytecode.refToIndex(callee_ref)].bin.lhs,
+        else => null,
+    };
 
     if (args.len > Bytecode.max_params) {
         return c.reportErr("too many arguments", node);
@@ -2004,7 +2013,8 @@ fn genCall(c: *Compiler, node: Node.Index) Error!Value {
     const list_buf_top = c.list_buf.items.len;
     defer c.list_buf.items.len = list_buf_top;
 
-    try c.list_buf.append(c.gpa, callee_val.getRt());
+    try c.list_buf.append(c.gpa, callee_ref);
+    if (this) |some| try c.list_buf.append(c.gpa, some);
 
     for (args) |arg| {
         const arg_val = try c.genNode(arg, .value);
@@ -2017,13 +2027,21 @@ fn genCall(c: *Compiler, node: Node.Index) Error!Value {
     }
 
     const arg_refs = c.list_buf.items[list_buf_top..];
+    if (this) |some| {
+        const res_ref = switch (arg_refs.len) {
+            0, 1 => unreachable, // callee and this is always added
+            2 => try c.addBin(.this_call_zero, callee_ref, some, node),
+            else => try c.addExtra(.this_call, arg_refs, node),
+        };
+        return Value{ .ref = res_ref };
+    }
+
     const res_ref = switch (arg_refs.len) {
         0 => unreachable, // callee is always added
         1 => try c.addUn(.call_zero, arg_refs[0], node),
         2 => try c.addBin(.call_one, arg_refs[0], arg_refs[1], node),
         else => try c.addExtra(.call, arg_refs, node),
     };
-
     return Value{ .ref = res_ref };
 }
 
@@ -2121,9 +2139,13 @@ fn genFormatString(c: *Compiler, node: Node.Index) Error!Value {
     }
 
     const arg_refs = c.list_buf.items[list_buf_top..];
-    const args_tuple = try c.addExtra(.build_tuple, arg_refs, node);
+    const args_tuple_ref = try c.addExtra(.build_tuple, arg_refs, node);
 
-    const res_ref = try c.addBin(.call_one, format_fn_ref, args_tuple, node);
+    const res_ref = try c.addExtra(.this_call, &.{
+        format_fn_ref,
+        string_ref,
+        args_tuple_ref,
+    }, node);
     return Value{ .ref = res_ref };
 }
 

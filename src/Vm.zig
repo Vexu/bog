@@ -62,9 +62,6 @@ pub const Frame = struct {
     module_frame: *Frame,
     /// Where to store a capture after a build_func instruction
     store_capture_index: u24 = 0,
-    /// Result of latest `get` instruction, will become value of `this` for
-    /// function calls and be invalidated afterwards.
-    last_get: *Value = Value.Null,
     /// This function frames stack.
     stack: std.AutoArrayHashMapUnmanaged(u32, *Value) = .{},
     /// Stack of error handlers that have been set up.
@@ -128,12 +125,8 @@ pub const Frame = struct {
         return res.bool;
     }
 
-    pub fn ctx(f: *Frame, vm: *Vm) Context {
-        return .{
-            .this = f.last_get,
-            .vm = vm,
-            .frame = f,
-        };
+    pub fn ctx(f: *Frame, this: *Value, vm: *Vm) Context {
+        return .{ .this = this, .vm = vm, .frame = f };
     }
 };
 
@@ -760,7 +753,6 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const index = f.val(data[inst].bin.rhs);
 
                 try container.get(vm, index, res);
-                f.last_get = container;
             },
             .get_or_null => {
                 const res = try f.newRef(vm, ref);
@@ -771,7 +763,6 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     res.* = Value.Null;
                 } else {
                     res.* = container.map.get(index) orelse Value.Null;
-                    f.last_get = res.*.?;
                 }
             },
             .set => {
@@ -855,10 +846,13 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .call,
             .call_one,
             .call_zero,
+            .this_call,
+            .this_call_zero,
             => {
                 var buf: [1]Ref = undefined;
                 var args: []const Ref = &.{};
                 var callee: *Value = undefined;
+                var this: *Value = Value.Null;
                 switch (ops[inst]) {
                     .call => {
                         const extra = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
@@ -871,6 +865,16 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         args = &buf;
                     },
                     .call_zero => callee = f.val(data[inst].un),
+                    .this_call => {
+                        const extra = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
+                        callee = f.val(extra[0]);
+                        this = f.val(extra[1]);
+                        args = extra[2..];
+                    },
+                    .this_call_zero => {
+                        callee = f.val(data[inst].bin.lhs);
+                        this = f.val(data[inst].bin.rhs);
+                    },
                     else => unreachable,
                 }
                 if (callee.* == .native) {
@@ -883,7 +887,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         return vm.fatalExtra(str);
                     }
 
-                    const res = try callee.native.func(f.ctx(vm), args);
+                    const res = try callee.native.func(f.ctx(this, vm), args);
 
                     // function may mutate the stack
                     const returned = try f.newRef(vm, ref);
@@ -909,7 +913,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         .body = callee.func.body[0..callee.func.body_len],
                         .caller_frame = f,
                         .module_frame = f.module_frame,
-                        .this = f.last_get,
+                        .this = this,
                         .captures = &.{},
                     };
                     defer new_frame.deinit(vm);
@@ -929,7 +933,6 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     const returned = try f.newRef(vm, ref);
                     returned.* = try vm.typeError(.func, callee.*);
                 }
-                f.last_get = Value.Null;
                 const returned = f.val(ref);
                 if (returned.* == .err) {
                     if (f.err_handlers.get()) |handler| {
@@ -1101,7 +1104,7 @@ fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) !*Value {
         try vm.importFile(id)
     else {
         if (vm.imports.get(id)) |some| {
-            return some(caller_frame.ctx(vm));
+            return some(caller_frame.ctx(Value.Null, vm));
         }
         return vm.fatal("no such package");
     };
@@ -1111,7 +1114,7 @@ fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) !*Value {
         .body = mod.main,
         .caller_frame = caller_frame,
         .module_frame = undefined,
-        .this = caller_frame.last_get,
+        .this = Value.Null,
         .captures = &.{},
     };
     defer frame.deinit(vm);
