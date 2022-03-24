@@ -220,11 +220,11 @@ pub const Parser = struct {
         }
     }
 
-    /// block_or_expr : block | expr
+    /// block_or_expr : block | assign_expr
     fn blockOrExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
         if (skip_nl == .keep_nl) if (try p.block(level)) |node| return node;
         p.skipNl();
-        return try p.expr(skip_nl, level);
+        return try p.assignExpr(skip_nl, level);
     }
 
     /// block : NL (stmt NL)+
@@ -353,10 +353,11 @@ pub const Parser = struct {
         }
     }
 
-    /// type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
+    /// type_name : "null" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
     fn typeName(p: *Parser, skip_nl: SkipNl) Error!Token.Index {
         return p.eatToken(.keyword_error, skip_nl) orelse
             p.eatToken(.keyword_fn, skip_nl) orelse
+            p.eatToken(.keyword_null, skip_nl) orelse
             p.eatToken(.identifier, skip_nl) orelse
             p.reportErr("expected type name", p.tok_i);
     }
@@ -695,6 +696,7 @@ pub const Parser = struct {
         } else if (p.eatToken(.l_paren, .keep_nl)) |tok| {
             if (try p.block(level)) |b| {
                 p.skipNl();
+                _ = try p.expectToken(.r_paren, skip_nl);
                 return try p.addUn(.paren_expr, tok, b);
             }
             p.skipNl();

@@ -453,7 +453,7 @@ pub const Value = union(Type) {
                     } else if (mem.eql(u8, s.data, "append")) {
                         res.* = try zigToBog(ctx.vm, struct {
                             fn append(_list: This(*List), _ctx: Vm.Context, val: *Value) !void {
-                                try _list.t.append(_ctx.vm.gc.gpa, try _ctx.vm.gc.dupe(val));
+                                try _list.t.append(_ctx.vm.gc.gpa, val);
                             }
                         }.append);
                     } else {
@@ -491,7 +491,7 @@ pub const Value = union(Type) {
     }
 
     /// Sets index of container to value. Does a shallow copy if value stored.
-    pub fn set(container: *Value, ctx: Vm.Context, index: *const Value, new_val: *const Value) NativeError!void {
+    pub fn set(container: *Value, ctx: Vm.Context, index: *const Value, new_val: *Value) NativeError!void {
         switch (container.*) {
             .tuple => |tuple| if (index.* == .int) {
                 var i = index.int;
@@ -500,12 +500,12 @@ pub const Value = union(Type) {
                 if (i < 0 or i >= tuple.len)
                     return ctx.throw("index out of bounds");
 
-                tuple[@intCast(u32, i)] = try ctx.vm.gc.dupe(new_val);
+                tuple[@intCast(u32, i)] = new_val;
             } else {
                 return ctx.frame.fatal(ctx.vm, "TODO set with ranges");
             },
             .map => |*map| {
-                _ = try map.put(ctx.vm.gc.gpa, try ctx.vm.gc.dupe(index), try ctx.vm.gc.dupe(new_val));
+                _ = try map.put(ctx.vm.gc.gpa, try ctx.vm.gc.dupe(index), new_val);
             },
             .list => |*list| if (index.* == .int) {
                 var i = index.int;
@@ -514,7 +514,7 @@ pub const Value = union(Type) {
                 if (i < 0 or i >= list.items.len)
                     return ctx.throw("index out of bounds");
 
-                list.items[@intCast(u32, i)] = try ctx.vm.gc.dupe(new_val);
+                list.items[@intCast(u32, i)] = new_val;
             } else {
                 return ctx.frame.fatal(ctx.vm, "TODO set with ranges");
             },

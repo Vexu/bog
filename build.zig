@@ -49,7 +49,7 @@ pub fn build(b: *Builder) void {
     addTests(b, examples_step, .{
         "src/main.zig",
         "tests/fmt.zig",
-        // "tests/behavior.zig",
+        "tests/behavior.zig",
         "tests/error.zig",
     });
 

@@ -279,6 +279,7 @@ pub fn compileAndRun(vm: *Vm, file_path: []const u8) !*Value {
 
     var frame_val = try vm.gc.alloc();
     frame_val.* = .{ .frame = &frame };
+    defer frame_val.* = .{ .int = 0 }; // clear frame
 
     return vm.run(&frame);
 }
@@ -375,8 +376,9 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .build_tagged => {
                 const res = try f.newVal(vm, ref);
                 const arg = f.val(mod.extra[data[inst].extra.extra]);
+                const str_offset = @enumToInt(mod.extra[data[inst].extra.extra + 1]);
 
-                const name = mod.strings[data[inst].extra.extra..][0..data[inst].extra.len];
+                const name = mod.strings[str_offset..][0..data[inst].extra.len];
                 res.* = .{ .tagged = .{
                     .name = name,
                     .value = try vm.gc.dupe(arg),
@@ -409,7 +411,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .build_range => {
                 const start = (try f.int(vm, data[inst].bin.lhs)) orelse continue;
-                const end = (try f.int(vm, data[inst].bin.lhs)) orelse continue;
+                const end = (try f.int(vm, data[inst].bin.rhs)) orelse continue;
 
                 const res = try f.newVal(vm, ref);
                 res.* = .{
@@ -778,7 +780,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 res.* = .{ .int = ~operand };
             },
             .unwrap_error => {
-                const arg = f.val(data[inst].jump_condition.operand);
+                const arg = f.val(data[inst].un);
 
                 if (arg.* != .err) {
                     try f.throw(vm, "expected an error");
@@ -1054,6 +1056,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
 
                     var frame_val = try vm.gc.alloc();
                     frame_val.* = .{ .frame = &new_frame };
+                    defer frame_val.* = .{ .int = 0 }; // clear frame
 
                     const returned = try vm.run(&new_frame);
                     if (returned.* == .err) {
@@ -1246,6 +1249,7 @@ fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) !*Value {
 
     var frame_val = try vm.gc.alloc();
     frame_val.* = .{ .frame = &frame };
+    defer frame_val.* = .{ .int = 0 }; // clear frame
 
     return vm.run(&frame);
 }

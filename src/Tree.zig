@@ -708,9 +708,9 @@ pub const While = struct {
         const data = tree.nodes.items(.data);
         if (tree.nodes.items(.id)[node] == .while_let_expr) {
             while_expr.let_tok = tree.nextToken(tokens[node]);
-            while_expr.capture = data[node].cond.cond;
+            while_expr.capture = tree.extra[data[node].cond.extra];
             while_expr.eq_tok = tree.nextToken(tree.lastToken(while_expr.capture.?));
-            while_expr.cond = tree.extra[data[node].cond.extra];
+            while_expr.cond = data[node].cond.cond;
             while_expr.body = tree.extra[data[node].cond.extra + 1];
         } else {
             while_expr.cond = data[node].bin.lhs;

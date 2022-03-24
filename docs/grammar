@@ -8,7 +8,7 @@ decl : "let" primary_expr "=" block_or_expr
 
 assign_expr : expr (("=" | "+=" | "-=" | "*=" | "**=" | "/=" | "//=" | "%=" | "<<=" | ">>=" | "&=" | "|=" | "^=") block_or_expr)?
 
-block_or_expr : block | expr
+block_or_expr : block | assign_expr
 
 block : NL (stmt NL)+
 
@@ -30,7 +30,7 @@ comparison_expr
     : range_expr (("<" | "<=" | ">" | ">="| "==" | "!=" | "in") range_expr)?
     | range_expr ("is" type_name)?
 
-type_name : "none" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
+type_name : "null" | "int" | "num" | "bool" | "str" | "tuple" | "map" | "list" | "error" | "range" | "fn"
 
 range_expr : bit_expr (":" bit_expr? (":" bit_expr)?)?
 

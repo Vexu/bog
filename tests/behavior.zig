@@ -1,21 +1,21 @@
 test "range destructuring" {
     try expectOutput(
-        \\const start:end:step = 1:2:3
+        \\let (start:end:step) = 1:2:3
         \\return start+end+step
     , "6");
 }
 
 test "continue" {
     try expectOutput(
-        \\let i = 0
-        \\while (i < 1)
+        \\let mut i = 0
+        \\while i < 1
         \\    i += 1
         \\    continue
-    , "()");
+    , "null");
     try expectOutput(
-        \\for (let i in 0:1)
+        \\for let i in 0:1
         \\    continue
-    , "()");
+    , "null");
 }
 
 test "std.gc" {
@@ -24,29 +24,29 @@ test "std.gc" {
         return error.SkipZigTest;
     }
     try expectOutput(
-        \\const {collect} = import("std.gc")
-        \\const json = import("std.json")
+        \\let {collect} = import("std.gc")
+        \\let json = import("std.json")
         \\
-        \\const makeGarbage = fn()
-        \\    json.stringify({"a": [2, "foo", ()]})
+        \\let makeGarbage = fn()
+        \\    json.stringify({"a" = [2, "foo", null]})
         \\
-        \\for (0:5) makeGarbage()
+        \\for 0:5 makeGarbage()
         \\return collect()
     ,
-        \\42
+        \\39
     );
 }
 
 test "std.json" {
     try expectOutput(
-        \\const json = import("std.json")
+        \\let json = import("std.json")
         \\return json.parse("{\"a\":[2,\"foo\",null]}")
     ,
-        \\{"a": [2, "foo", ()]}
+        \\{"a" = [2, "foo", null]}
     );
     try expectOutput(
-        \\const json = import("std.json")
-        \\return json.stringify({"a": [2, "foo", ()]})
+        \\let json = import("std.json")
+        \\return json.stringify({"a" = [2, "foo", null]})
     ,
         \\"{\"a\":[2,\"foo\",null]}"
     );
@@ -54,15 +54,15 @@ test "std.json" {
 
 test "boolean short-circuit" {
     try expectOutput(
-        \\const foo = fn() true
-        \\const bar = fn() error("should not be evaluated")
+        \\let foo = fn() true
+        \\let bar = fn() error("should not be evaluated")
         \\return foo() or bar()
     ,
         \\true
     );
     try expectOutput(
-        \\const foo = fn() false
-        \\const bar = fn() error("should not be evaluated")
+        \\let foo = fn() false
+        \\let bar = fn() error("should not be evaluated")
         \\return foo() and bar()
     ,
         \\false
@@ -71,7 +71,7 @@ test "boolean short-circuit" {
 
 test "match" {
     try expectOutput(
-        \\const getNum = fn (arg)
+        \\let getNum = fn (arg)
         \\    return match (arg)
         \\        1, 2 => 69
         \\        12 => 42
@@ -79,19 +79,19 @@ test "match" {
         \\        _ => 0
         \\
         \\let arr = []
-        \\arr ++ getNum(1)
-        \\arr ++ getNum(2)
-        \\arr ++ getNum(12)
-        \\arr ++ getNum(10004)
-        \\arr ++ getNum(9)
+        \\arr.append(getNum(1))
+        \\arr.append(getNum(2))
+        \\arr.append(getNum(12))
+        \\arr.append(getNum(10004))
+        \\arr.append(getNum(9))
         \\return arr
     ,
         \\[69, 69, 42, 17, 0]
     );
     try expectOutput(
-        \\const getNum = fn() 42
+        \\let getNum = fn() 42
         \\
-        \\match (getNum())
+        \\match getNum()
         \\    1 => error
         \\    let val => return val
     ,
@@ -101,21 +101,21 @@ test "match" {
 
 test "try catch" {
     try expectOutput(
-        \\const fails_on_1 = fn(arg) if (arg == 1) error(69)
-        \\const fails_on_2 = fn(arg) if (arg == 2) error(42)
-        \\const fails_on_3 = fn(arg) if (arg == 3) error(17)
+        \\let fails_on_1 = fn(arg) if (arg == 1) error(69)
+        \\let fails_on_2 = fn(arg) if (arg == 2) error(42)
+        \\let fails_on_3 = fn(arg) if (arg == 3) error(17)
         \\
-        \\const foo = fn(arg)
+        \\let foo = fn(arg)
         \\    try
         \\        fails_on_1(arg)
         \\        fails_on_2(arg)
         \\        fails_on_3(arg)
-        \\    catch (let err)
+        \\    catch let err
         \\        return err
         \\
         \\    return 99
         \\
-        \\return for (let i in 0:4) foo(i)
+        \\return for let i in 0:4 foo(i)
     ,
         \\[99, 69, 42, 17]
     );
@@ -142,44 +142,9 @@ test "format string" {
     );
 }
 
-test "concatting" {
-    try expectOutput(
-        \\let x = "foo"
-        \\return x ++ "bar" ++ "baz"
-    ,
-        \\"foobarbaz"
-    );
-    try expectOutput(
-        \\let x = []
-        \\return x ++ 1 ++ "bar" ++ 2
-    ,
-        \\[1, "bar", 2]
-    );
-    try expectOutput(
-        \\return [[1] as str]
-    ,
-        \\["[1]"]
-    );
-    try expectOutput(
-        \\let x = "foo"
-        \\x ++ "bar" ++ "baz"
-        \\return x
-    ,
-        \\"foobarbaz"
-    );
-}
-
-test "comma decimals" {
-    try expectOutput(
-        \\return 0,5 + 0,2;
-    ,
-        \\0.7
-    );
-}
-
 test "range" {
     try expectOutput(
-        \\return for (let i in 0:7:2) i
+        \\return for let i in 0:7:2 i
     ,
         \\[0, 2, 4, 6]
     );
@@ -197,18 +162,18 @@ test "range" {
 
 test "list comprehension as function argument" {
     try expectOutput(
-        \\const map = {1: 2, 3: 4, 5: 6}
-        \\return (fn(l)l)(for (let (k, v) in map) {key: k, val: v})
+        \\let map = {1 = 2, 3 = 4, 5 = 6}
+        \\return (fn(l)l)(for let (k, v) in map {key = k, val = v})
     ,
-        \\[{"key": 1, "val": 2}, {"key": 3, "val": 4}, {"key": 5, "val": 6}]
+        \\[{"key" = 1, "val" = 2}, {"key" = 3, "val" = 4}, {"key" = 5, "val" = 6}]
     );
 }
 
 test "map iterator" {
     try expectOutput(
-        \\const map = {1: 2, 3: 4, 5: 6}
-        \\let sum = 0
-        \\for (let (k, v) in map)
+        \\let map = {1 = 2, 3 = 4, 5 = 6}
+        \\let mut sum = 0
+        \\for let (k, v) in map
         \\    sum += k
         \\    sum *= v
         \\return sum
@@ -219,12 +184,12 @@ test "map iterator" {
 
 test "list comprehension" {
     try expectOutput(
-        \\return for (const c in "hello") c
+        \\return for let c in "hello" c
     ,
         \\["h", "e", "l", "l", "o"]
     );
     try expectOutput(
-        \\let i = 0
+        \\let mut i = 0
         \\return while (i < 10)
         \\    i += 1
         \\    i
@@ -245,34 +210,34 @@ test "list.append" {
 
 test "std.map" {
     try expectOutput(
-        \\let val = {foo: 2, bar: 3, 0: 515, [1]: [2]}
-        \\const map = import("std.map")
-        \\const {assert} = import("std.debug")
-        \\const keys = map.keys(val)
+        \\let val = {foo = 2, bar = 3, 0 = 515, [1] = [2]}
+        \\let map = import("std.map")
+        \\let {assert} = import("std.debug")
+        \\let keys = map.keys(val)
         \\assert(keys is list and keys.len == 4)
-        \\const values = map.values(val)
+        \\let values = map.values(val)
         \\assert(values is list and values.len == 4)
-        \\const entries = map.entries(val)
+        \\let entries = map.entries(val)
         \\assert(entries is list and entries.len == 4)
-        \\const entry = entries[0]
+        \\let entry = entries[0]
         \\assert(entry is map and map.size(entry) == 2)
     ,
-        \\()
+        \\null
     );
 }
 
-test "collections copy hold values" {
+test "modifying collections" {
     try expectOutput(
         \\let x = [0]
         \\let y = [x]
         \\x[0] = 1
         \\return y
     ,
-        \\[[0]]
+        \\[[1]]
     );
     try expectOutput(
-        \\const foo = [1]
-        \\const bar = fn(list) list[0] = 2
+        \\let foo = [1]
+        \\let bar = fn(list) list[0] = 2
         \\bar(foo)
         \\return foo
     ,
@@ -282,27 +247,27 @@ test "collections copy hold values" {
 
 test "tagged values" {
     try expectOutput(
-        \\return @something{foo: 69}
+        \\return @something{foo = 69}
     ,
-        \\@something{"foo": 69}
+        \\@something{"foo" = 69}
     );
     try expectOutput(
-        \\const foo = @foo
-        \\const bar = @bar
+        \\let foo = @foo
+        \\let bar = @bar
         \\return foo == bar
     ,
         \\false
     );
     try expectOutput(
-        \\const foo = @foo[1]
-        \\const bar = @foo[1]
+        \\let foo = @foo[1]
+        \\let bar = @foo[1]
         \\return foo == bar
     ,
         \\true
     );
     try expectOutput(
-        \\const foo = @foo[1, 2]
-        \\const @foo[bar, baz] = foo
+        \\let foo = @foo[1, 2]
+        \\let @foo[bar, baz] = foo
         \\return bar + baz
     ,
         \\3
@@ -311,8 +276,8 @@ test "tagged values" {
 
 test "error map" {
     try expectOutput(
-        \\const foo = error{a: 2}
-        \\const error{a: bar} = foo
+        \\let foo = error{a = 2}
+        \\let error{a = bar} = foo
         \\return bar * 2
     ,
         \\4
@@ -322,8 +287,8 @@ test "error map" {
 test "call bog function" {
     try expectCallOutput(
         \\return {
-        \\    foo: 2,
-        \\    doTheTest: fn(num) this.foo + num
+        \\    foo = 2,
+        \\    doTheTest = fn(num) this.foo + num
         \\}
     , .{1},
         \\3
@@ -343,10 +308,10 @@ test "containers do not overwrite memoized values" {
 test "this" {
     try expectOutput(
         \\let x = {
-        \\    a: 69,
-        \\    y: 420,
-        \\    foo: fn() (
-        \\        [0][0] # last_get is now referencing this list
+        \\    a = 69,
+        \\    y = 420,
+        \\    foo = fn() (
+        \\        [0][0]
         \\        return this.a * this.y
         \\    ),
         \\
@@ -360,18 +325,18 @@ test "this" {
 test "closures" {
     try expectOutput(
         \\let x = 2
-        \\const foo = fn() x + 5
+        \\let foo = fn() x + 5
         \\return foo()
     ,
         \\7
     );
     try expectOutput(
         \\let x = 2
-        \\const foo = fn()
+        \\let foo = fn()
         \\    return fn()
         \\        return x + 5
         \\
-        \\const bar = foo()
+        \\let bar = foo()
         \\return bar()
     ,
         \\7
@@ -381,17 +346,17 @@ test "closures" {
 test "map" {
     try expectOutput(
         \\let y = 2
-        \\const map = {1: 2, y}
+        \\let map = {1 = 2, y}
         \\map["foo"] = "bar"
         \\return map
     ,
-        \\{1: 2, "y": 2, "foo": "bar"}
+        \\{1 = 2, "y" = 2, "foo" = "bar"}
     );
     try expectOutput(
         \\let y = 2
-        \\const map = {1: 2, x: y}
-        \\const {x} = map
-        \\const {x: foo} = map
+        \\let map = {1 = 2, x = y}
+        \\let {x} = map
+        \\let {x = foo} = map
         \\return x == foo
     ,
         \\true
@@ -400,7 +365,7 @@ test "map" {
 
 test "property access of list" {
     try expectOutput(
-        \\const list = [1, true, "hello"]
+        \\let list = [1, true, "hello"]
         \\return list.len
     ,
         \\3
@@ -417,8 +382,8 @@ test "property access of list" {
 
 test "string for iter" {
     try expectOutput(
-        \\let sum = 0
-        \\for (let c in "hellö wörld")
+        \\let mut sum = 0
+        \\for let c in "hellö wörld"
         \\    if (c == "h") sum += 1
         \\    else if (c == "e") sum += 2
         \\    else if (c == "l") sum += 3
@@ -434,8 +399,8 @@ test "string for iter" {
 
 test "for loops" {
     try expectOutput(
-        \\let sum = 0
-        \\for (let x in [1, 2, 3])
+        \\let mut sum = 0
+        \\for let x in [1, 2, 3]
         \\    sum += x
         \\
         \\return sum
@@ -443,8 +408,8 @@ test "for loops" {
         \\6
     );
     try expectOutput(
-        \\let sum = 0
-        \\for (let (x,y) in [(1, 2), (2, 3), (5, 6)])
+        \\let mut sum = 0
+        \\for let (x,y) in [(1, 2), (2, 3), (5, 6)]
         \\    sum += x * y
         \\
         \\return sum
@@ -455,7 +420,7 @@ test "for loops" {
 
 test "error destructure" {
     try expectOutput(
-        \\const err = fn() error(2)
+        \\let err = fn() error(2)
         \\
         \\let error(y) = err()
         \\return y + 2
@@ -466,10 +431,10 @@ test "error destructure" {
 
 test "while let" {
     try expectOutput(
-        \\const getSome = fn(val) if (val != 0) val - 1
+        \\let getSome = fn(val) if val != 0 val - 1
         \\
-        \\let val = 10
-        \\while (let newVal = getSome(val))
+        \\let mut val = 10
+        \\while let newVal = getSome(val)
         \\    val = newVal
         \\return val
     ,
@@ -479,12 +444,12 @@ test "while let" {
 
 test "if let" {
     try expectOutput(
-        \\const maybeInc = fn(val)
-        \\    if (let y = val)
+        \\let maybeInc = fn(val)
+        \\    if let y = val
         \\        return y + 4
         \\    return 2
         \\
-        \\return maybeInc(()) + maybeInc(4)
+        \\return maybeInc(null) + maybeInc(4)
     ,
         \\10
     );
@@ -492,8 +457,8 @@ test "if let" {
 
 test "fibonacci" {
     try expectOutput(
-        \\const fib = fn(n)
-        \\    if (n < 2) return n
+        \\let fib = fn(n)
+        \\    if n < 2 return n
         \\    return fib(n - 1) + fib(n-2)
         \\
         \\return fib(10)
@@ -504,19 +469,28 @@ test "fibonacci" {
 
 test "const value not modified by function" {
     try expectOutput(
-        \\const x = 2
-        \\const inc = fn(n) n += 1
+        \\let x = 2
+        \\let inc = fn(mut n)
+        \\    n += 1
         \\inc(x)
         \\return x
     ,
         \\2
+    );
+    try expectOutput(
+        \\let x = [2]
+        \\let inc = fn(l) l.append(1)
+        \\inc(x)
+        \\return x
+    ,
+        \\[2]
     );
 }
 
 test "in" {
     try expectOutput(
         \\let y = [1, 2, 3]
-        \\if (not true in y)
+        \\if not true in y
         \\    y[-2] = false
         \\return y == [1, false, 3]
     ,
@@ -536,14 +510,14 @@ test "get/set" {
 
 test "mixed num and int" {
     try expectOutput(
-        \\let y = 2
+        \\let mut y = 2
         \\y /= 5
         \\return y
     ,
         \\0.4
     );
     try expectOutput(
-        \\let y = 2
+        \\let mut y = 2
         \\y **= 0.5
         \\return y
     ,
@@ -553,27 +527,28 @@ test "mixed num and int" {
 
 test "copy on assign" {
     try expectOutput(
-        \\const x = 2
-        \\let y = x
+        \\let x = 2
+        \\let mut y = x
         \\y += 2
         \\return x
     ,
         \\2
     );
     try expectOutput(
-        \\let y = 2
-        \\const inc = fn (a) a+=2
+        \\let mut y = 2
+        \\let inc = fn (mut a)
+        \\    a += 2
         \\inc(y)
         \\return y
     ,
-        \\4
+        \\2
     );
 }
 
 test "strings" {
     try expectOutput(
-        \\const a = "hello"
-        \\return if (a == "world") 2 as str else 1.5 as str
+        \\let a = "hello"
+        \\return if a == "world" 2 as str else 1.5 as str
     ,
         \\"1.5"
     );
@@ -581,8 +556,8 @@ test "strings" {
 
 test "comparison" {
     try expectOutput(
-        \\let a = 0
-        \\while (a != 1000)
+        \\let mut a = 0
+        \\while a != 1000
         \\    a += 1
         \\return a
     ,
@@ -592,9 +567,9 @@ test "comparison" {
 
 test "while loop" {
     try expectOutput(
-        \\const cond = true
-        \\while (cond)
-        \\    if (not cond)
+        \\let cond = true
+        \\while cond
+        \\    if not cond
         \\        break
         \\    else
         \\        let x = 2
@@ -607,7 +582,7 @@ test "while loop" {
 
 test "subscript" {
     try expectOutput(
-        \\const y = (1, 2)
+        \\let y = (1, 2)
         \\return y[-1]
     ,
         \\2
@@ -616,24 +591,24 @@ test "subscript" {
 
 test "assert" {
     try expectOutput(
-        \\const assert = fn (ok) if (not ok) error(false)
+        \\let assert = fn (ok) if not ok error(false)
         \\return assert(not false)
     ,
-        \\()
+        \\null
     );
 }
 
 test "functions" {
     try expectOutput(
-        \\const add = fn ((a,b)) a + b
-        \\const tuplify = fn (a,b) (a,b)
+        \\let add = fn ((a,b)) a + b
+        \\let tuplify = fn (a,b) (a,b)
         \\return add(tuplify(1, 2))
     ,
         \\3
     );
     try expectOutput(
-        \\const add = fn (a,b) a + b
-        \\const sub = fn (a,b) a - b
+        \\let add = fn (a,b) a + b
+        \\let sub = fn (a,b) a - b
         \\return sub(add(3, 4), add(1,2))
     ,
         \\4
@@ -642,9 +617,9 @@ test "functions" {
 
 test "type casting" {
     try expectOutput(
-        \\return 1 as none
+        \\return 1 as null
     ,
-        \\()
+        \\null
     );
     try expectOutput(
         \\return 1 as bool
@@ -685,9 +660,8 @@ test "type checking" {
 }
 
 test "tuple destructuring" {
-    // TODO should destructuring different sized tuples be an error?
     try expectOutput(
-        \\let (a, b, _, c) = (1, 2, 3, 4, 5)
+        \\let (a, b, _, c, _) = (1, 2, 3, 4, 5)
         \\return (a + b) * c
     ,
         \\12
@@ -704,8 +678,8 @@ test "tuple" {
 
 test "bool if" {
     try expectOutput(
-        \\const x = not false
-        \\return 3 + if (not x) 2 else if (x) 4 else 9
+        \\let x = not false
+        \\return 3 + if not x 2 else if x 4 else 9
     ,
         \\7
     );
@@ -713,7 +687,7 @@ test "bool if" {
 
 test "assignment" {
     try expectOutput(
-        \\let x = 2
+        \\let mut x = 2
         \\let y = -3
         \\x **= -y
         \\return x
@@ -794,26 +768,52 @@ const Vm = bog.Vm;
 fn expectCallOutput(source: []const u8, args: anytype, expected: []const u8) !void {
     var vm = Vm.init(std.testing.allocator, .{});
     defer vm.deinit();
-    var module: *bog.Module = undefined;
-    const res = run(&module, source, &vm) catch |e| switch (e) {
-        else => @panic("test failure"),
-        error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
-            vm.errors.render(source, std.io.getStdErr().writer()) catch {};
-            @panic("test failure");
+
+    var mod = bog.compile(vm.gc.gpa, source, "<test buf>", &vm.errors) catch |e| switch (e) {
+        else => return e,
+        error.TokenizeError, error.ParseError, error.CompileError => {
+            vm.errors.render(std.io.getStdErr().writer()) catch {};
+            return error.TestFailed;
         },
     };
-    defer module.deinit(std.testing.allocator);
+    mod.debug_info.source = "";
+    defer mod.deinit(vm.gc.gpa);
+
+    var frame = bog.Vm.Frame{
+        .mod = &mod,
+        .body = mod.main,
+        .caller_frame = null,
+        .module_frame = undefined,
+        .captures = &.{},
+    };
+    defer frame.deinit(&vm);
+    frame.module_frame = &frame;
+
+    vm.gc.stack_protect_start = @frameAddress();
+
+    var frame_val = try vm.gc.alloc();
+    frame_val.* = .{ .frame = &frame };
+
+    const res = vm.run(&frame) catch |e| switch (e) {
+        else => return e,
+        error.FatalError => {
+            vm.errors.render(std.io.getStdErr().writer()) catch {};
+            return error.TestFailed;
+        },
+    };
+
+    if (true) return error.SkipZigTest;
 
     const call_res = vm.call(res, "doTheTest", args) catch |e| switch (e) {
-        else => @panic("test failure"),
-        error.RuntimeError => {
-            vm.errors.render(source, std.io.getStdErr().writer()) catch {};
-            @panic("test failure");
+        else => return e,
+        error.FatalError => {
+            vm.errors.render(std.io.getStdErr().writer()) catch {};
+            return error.TestFailed;
         },
     };
     var out_buf = std.ArrayList(u8).init(std.testing.allocator);
     defer out_buf.deinit();
-    call_res.dump(out_buf.writer(), 2) catch @panic("test failure");
+    try call_res.dump(out_buf.writer(), 2);
     try testing.expectEqualStrings(expected, out_buf.items);
 }
 
@@ -821,28 +821,42 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
     var vm = Vm.init(std.testing.allocator, .{});
     defer vm.deinit();
     vm.addStd() catch unreachable;
-    var module: *bog.Module = undefined;
-    const res = run(&module, source, &vm) catch |e| switch (e) {
-        else => @panic("test failure"),
-        error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
-            vm.errors.render(source, std.io.getStdErr().writer()) catch {};
-            @panic("test failure");
+
+    var mod = bog.compile(vm.gc.gpa, source, "<test buf>", &vm.errors) catch |e| switch (e) {
+        else => return e,
+        error.TokenizeError, error.ParseError, error.CompileError => {
+            vm.errors.render(std.io.getStdErr().writer()) catch {};
+            return error.TestFailed;
         },
     };
-    defer module.deinit(std.testing.allocator);
+    mod.debug_info.source = "";
+    defer mod.deinit(vm.gc.gpa);
+
+    var frame = bog.Vm.Frame{
+        .mod = &mod,
+        .body = mod.main,
+        .caller_frame = null,
+        .module_frame = undefined,
+        .captures = &.{},
+    };
+    defer frame.deinit(&vm);
+    frame.module_frame = &frame;
+
+    vm.gc.stack_protect_start = @frameAddress();
+
+    var frame_val = try vm.gc.alloc();
+    frame_val.* = .{ .frame = &frame };
+
+    const res = vm.run(&frame) catch |e| switch (e) {
+        else => return e,
+        error.FatalError => {
+            vm.errors.render(std.io.getStdErr().writer()) catch {};
+            return error.TestFailed;
+        },
+    };
 
     var out_buf = std.ArrayList(u8).init(std.testing.allocator);
     defer out_buf.deinit();
-    res.dump(out_buf.writer(), 2) catch @panic("test failure");
+    try res.dump(out_buf.writer(), 2);
     try testing.expectEqualStrings(expected, out_buf.items);
-}
-
-fn run(mp: **bog.Module, source: []const u8, vm: *Vm) !*bog.Value {
-    const module = try bog.compile(std.testing.allocator, source, &vm.errors);
-    errdefer module.deinit(std.testing.allocator);
-    mp.* = module;
-
-    // TODO this should happen in vm.exec but currently that would break repl
-    vm.ip = module.entry;
-    return try vm.exec(module);
 }

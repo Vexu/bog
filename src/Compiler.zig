@@ -394,13 +394,9 @@ fn checkRedeclaration(c: *Compiler, tok: TokenIndex) !void {
         const scope = c.scopes.items[i];
         switch (scope) {
             .symbol => |sym| if (std.mem.eql(u8, sym.name, name)) {
-                try c.errors.add(
-                    try bog.Value.String.init(c.gpa, "redeclaration of '{s}'", .{name}),
-                    c.tree.source,
-                    c.tree.path,
-                    tok,
-                    .err,
-                );
+                const msg = try bog.Value.String.init(c.gpa, "redeclaration of '{s}'", .{name});
+                const starts = c.tree.tokens.items(.start);
+                try c.errors.add(msg, c.tree.source, c.tree.path, starts[tok], .err);
                 return error.CompileError;
             },
             else => {},
@@ -419,13 +415,8 @@ fn resolveGlobals(c: *Compiler) !void {
                 break;
             }
         } else {
-            try c.errors.add(
-                .{ .data = "use of undeclared identifier" },
-                c.tree.source,
-                c.tree.path,
-                unresolved.tok,
-                .err,
-            );
+            const starts = c.tree.tokens.items(.start);
+            try c.errors.add(.{ .data = "use of undeclared identifier" }, c.tree.source, c.tree.path, starts[unresolved.tok], .err);
             return error.CompileError;
         }
     }
@@ -913,6 +904,13 @@ fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     const cond_val = try c.genNode(if_expr.cond, .value);
     if (if_expr.capture) |capture| {
         const cond_ref = try c.makeRuntime(cond_val, if_expr.cond);
+        switch (c.tree.nodes.items(.id)[c.getLastNode(capture)]) {
+            .ident_expr, .mut_ident_expr, .discard_expr => {
+                const jump_null_ref = try c.addJump(.jump_if_null, cond_ref, if_expr.cond);
+                try c.unwrap_jump_buf.append(c.gpa, jump_null_ref);
+            },
+            else => {},
+        }
         try c.genTryUnwrap(capture, &.{ .ref = cond_ref });
     } else if (!cond_val.isRt()) {
         const bool_val = try cond_val.getBool(c, if_expr.cond);
@@ -1821,7 +1819,7 @@ fn genMap(c: *Compiler, node: Node.Index, res: Result) Error!Value {
             } }, maybe_ident);
         }
 
-        var value_val = try c.genNode(data[item].bin.lhs, .value);
+        var value_val = try c.genNode(data[item].bin.rhs, .value);
         const value_ref = try c.makeRuntime(value_val, data[item].bin.rhs);
         try c.list_buf.appendSlice(c.gpa, &.{ key, value_ref });
     }
@@ -1955,7 +1953,14 @@ fn genFn(c: *Compiler, node: Node.Index) Error!Value {
 
     // destructure parameters
     for (params) |param, i| {
-        try c.genLval(param, .{ .let = &.{ .ref = @intToEnum(Ref, i) } });
+        var arg_ref = @intToEnum(Ref, i);
+        switch (c.tree.nodes.items(.id)[c.getLastNode(param)]) {
+            .ident_expr, .mut_ident_expr => {
+                arg_ref = try c.addUn(.copy_un, arg_ref, param);
+            },
+            else => {},
+        }
+        try c.genLval(param, .{ .let = &.{ .ref = arg_ref } });
     }
 
     // for one liner functions return the value of the expression,
@@ -2036,10 +2041,7 @@ fn genCall(c: *Compiler, node: Node.Index) Error!Value {
 
     for (args) |arg| {
         const arg_val = try c.genNode(arg, .value);
-        const arg_ref = if (arg_val == .mut)
-            try c.addUn(.copy_un, arg_val.mut, arg)
-        else
-            try c.makeRuntime(arg_val, arg);
+        const arg_ref = try c.makeRuntime(arg_val, arg);
 
         try c.list_buf.append(c.gpa, arg_ref);
     }
@@ -2210,6 +2212,9 @@ fn genLval(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
 
 fn genLvalIdent(c: *Compiler, node: Node.Index, lval: Lval, mutable: bool) Error!void {
     const tokens = c.tree.nodes.items(.token);
+    if (mutable and lval != .let) {
+        return c.reportErr("cannot make variable mutable in assignment", node);
+    }
     switch (lval) {
         .let => |val| {
             try c.checkRedeclaration(tokens[node]);
