@@ -689,9 +689,30 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 if (arg.* != .err) return vm.fatal("expected an error");
                 res.* = try vm.gc.dupe(arg.err);
             },
-            .unwrap_tagged,
-            .unwrap_tagged_or_null,
-            => @panic("TODO"),
+            .unwrap_tagged => {
+                const res = try f.newRef(vm, ref);
+                const operand = f.val(mod.extra[data[inst].extra.extra]);
+                const str_offset = @enumToInt(mod.extra[data[inst].extra.extra + 1]);
+                const name = mod.strings[str_offset..][0..data[inst].extra.len];
+
+                if (operand.* != .tagged)
+                    return vm.fatal("expected a tagged value");
+                if (!mem.eql(u8, operand.tagged.name, name))
+                    return vm.fatal("invalid tag");
+                res.* = operand.tagged.value;
+            },
+            .unwrap_tagged_or_null => {
+                const res = try f.newRef(vm, ref);
+                const operand = f.val(mod.extra[data[inst].extra.extra]);
+                const str_offset = @enumToInt(mod.extra[data[inst].extra.extra + 1]);
+                const name = mod.strings[str_offset..][0..data[inst].extra.len];
+
+                if (operand.* == .tagged and mem.eql(u8, operand.tagged.name, name)) {
+                    res.* = operand.tagged.value;
+                } else {
+                    res.* = Value.Null;
+                }
+            },
             .check_len => {
                 const container = f.val(data[inst].bin.lhs);
                 const len = @enumToInt(data[inst].bin.rhs);
@@ -1134,38 +1155,4 @@ pub fn fatalExtra(vm: *Vm, str: Value.String) Error {
     _ = vm;
     _ = str;
     return error.RuntimeError;
-}
-
-/// Gets function `func_name` from map and calls it with `args`.
-pub fn call(vm: *Vm, val: *Value, func_name: []const u8, args: anytype) !*Value {
-    std.debug.assert(vm.call_stack.items.len == 0); // vm must be in a callable state
-    if (val.* != .map) return error.NotAMap;
-    const index = Value.string(func_name);
-    const member = val.map.get(&index) orelse
-        return error.NoSuchMember;
-
-    switch (member.*) {
-        .func => |*func| {
-            if (func.arg_count != args.len) {
-                // TODO improve this error message to tell the expected and given counts
-                return error.InvalidArgCount;
-            }
-
-            // prepare arguments
-            inline for (args) |arg, i| {
-                const loc = try vm.gc.stackRef(i);
-                loc.* = try Value.zigToBog(vm, arg);
-            }
-
-            var frame: Frame = undefined;
-            frame.this = val;
-            try vm.call_stack.append(vm.gc.gpa, frame);
-
-            vm.sp = 0;
-            vm.ip = func.offset;
-            return try vm.exec(func.module);
-        },
-        .native => return error.NativeFunctionsUnsupported, // TODO
-        else => return error.NotAFunction,
-    }
 }
