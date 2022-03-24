@@ -178,7 +178,7 @@ pub const Frame = struct {
 
     pub fn throw(f: *Frame, vm: *Vm, err: []const u8) !void {
         if (f.err_handlers.get()) |handler| {
-            const handler_operand = f.refAssert(handler.operand);
+            const handler_operand = try f.newRef(vm, handler.operand);
             handler_operand.* = try vm.errorVal(err);
             f.ip = handler.offset;
         } else {
@@ -188,7 +188,7 @@ pub const Frame = struct {
 
     pub fn throwFmt(f: *Frame, vm: *Vm, comptime err: []const u8, args: anytype) !void {
         if (f.err_handlers.get()) |handler| {
-            const handler_operand = f.refAssert(handler.operand);
+            const handler_operand = try f.newRef(vm, handler.operand);
             handler_operand.* = try vm.errorFmt(err, args);
             f.ip = handler.offset;
         } else {
@@ -894,13 +894,21 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const err_val_ref = data[inst].jump_condition.operand;
                 const offset = data[inst].jump_condition.offset;
 
+                // Clear the error value ref in case we're in a loop
+                _ = f.stack.swapRemove(@enumToInt(err_val_ref));
+
                 try f.err_handlers.push(vm.gc.gpa, .{
                     .operand = err_val_ref,
                     .offset = offset,
                 });
             },
             .pop_err_handler => {
-                f.err_handlers.pop();
+                const handler = f.err_handlers.pop();
+
+                // Jump past error handlers in case nothing was thrown
+                if (f.stack.get(@enumToInt(handler.operand)) == null) {
+                    f.ip = data[inst].jump;
+                }
             },
             .jump => {
                 f.ip = data[inst].jump;
@@ -1050,8 +1058,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     const returned = try vm.run(&new_frame);
                     if (returned.* == .err) {
                         if (f.err_handlers.get()) |handler| {
-                            const handler_operand = f.refAssert(handler.operand);
-                            handler_operand.* = returned;
+                            const handler_operand = try f.newRef(vm, handler.operand);
+                            handler_operand.* = returned.err;
                             f.ip = handler.offset;
                         }
                     }
@@ -1065,14 +1073,14 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .ret_null => return Value.Null,
             .throw => {
                 const val = f.val(data[inst].un);
-                if (val.* == .err) {
-                    if (f.err_handlers.get()) |handler| {
-                        const handler_operand = f.refAssert(handler.operand);
-                        handler_operand.* = val;
-                        f.ip = handler.offset;
-                        continue;
-                    }
+                if (f.err_handlers.get()) |handler| {
+                    const handler_operand = try f.newRef(vm, handler.operand);
+                    handler_operand.* = val;
+                    f.ip = handler.offset;
+                    continue;
                 }
+                const res = try vm.gc.alloc();
+                res.* = .{ .err = val };
                 return val;
             },
         }
@@ -1131,8 +1139,10 @@ const ErrHandlers = extern union {
         }
     }
 
-    fn pop(e: *ErrHandlers) void {
+    fn pop(e: *ErrHandlers) Handler {
+        const handler = e.get().?;
         e.short.len -= 1;
+        return handler;
     }
 
     fn get(e: ErrHandlers) ?Handler {

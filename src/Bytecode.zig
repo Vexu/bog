@@ -398,7 +398,9 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
             .build_error,
             .copy_un,
             => std.debug.print("{}\n", .{data[i].un}),
-            .jump => std.debug.print("{d}\n", .{data[i].jump}),
+            .pop_err_handler,
+            .jump,
+            => std.debug.print("{d}\n", .{data[i].jump}),
             .jump_if_true,
             .jump_if_false,
             .unwrap_error_or_jump,
@@ -427,7 +429,6 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
             .ret_null,
             .build_error_null,
             .load_this,
-            .pop_err_handler,
             => std.debug.print("\n", .{}),
         }
     }

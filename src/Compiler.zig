@@ -284,7 +284,7 @@ fn finishJump(c: *Compiler, jump_ref: Ref) void {
     const data = c.instructions.items(.data);
     const ops = c.instructions.items(.op);
     const jump_index = Bytecode.refToIndex(jump_ref);
-    if (ops[jump_index] == .jump) {
+    if (ops[jump_index] == .jump or ops[jump_index] == .pop_err_handler) {
         data[jump_index] = .{ .jump = offset };
     } else {
         data[jump_index].jump_condition.offset = offset;
@@ -725,8 +725,7 @@ fn genThrow(c: *Compiler, node: Node.Index) !void {
     const operand = data[node].un;
     const operand_val = try c.genNode(operand, .value);
     const operand_ref = try c.makeRuntime(operand_val, operand);
-    const err_ref = try c.addUn(.build_error, operand_ref, node);
-    _ = try c.addUn(.throw, err_ref, node);
+    _ = try c.addUn(.throw, operand_ref, node);
 }
 
 fn genReturn(c: *Compiler, node: Node.Index) !void {
@@ -1105,17 +1104,21 @@ fn genTry(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         },
     };
 
-    const err_ref = try c.makeRuntime(Value.@"null", node);
+    const err_ref = err_ref: {
+        // add a dummy instruction for the thrown value
+        const res_ref = Bytecode.indexToRef(c.instructions.len);
+        try c.instructions.append(c.gpa, undefined);
+        break :err_ref res_ref;
+    };
     const err_handler_inst = try c.addJump(.push_err_handler, err_ref, node);
 
     _ = try c.genNode(cond, sub_res);
 
     // no longer in try scope
-    _ = try c.addUn(.pop_err_handler, undefined, node);
     c.finishJump(err_handler_inst);
 
     // if no error jump over all catchers
-    const skip_all = try c.addJump(.unwrap_error_or_jump, err_ref, cond);
+    const skip_all = try c.addUn(.pop_err_handler, undefined, node);
 
     const scope_count = c.scopes.items.len;
     defer c.scopes.items.len = scope_count;
