@@ -52,28 +52,29 @@ test "ranges" {
     );
 }
 
-// test "ignore comments in indent blocks" {
-//     try testTransform(
-//         \\const foo = fn()
-//         \\                #quux
-//         \\#foo bar
-//         \\                #quux
-//         \\#foo bar
-//         \\                #quux
-//         \\    return 2
-//     , // TODO improve comment rendering
-//         \\const foo = fn()
-//         \\#quux
-//         \\#foo bar
-//         \\#quux
-//         \\#foo bar
-//         \\#quux
-//         \\    return 2
-//         \\
-//         \\
-//         \\
-//     );
-// }
+test "ignore comments in indent blocks" {
+    if (true) return error.SkipZigTest;
+    try testTransform(
+        \\const foo = fn()
+        \\                #quux
+        \\#foo bar
+        \\                #quux
+        \\#foo bar
+        \\                #quux
+        \\    return 2
+    , // TODO improve comment rendering
+        \\const foo = fn()
+        \\#quux
+        \\#foo bar
+        \\#quux
+        \\#foo bar
+        \\#quux
+        \\    return 2
+        \\
+        \\
+        \\
+    );
+}
 
 test "tag" {
     try testCanonical(
@@ -114,14 +115,15 @@ test "nested blocks and matches" {
     );
 }
 
-// test "comments after expression" {
-//     try testCanonical(
-//         \\a
-//         \\#foo
-//         \\#bar
-//         \\
-//     );
-// }
+test "comments after expression" {
+    if (true) return error.SkipZigTest;
+    try testCanonical(
+        \\a
+        \\#foo
+        \\#bar
+        \\
+    );
+}
 
 test "two empty lines after block" {
     try testTransform(
@@ -138,25 +140,26 @@ test "two empty lines after block" {
     );
 }
 
-// test "respect new lines" {
-//     try testCanonical(
-//         \\const foo = 1
-//         \\
-//         \\const bar = 2
-//         \\
-//     );
-//     try testTransform(
-//         \\const foo = 1
-//         \\
-//         \\
-//         \\const bar = 2
-//     ,
-//         \\const foo = 1
-//         \\
-//         \\const bar = 2
-//         \\
-//     );
-// }
+test "respect new lines" {
+    if (true) return error.SkipZigTest;
+    try testCanonical(
+        \\const foo = 1
+        \\
+        \\const bar = 2
+        \\
+    );
+    try testTransform(
+        \\const foo = 1
+        \\
+        \\
+        \\const bar = 2
+    ,
+        \\const foo = 1
+        \\
+        \\const bar = 2
+        \\
+    );
+}
 
 test "nested blocks" {
     try testCanonical(
@@ -173,43 +176,45 @@ test "nested blocks" {
     );
 }
 
-// test "preserve comment after comma" {
-//     try testTransform(
-//         \\(1, #hello world
-//         \\    2)
-//         \\
-//     ,
-//         \\(
-//         \\    1, #hello world
-//         \\    2,
-//         \\)
-//         \\
-//     );
-//     try testTransform(
-//         \\(1#hello world
-//         \\    , 2)
-//         \\
-//     ,
-//         \\(
-//         \\    1, #hello world
-//         \\    2,
-//         \\)
-//         \\
-//     );
-// }
+test "preserve comment after comma" {
+    if (true) return error.SkipZigTest;
+    try testTransform(
+        \\(1, #hello world
+        \\    2)
+        \\
+    ,
+        \\(
+        \\    1, #hello world
+        \\    2,
+        \\)
+        \\
+    );
+    try testTransform(
+        \\(1#hello world
+        \\    , 2)
+        \\
+    ,
+        \\(
+        \\    1, #hello world
+        \\    2,
+        \\)
+        \\
+    );
+}
 
-// test "preserve comments" {
-//     try testCanonical(
-//         \\#some comment
-//         \\123 +
-//         \\    #another comment
-//         \\    #third comment
-//         \\    2
-//         \\#fourth comment
-//         \\#fifth comment
-//         \\
-//     );
-// }
+test "preserve comments" {
+    if (true) return error.SkipZigTest;
+    try testCanonical(
+        \\#some comment
+        \\123 +
+        \\    #another comment
+        \\    #third comment
+        \\    2
+        \\#fourth comment
+        \\#fifth comment
+        \\
+    );
+}
 
 test "match" {
     try testCanonical(
