@@ -65,12 +65,11 @@ pub const Value = union(Type) {
             i: i64,
         } = .{ .u = 0 },
 
-        pub fn next(iter: *@This(), ctx: Vm.Context, res: *?*Value) !void {
+        pub fn next(iter: *@This(), ctx: Vm.Context, res: *?*Value) !bool {
             switch (iter.value.*) {
                 .tuple => |tuple| {
                     if (iter.i.u == tuple.len) {
-                        res.* = Value.Null;
-                        return;
+                        return false;
                     }
 
                     res.* = tuple[iter.i.u];
@@ -78,8 +77,7 @@ pub const Value = union(Type) {
                 },
                 .list => |*list| {
                     if (iter.i.u == list.items.len) {
-                        res.* = Value.Null;
-                        return;
+                        return false;
                     }
 
                     res.* = list.items[iter.i.u];
@@ -87,8 +85,7 @@ pub const Value = union(Type) {
                 },
                 .str => |*str| {
                     if (iter.i.u == str.data.len) {
-                        res.* = Value.Null;
-                        return;
+                        return false;
                     }
                     if (res.* == null)
                         res.* = try ctx.vm.gc.alloc();
@@ -105,8 +102,7 @@ pub const Value = union(Type) {
                 },
                 .map => |*map| {
                     if (iter.i.u == map.count()) {
-                        res.* = Value.Null;
-                        return;
+                        return false;
                     }
 
                     if (res.* == null)
@@ -125,8 +121,7 @@ pub const Value = union(Type) {
                 },
                 .range => {
                     if (iter.i.i >= iter.value.range.end) {
-                        res.* = Value.Null;
-                        return;
+                        return false;
                     }
                     if (res.* == null)
                         res.* = try ctx.vm.gc.alloc();
@@ -138,6 +133,7 @@ pub const Value = union(Type) {
                 },
                 else => unreachable,
             }
+            return true;
         }
     },
 
@@ -464,7 +460,7 @@ pub const Value = union(Type) {
             },
             .map => |*map| {
                 res.* = map.get(index) orelse
-                    return ctx.throw("TODO better handling undefined key");
+                    return ctx.throwFmt("no value associated with key: {}", .{index.*});
             },
             .str => |*str| return str.get(ctx, index, res),
             .iterator => unreachable,

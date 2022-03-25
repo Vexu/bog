@@ -36,10 +36,12 @@ pub const sqrt1_2 = math.sqrt1_2;
 
 pub fn ln(ctx: Vm.Context, val: *Value) !*Value {
     switch (val.*) {
-        // TODO fix zig std
-        // .int => |i| Value{
-        //     .int = std.math.ln(i),
-        // },
+        .int => |i| {
+            if (i <= 0) return ctx.throw("ln is undefined for numbers less than zero");
+            const res = try ctx.vm.gc.alloc();
+            res.* = Value{ .int = std.math.lossyCast(i64, std.math.floor(std.math.ln(@intToFloat(f64, i)))) };
+            return res;
+        },
         .num => |n| {
             const res = try ctx.vm.gc.alloc();
             res.* = Value{ .num = std.math.ln(n) };

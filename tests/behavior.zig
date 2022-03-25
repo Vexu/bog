@@ -1,3 +1,13 @@
+test "nested for loop" {
+    try expectOutput(
+        \\let mut i = 0
+        \\for 1:5
+        \\    for 1:5
+        \\        i += 1
+        \\return i
+    , "16");
+}
+
 test "range destructuring" {
     try expectOutput(
         \\let (start:end:step) = 1:2:3
@@ -33,7 +43,7 @@ test "std.gc" {
         \\for 0:5 makeGarbage()
         \\return collect()
     ,
-        \\39
+        \\38
     );
 }
 

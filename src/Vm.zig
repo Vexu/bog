@@ -961,12 +961,12 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const res = try f.newRef(vm, ref);
                 const arg = f.val(data[inst].jump_condition.operand);
 
-                arg.iterator.next(f.ctx(vm), res) catch |err| switch (err) {
+                const end = arg.iterator.next(f.ctx(vm), res) catch |err| switch (err) {
                     error.Throw => continue,
                     else => |e| return e,
                 };
 
-                if (res.*.?.* == .@"null") {
+                if (!end) {
                     f.ip = data[inst].jump_condition.offset;
                 }
             },
