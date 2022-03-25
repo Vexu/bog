@@ -74,7 +74,8 @@ pub fn build(b: *Builder) void {
 
 fn addTests(b: *Builder, examples_step: *std.build.Step, tests: anytype) void {
     const tests_step = b.step("test", "Run all tests");
-    tests_step.dependOn(examples_step);
+    // tests_step.dependOn(examples_step);
+    _ = examples_step;
     inline for (tests) |t| {
         var test_step = b.addTest(t);
         test_step.addPackagePath("bog", "src/bog.zig");

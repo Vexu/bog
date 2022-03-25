@@ -90,7 +90,6 @@ const Page = struct {
 const Gc = @This();
 
 pages: std.ArrayListUnmanaged(*Page) = .{},
-stack: std.ArrayListUnmanaged(?*Value) = .{},
 gpa: Allocator,
 page_limit: u32,
 stack_protect_start: usize = 0,
@@ -102,9 +101,9 @@ const PageAndIndex = struct {
 
 fn findInPage(gc: *Gc, value: *const Value) ?PageAndIndex {
     // These will never be allocated
-    if (value == &Value.None or
-        value == &Value.True or
-        value == &Value.False) return null;
+    if (value == Value.Null or
+        value == Value.True or
+        value == Value.False) return null;
 
     for (gc.pages.items) |page| {
         // is the value before this page
@@ -158,9 +157,18 @@ fn markGray(gc: *Gc) void {
                         gc.markVal(err);
                     },
                     .func => |func| {
-                        for (func.captures) |val| {
+                        for (func.captures[0..func.info.captures]) |val| {
                             gc.markVal(val);
                         }
+                    },
+                    .frame => |frame| {
+                        for (frame.stack.values()) |val| {
+                            gc.markVal(val);
+                        }
+                        for (frame.captures) |val| {
+                            gc.markVal(val);
+                        }
+                        gc.markVal(frame.this);
                     },
                     .iterator => |iter| {
                         gc.markVal(iter.value);
@@ -169,7 +177,7 @@ fn markGray(gc: *Gc) void {
                         gc.markVal(tag.value);
                     },
                     // These values don't reference any other values
-                    .native, .str, .int, .num, .range, .none, .bool => {},
+                    .native, .str, .int, .num, .range, .@"null", .bool => {},
                 }
             }
         }
@@ -179,12 +187,6 @@ fn markGray(gc: *Gc) void {
 /// Collect all unreachable values.
 pub fn collect(gc: *Gc) usize {
     // mark roots as reachable
-    for (gc.stack.items) |val| {
-        // beautiful
-        const loc = gc.findInPage(val orelse continue) orelse continue;
-
-        loc.page.meta[loc.index] = .gray;
-    }
     if (gc.stack_protect_start != 0) {
         var i = @intToPtr([*]*Value, gc.stack_protect_start);
         while (@ptrToInt(i) > @frameAddress()) : (i -= 1) {
@@ -219,7 +221,6 @@ pub fn init(allocator: Allocator, page_limit: u32) Gc {
 pub fn deinit(gc: *Gc) void {
     for (gc.pages.items) |page| page.deinit(gc);
     gc.pages.deinit(gc.gpa);
-    gc.stack.deinit(gc.gpa);
 }
 
 /// Allocate a new Value on the heap.
@@ -259,8 +260,8 @@ pub fn alloc(gc: *Gc) !*Value {
 pub fn dupe(gc: *Gc, val: *const Value) !*Value {
     // no need to copy always memoized values
     switch (val.*) {
-        .none => return &Value.None,
-        .bool => |b| return if (b) &Value.True else &Value.False,
+        .@"null" => return Value.Null,
+        .bool => |b| return if (b) Value.True else Value.False,
         else => {},
     }
 
@@ -286,98 +287,6 @@ pub fn dupe(gc: *Gc, val: *const Value) !*Value {
         else => new.* = val.*,
     }
     return new;
-}
-
-/// Get value from stack at `index`.
-/// Returns `error.NullPtrDeref` if stack has no value at `index`.
-pub fn stackGet(gc: *Gc, index: usize) !*Value {
-    if (index >= gc.stack.items.len)
-        return error.NullPtrDeref;
-
-    return gc.stack.items[index] orelse
-        error.NullPtrDeref;
-}
-
-/// Only valid until next `stackAlloc` call.
-pub fn stackRef(gc: *Gc, index: usize) !*?*Value {
-    try gc.stack.ensureTotalCapacity(gc.gpa, index + 1);
-    while (index >= gc.stack.items.len) {
-        gc.stack.appendAssumeCapacity(null);
-    }
-    return &gc.stack.items[index];
-}
-
-/// Allocates new value on stack, invalidates all references to stack values.
-pub fn stackAlloc(gc: *Gc, index: usize) !*Value {
-    const val = try gc.stackRef(index);
-    if (val.*) |some| switch (some.*) {
-        .int, .num, .native, .tagged, .str => {},
-        else => val.* = try gc.alloc(),
-    } else {
-        val.* = try gc.alloc();
-    }
-    return val.*.?;
-}
-
-/// Shrinks stack to `size`, doesn't free any memory.
-pub fn stackShrink(gc: *Gc, size: usize) void {
-    if (size > gc.stack.items.len) return;
-    gc.stack.items.len = size;
-}
-
-test "basic collect" {
-    var gc = Gc.init(std.testing.allocator, 1);
-    defer gc.deinit();
-
-    var tuple = try gc.stackAlloc(0);
-    tuple.* = .{ .tuple = try gc.gpa.alloc(*Value, 32) };
-
-    for (tuple.tuple) |*e, i| {
-        const val = try gc.alloc();
-        val.* = .{ .int = @intCast(i64, i) };
-        e.* = val;
-    }
-
-    var i: i64 = 0;
-    while (i < (1024 - 32 - 1 - 2)) : (i += 1) {
-        const val = try gc.alloc();
-        val.* = .{ .int = @intCast(i64, i) };
-    }
-
-    {
-        // self referencing values should be collected
-        const a = try gc.alloc();
-        const b = try gc.alloc();
-        a.* = .{ .err = b };
-        b.* = .{ .err = a };
-    }
-
-    try expect(gc.pages.items[0].free == 1024);
-    try expect(gc.collect() == 1024 - 32 - 1);
-    try expect(gc.pages.items[0].free == 33);
-}
-
-test "major collection" {
-    var gc = Gc.init(std.testing.allocator, 2);
-    defer gc.deinit();
-
-    // ensure we allocate at least 2 pages.
-    const alloc_count = Page.val_count + Page.val_count / 2;
-
-    // create a looped chain of values
-    var i: i64 = 0;
-    var first: *Value = try gc.stackAlloc(0);
-    var prev: *Value = first;
-    while (i < alloc_count) : (i += 1) {
-        const val = try gc.alloc();
-        prev.* = .{ .err = val };
-        prev = val;
-        val.* = .{ .int = 1 };
-    }
-    prev.* = .{ .err = first };
-
-    gc.stack.items.len = 0;
-    try expect(gc.collect() == alloc_count + 1);
 }
 
 test "stack protect" {

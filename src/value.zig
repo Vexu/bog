@@ -3,11 +3,9 @@ const mem = std.mem;
 const Allocator = mem.Allocator;
 const bog = @import("bog.zig");
 const Vm = bog.Vm;
-const Module = bog.Module;
-const util = @import("util.zig");
 
 pub const Type = enum(u8) {
-    none = 0,
+    @"null",
     int,
     num,
     bool,
@@ -20,12 +18,14 @@ pub const Type = enum(u8) {
     func,
     tagged,
 
+    /// A called function during execution.
+    frame,
+
     /// pseudo type user should not have access to via valid bytecode
     iterator,
 
     /// native being separate from .func is an implementation detail
     native,
-    _,
 };
 
 pub const Value = union(Type) {
@@ -42,15 +42,17 @@ pub const Value = union(Type) {
     },
     str: String,
     func: struct {
-        /// offset to the functions first instruction
-        offset: u32,
-        arg_count: u8,
+        info: bog.Bytecode.Inst.Data.FnInfo,
+        body_len: u32,
+        /// `len` broken into body_len to save space
+        body: [*]const bog.Bytecode.Ref,
+        /// `len` stored in `info`
+        captures: [*]*Value,
 
         /// module in which this function exists
-        module: *Module,
-
-        captures: []*Value,
+        module: *bog.Bytecode,
     },
+    frame: *Vm.Frame,
     native: Native,
     tagged: struct {
         name: []const u8,
@@ -63,12 +65,11 @@ pub const Value = union(Type) {
             i: i64,
         } = .{ .u = 0 },
 
-        pub fn next(iter: *@This(), vm: *Vm, res: *?*Value) !void {
+        pub fn next(iter: *@This(), ctx: Vm.Context, res: *?*Value) !bool {
             switch (iter.value.*) {
                 .tuple => |tuple| {
                     if (iter.i.u == tuple.len) {
-                        res.* = &Value.None;
-                        return;
+                        return false;
                     }
 
                     res.* = tuple[iter.i.u];
@@ -76,8 +77,7 @@ pub const Value = union(Type) {
                 },
                 .list => |*list| {
                     if (iter.i.u == list.items.len) {
-                        res.* = &Value.None;
-                        return;
+                        return false;
                     }
 
                     res.* = list.items[iter.i.u];
@@ -85,14 +85,13 @@ pub const Value = union(Type) {
                 },
                 .str => |*str| {
                     if (iter.i.u == str.data.len) {
-                        res.* = &Value.None;
-                        return;
+                        return false;
                     }
                     if (res.* == null)
-                        res.* = try vm.gc.alloc();
+                        res.* = try ctx.vm.gc.alloc();
 
                     const cp_len = std.unicode.utf8ByteSequenceLength(str.data[iter.i.u]) catch
-                        return vm.fatal("invalid utf-8 sequence");
+                        return ctx.throw("invalid utf-8 sequence");
                     iter.i.u += cp_len;
 
                     res.*.?.* = .{
@@ -103,14 +102,13 @@ pub const Value = union(Type) {
                 },
                 .map => |*map| {
                     if (iter.i.u == map.count()) {
-                        res.* = &Value.None;
-                        return;
+                        return false;
                     }
 
                     if (res.* == null)
-                        res.* = try vm.gc.alloc();
+                        res.* = try ctx.vm.gc.alloc();
                     if (iter.i.u == 0) {
-                        res.*.?.* = .{ .tuple = try vm.gc.gpa.alloc(*Value, 2) };
+                        res.*.?.* = .{ .tuple = try ctx.vm.gc.gpa.alloc(*Value, 2) };
                     }
                     // const e = &map.entries.items[iter.i.u];
                     const e_key = &map.keys()[iter.i.u].*;
@@ -123,11 +121,10 @@ pub const Value = union(Type) {
                 },
                 .range => {
                     if (iter.i.i >= iter.value.range.end) {
-                        res.* = &Value.None;
-                        return;
+                        return false;
                     }
                     if (res.* == null)
-                        res.* = try vm.gc.alloc();
+                        res.* = try ctx.vm.gc.alloc();
 
                     res.*.?.* = .{
                         .int = iter.i.i,
@@ -136,12 +133,13 @@ pub const Value = union(Type) {
                 },
                 else => unreachable,
             }
+            return true;
         }
     },
 
     /// always memoized
     bool: bool,
-    none,
+    @"null",
 
     pub const String = @import("String.zig");
 
@@ -151,8 +149,9 @@ pub const Value = union(Type) {
             return Value.hash(v);
         }
 
-        pub fn eql(self: @This(), a: *const Value, b: *const Value) bool {
+        pub fn eql(self: @This(), a: *const Value, b: *const Value, b_index: usize) bool {
             _ = self;
+            _ = b_index;
             return Value.eql(a, b);
         }
     };
@@ -161,12 +160,27 @@ pub const Value = union(Type) {
     pub const List = std.ArrayListUnmanaged(*Value);
     pub const Native = struct {
         arg_count: u8,
-        func: fn (*Vm, []*Value) Vm.Error!*Value,
+        func: fn (Vm.Context, []const bog.Bytecode.Ref) NativeError!*Value,
     };
+    pub const NativeError = Vm.Error || error{Throw};
 
-    pub var None = Value{ .none = {} };
-    pub var True = Value{ .bool = true };
-    pub var False = Value{ .bool = false };
+    /// Makes a distinct type which can be used as the parameter of a native function
+    /// to easily get the value of `this`.
+    pub fn This(comptime T: type) type {
+        return struct {
+            t: T,
+
+            const __bog_This_T = T;
+        };
+    }
+
+    var null_base = Value{ .@"null" = {} };
+    var true_base = Value{ .bool = true };
+    var false_base = Value{ .bool = false };
+
+    pub const Null = &null_base;
+    pub const True = &true_base;
+    pub const False = &false_base;
 
     pub fn string(data: anytype) Value {
         return switch (@TypeOf(data)) {
@@ -188,13 +202,14 @@ pub const Value = union(Type) {
     /// Does not free values recursively.
     pub fn deinit(value: *Value, allocator: Allocator) void {
         switch (value.*) {
-            .bool, .none => return,
+            .bool, .@"null" => return,
+            .frame => {}, // frames are managed by the VM
             .int, .num, .native, .tagged, .range, .iterator, .err => {},
             .tuple => |t| allocator.free(t),
             .map => |*m| m.deinit(allocator),
             .list => |*l| l.deinit(allocator),
             .str => |*s| s.deinit(allocator),
-            .func => |*f| allocator.free(f.captures),
+            .func => |*f| allocator.free(f.captures[0..f.info.captures]),
         }
         value.* = undefined;
     }
@@ -207,7 +222,8 @@ pub const Value = union(Type) {
         autoHash(&hasher, @as(Type, key.*));
         switch (key.*) {
             .iterator => unreachable,
-            .none => {},
+            .frame => autoHash(&hasher, key.frame),
+            .@"null" => {},
             .int => |int| autoHash(&hasher, int),
             .num => {},
             .bool => |b| autoHash(&hasher, b),
@@ -233,8 +249,8 @@ pub const Value = union(Type) {
                 autoHash(&hasher, range.step);
             },
             .func => |*func| {
-                autoHash(&hasher, func.offset);
-                autoHash(&hasher, func.arg_count);
+                autoHash(&hasher, func.body);
+                autoHash(&hasher, func.info);
                 autoHash(&hasher, func.module);
             },
             .native => |*func| {
@@ -265,7 +281,8 @@ pub const Value = union(Type) {
         }
         return switch (a.*) {
             .iterator, .int, .num => unreachable,
-            .none => true,
+            .frame => a.frame == b.frame,
+            .@"null" => true,
             .bool => |bool_val| bool_val == b.bool,
             .str => |s| s.eql(b.str),
             .tuple => |t| {
@@ -291,9 +308,8 @@ pub const Value = union(Type) {
                     r.step == b.range.step;
             },
             .func => |*f| {
-                return f.offset == b.func.offset and
-                    f.arg_count == b.func.arg_count and
-                    f.module == b.func.module;
+                const b_f = b.func;
+                return f.module == b_f.module and f.body == b_f.body;
             },
             .native => |*n| n.func == b.native.func,
             .tagged => |*t| {
@@ -310,7 +326,7 @@ pub const Value = union(Type) {
             .int => |i| try writer.print("{}", .{i}),
             .num => |n| try writer.print("{d}", .{n}),
             .bool => |b| try writer.writeAll(if (b) "true" else "false"),
-            .none => try writer.writeAll("()"),
+            .@"null" => try writer.writeAll("null"),
             .range => |*r| {
                 try writer.print("{}:{}:{}", .{ r.start, r.end, r.step });
             },
@@ -337,7 +353,7 @@ pub const Value = union(Type) {
                         if (i != 0)
                             try writer.writeAll(", ");
                         try entry.key_ptr.*.dump(writer, level - 1);
-                        try writer.writeAll(": ");
+                        try writer.writeAll(" = ");
                         try entry.value_ptr.*.dump(writer, level - 1);
                     }
                     try writer.writeByte('}');
@@ -366,7 +382,10 @@ pub const Value = union(Type) {
             },
             .str => |s| try s.dump(writer),
             .func => |*f| {
-                try writer.print("fn({})@0x{X}[{}]", .{ f.arg_count, f.offset, f.captures.len });
+                try writer.print("fn({})@0x{X}[{}]", .{ f.info.args, f.body[0], f.info.captures });
+            },
+            .frame => |f| {
+                try writer.print("frame@x{X}", .{f.body[0]});
             },
             .native => |*n| {
                 try writer.print("native({})@0x{}", .{ n.arg_count, @ptrToInt(n.func) });
@@ -383,7 +402,7 @@ pub const Value = union(Type) {
     }
 
     /// Returns value in `container` at `index`.
-    pub fn get(container: *const Value, vm: *Vm, index: *const Value, res: *?*Value) Vm.Error!void {
+    pub fn get(container: *const Value, ctx: Vm.Context, index: *const Value, res: *?*Value) NativeError!void {
         switch (container.*) {
             .tuple => |tuple| switch (index.*) {
                 .int => {
@@ -391,23 +410,23 @@ pub const Value = union(Type) {
                     if (i < 0)
                         i += @intCast(i64, tuple.len);
                     if (i < 0 or i >= tuple.len)
-                        return vm.fatal("index out of bounds");
+                        return ctx.throw("index out of bounds");
 
                     res.* = tuple[@intCast(u32, i)];
                 },
-                .range => return vm.fatal("TODO get with ranges"),
+                .range => return ctx.frame.fatal(ctx.vm, "TODO get with ranges"),
                 .str => |*s| {
                     if (res.* == null) {
-                        res.* = try vm.gc.alloc();
+                        res.* = try ctx.vm.gc.alloc();
                     }
 
                     if (mem.eql(u8, s.data, "len")) {
                         res.*.?.* = .{ .int = @intCast(i64, tuple.len) };
                     } else {
-                        return vm.fatal("no such property");
+                        return ctx.throw("no such property");
                     }
                 },
-                else => return vm.fatal("invalid index type"),
+                else => return ctx.throw("invalid index type"),
             },
             .list => |*list| switch (index.*) {
                 .int => {
@@ -415,42 +434,40 @@ pub const Value = union(Type) {
                     if (i < 0)
                         i += @intCast(i64, list.items.len);
                     if (i < 0 or i >= list.items.len)
-                        return vm.fatal("index out of bounds");
+                        return ctx.throw("index out of bounds");
 
                     res.* = list.items[@intCast(u32, i)];
                 },
-                .range => return vm.fatal("TODO get with ranges"),
+                .range => return ctx.frame.fatal(ctx.vm, "TODO get with ranges"),
                 .str => |*s| {
                     if (res.* == null) {
-                        res.* = try vm.gc.alloc();
+                        res.* = try ctx.vm.gc.alloc();
                     }
 
                     if (mem.eql(u8, s.data, "len")) {
                         res.*.?.* = .{ .int = @intCast(i64, list.items.len) };
                     } else if (mem.eql(u8, s.data, "append")) {
-                        res.* = try zigToBog(vm, struct {
-                            fn append(_vm: *Vm, val: *Value) !void {
-                                if (_vm.last_get.* != .list)
-                                    return _vm.fatal("expected list");
-                                try _vm.last_get.list.append(_vm.gc.gpa, try _vm.gc.dupe(val));
+                        res.* = try zigToBog(ctx.vm, struct {
+                            fn append(_list: This(*List), _ctx: Vm.Context, val: *Value) !void {
+                                try _list.t.append(_ctx.vm.gc.gpa, val);
                             }
                         }.append);
                     } else {
-                        return vm.fatal("no such property");
+                        return ctx.throw("no such property");
                     }
                 },
-                else => return vm.fatal("invalid index type"),
+                else => return ctx.throw("invalid index type"),
             },
             .map => |*map| {
                 res.* = map.get(index) orelse
-                    return vm.fatal("TODO better handling undefined key");
+                    return ctx.throwFmt("no value associated with key: {}", .{index.*});
             },
-            .str => |*str| return str.get(vm, index, res),
+            .str => |*str| return str.get(ctx, index, res),
             .iterator => unreachable,
             .range => |*r| switch (index.*) {
                 .str => |*s| {
                     if (res.* == null) {
-                        res.* = try vm.gc.alloc();
+                        res.* = try ctx.vm.gc.alloc();
                     }
 
                     if (mem.eql(u8, s.data, "start")) {
@@ -460,53 +477,53 @@ pub const Value = union(Type) {
                     } else if (mem.eql(u8, s.data, "step")) {
                         res.*.?.* = .{ .int = r.step };
                     } else {
-                        return vm.fatal("no such property");
+                        return ctx.throw("no such property");
                     }
                 },
-                else => return vm.fatal("invalid index type"),
+                else => return ctx.throw("invalid index type"),
             },
-            else => return vm.fatal("invalid subscript type"),
+            else => return ctx.throw("invalid subscript type"),
         }
     }
 
     /// Sets index of container to value. Does a shallow copy if value stored.
-    pub fn set(container: *Value, vm: *Vm, index: *const Value, new_val: *const Value) Vm.Error!void {
+    pub fn set(container: *Value, ctx: Vm.Context, index: *const Value, new_val: *Value) NativeError!void {
         switch (container.*) {
             .tuple => |tuple| if (index.* == .int) {
                 var i = index.int;
                 if (i < 0)
                     i += @intCast(i64, tuple.len);
                 if (i < 0 or i >= tuple.len)
-                    return vm.fatal("index out of bounds");
+                    return ctx.throw("index out of bounds");
 
-                tuple[@intCast(u32, i)] = try vm.gc.dupe(new_val);
+                tuple[@intCast(u32, i)] = new_val;
             } else {
-                return vm.fatal("TODO set with ranges");
+                return ctx.frame.fatal(ctx.vm, "TODO set with ranges");
             },
             .map => |*map| {
-                _ = try map.put(vm.gc.gpa, try vm.gc.dupe(index), try vm.gc.dupe(new_val));
+                _ = try map.put(ctx.vm.gc.gpa, try ctx.vm.gc.dupe(index), new_val);
             },
             .list => |*list| if (index.* == .int) {
                 var i = index.int;
                 if (i < 0)
                     i += @intCast(i64, list.items.len);
                 if (i < 0 or i >= list.items.len)
-                    return vm.fatal("index out of bounds");
+                    return ctx.throw("index out of bounds");
 
-                list.items[@intCast(u32, i)] = try vm.gc.dupe(new_val);
+                list.items[@intCast(u32, i)] = new_val;
             } else {
-                return vm.fatal("TODO set with ranges");
+                return ctx.frame.fatal(ctx.vm, "TODO set with ranges");
             },
-            .str => |*str| try str.set(vm, index, new_val),
+            .str => |*str| try str.set(ctx, index, new_val),
             .iterator => unreachable,
-            else => return vm.fatal("invalid subscript type"),
+            else => return ctx.throw("invalid subscript type"),
         }
     }
 
     /// `type_id` must be valid and cannot be .err, .range, .func or .native
-    pub fn as(val: *Value, vm: *Vm, type_id: Type) Vm.Error!*Value {
-        if (type_id == .none) {
-            return &Value.None;
+    pub fn as(val: *Value, vm: *Vm, type_id: Type) NativeError!*Value {
+        if (type_id == .@"null") {
+            return Value.Null;
         }
         if (val.* == type_id) {
             return val;
@@ -525,7 +542,7 @@ pub const Value = union(Type) {
                 else => return vm.errorFmt("cannot cast {s} to bool", .{@tagName(val.*)}),
             };
 
-            return if (bool_res) &Value.True else &Value.False;
+            return if (bool_res) Value.True else Value.False;
         } else if (type_id == .str) {
             return String.from(val, vm);
         }
@@ -535,7 +552,7 @@ pub const Value = union(Type) {
             .int => .{
                 .int = switch (val.*) {
                     .int => unreachable,
-                    .num => |num| @floatToInt(i64, num),
+                    .num => |num| std.math.lossyCast(i64, num),
                     .bool => |b| @boolToInt(b),
                     .str => unreachable,
                     else => return vm.errorFmt("cannot cast {s} to int", .{@tagName(val.*)}),
@@ -550,11 +567,11 @@ pub const Value = union(Type) {
                     else => return vm.errorFmt("cannot cast {s} to num", .{@tagName(val.*)}),
                 },
             },
-            .str, .bool, .none => unreachable,
+            .str, .bool, .@"null" => unreachable,
             .tuple,
             .map,
             .list,
-            => return vm.fatal("TODO more casts"),
+            => return vm.errorVal("TODO more casts"),
             else => unreachable,
         };
         return new_val;
@@ -595,18 +612,18 @@ pub const Value = union(Type) {
         }
     }
 
-    pub fn iterator(val: *const Value, vm: *Vm) Vm.Error!*Value {
+    pub fn iterator(val: *const Value, ctx: Vm.Context) NativeError!*Value {
         var start: ?i64 = null;
         switch (val.*) {
             .range => |*r| start = r.start,
             .str, .tuple, .list, .map => {},
             .iterator => unreachable,
-            else => return vm.errorFmt("cannot iterate {s}", .{@tagName(val.*)}),
+            else => return ctx.throwFmt("cannot iterate {s}", .{@tagName(val.*)}),
         }
-        const iter = try vm.gc.alloc();
+        const iter = try ctx.vm.gc.alloc();
         iter.* = .{
             .iterator = .{
-                .value = try vm.gc.dupe(val),
+                .value = try ctx.vm.gc.dupe(val),
             },
         };
         if (start) |some| iter.iterator.i.i = some;
@@ -614,14 +631,14 @@ pub const Value = union(Type) {
     }
 
     /// Converts Zig value to Bog value. Allocates copy in the gc.
-    pub fn zigToBog(vm: *Vm, val: anytype) Vm.Error!*Value {
+    pub fn zigToBog(vm: *Vm, val: anytype) error{OutOfMemory}!*Value {
         if (comptime std.meta.trait.hasFn("intoBog")(@TypeOf(val))) {
             return try val.intoBog(vm);
         }
 
         switch (@TypeOf(val)) {
-            void => return &Value.None,
-            bool => return if (val) &Value.True else &Value.False,
+            void => return Value.Null,
+            bool => return if (val) Value.True else Value.False,
             *Value => return val,
             Value => {
                 const ret = try vm.gc.alloc();
@@ -707,10 +724,6 @@ pub const Value = union(Type) {
                 .ErrorUnion => if (val) |some| {
                     return zigToBog(vm, some);
                 } else |e| {
-                    // capture runtime errors
-                    if (@as(anyerror, e) == error.RuntimeError)
-                        return error.RuntimeError;
-
                     // wrap error string
                     const str = try vm.gc.alloc();
                     str.* = Value.string(@errorName(e));
@@ -723,7 +736,7 @@ pub const Value = union(Type) {
                     tag.* = .{
                         .tagged = .{
                             .name = @tagName(val),
-                            .value = &None,
+                            .value = &Null,
                         },
                     };
                     return tag;
@@ -731,7 +744,7 @@ pub const Value = union(Type) {
                 .Optional => if (val) |some| {
                     return zigToBog(vm, some);
                 } else {
-                    return &Value.None;
+                    return Value.Null;
                 },
                 else => @compileError("unsupported type: " ++ @typeName(@TypeOf(val))),
             },
@@ -740,77 +753,80 @@ pub const Value = union(Type) {
 
     /// Converts Bog value to Zig value. Returned string is invalidated
     /// on next garbage collection.
-    pub fn bogToZig(val: *Value, comptime T: type, vm: *Vm) Vm.Error!T {
+    pub fn bogToZig(val: *Value, comptime T: type, ctx: Vm.Context) NativeError!T {
         if (comptime std.meta.trait.hasFn("fromBog")(T)) {
-            return try T.fromBog(val, vm);
+            return try T.fromBog(val, ctx);
         }
 
         return switch (T) {
             void => {
-                if (val.* != .none)
-                    return vm.fatal("expected none");
+                if (val.* != .@"null")
+                    return ctx.throw("expected a null");
             },
             bool => {
                 if (val.* != .bool)
-                    return vm.fatal("expected bool");
+                    return ctx.throw("expected a bool");
                 return val.bool;
             },
             []const u8 => {
                 if (val.* != .str)
-                    return vm.fatal("expected string");
+                    return ctx.throw("expected a string");
                 return val.str.data;
             },
             *Map, *const Map => {
                 if (val.* != .map)
-                    return vm.fatal("expected map");
+                    return ctx.throw("expected a map");
                 return &val.map;
             },
-            *Vm => vm,
+            *List, *const List => {
+                if (val.* != .list)
+                    return ctx.throw("expected a list");
+                return &val.list;
+            },
             *Value, *const Value => val,
-            Value => return val.*,
-            String => {
+            *String, *const String => {
                 if (val.* != .str)
-                    return vm.fatal("expected string");
-                return val.str;
+                    return ctx.throw("expected a string");
+                return &val.str;
             },
             []*Value, []const *Value, []*const Value, []const *const Value => {
                 switch (val.*) {
                     .tuple => |t| return t,
                     .list => |*l| return l.items,
-                    else => return vm.fatal("expected a list or a tuple"),
+                    else => return ctx.throw("expected a list or a tuple"),
                 }
             },
             else => switch (@typeInfo(T)) {
                 .Int => if (val.* == .int) blk: {
                     if (val.int < std.math.minInt(T) or val.int > std.math.maxInt(T))
-                        return vm.fatal("cannot fit int in desired type");
+                        return ctx.throw("cannot fit int in desired type");
                     break :blk @intCast(T, val.int);
                 } else if (val.* == .num)
-                    @floatToInt(T, val.num)
+                    std.math.lossyCast(T, val.num)
                 else
-                    return vm.fatal("expected int"),
+                    return ctx.throw("expected int"),
                 .Float => |info| switch (info.bits) {
                     32 => if (val.* == .num)
                         @floatCast(f32, val.num)
                     else if (val.* == .int)
                         @intToFloat(f32, val.int)
                     else
-                        return vm.fatal("expected num"),
+                        return ctx.throw("expected num"),
                     64 => if (val.* == .num)
                         val.num
                     else if (val.* == .int)
                         @intToFloat(f64, val.int)
                     else
-                        return vm.fatal("expected num"),
+                        return ctx.throw("expected num"),
                     else => @compileError("unsupported float"),
                 },
                 .Enum => {
                     if (val.* != .tagged)
-                        return vm.fatal("expected tag");
+                        return ctx.throw("expected tag");
                     const e = std.meta.stringToEnum(T, val.tagged.name) orelse
-                        return vm.fatal("no value by such name");
-                    if (val.tagged.value.* != .none)
-                        return vm.fatal("expected no value");
+                        return ctx.throw("no value by such name");
+                    if (val.tagged.value.* != .@"null")
+                        return ctx.throw("expected no value");
                     return e;
                 },
                 else => @compileError("unsupported type: " ++ @typeName(T)),
@@ -818,9 +834,9 @@ pub const Value = union(Type) {
         };
     }
 
-    pub fn jsonStringify(val: Value, options: std.json.StringifyOptions, writer: anytype) @TypeOf(writer).Error!void {
-        switch (val) {
-            .none => try writer.writeAll("null"),
+    pub fn jsonStringify(val: *const Value, options: std.json.StringifyOptions, writer: anytype) @TypeOf(writer).Error!void {
+        switch (val.*) {
+            .@"null" => try writer.writeAll("null"),
             .tuple => |t| {
                 try writer.writeByte('[');
                 for (t) |e, i| {
@@ -861,6 +877,7 @@ pub const Value = union(Type) {
             },
             .native,
             .func,
+            .frame,
             .range,
             .err,
             .tagged,
@@ -876,8 +893,7 @@ pub const Value = union(Type) {
 
 fn wrapZigFunc(func: anytype) Value.Native {
     const Fn = @typeInfo(@TypeOf(func)).Fn;
-    if (Fn.is_generic or Fn.is_var_args)
-        @compileError("unsupported function");
+    if (Fn.is_generic) @compileError("cannot wrap a generic function");
 
     @setEvalBranchQuota(Fn.args.len * 1000);
 
@@ -885,30 +901,61 @@ fn wrapZigFunc(func: anytype) Value.Native {
         // cannot directly use `func` so declare a pointer to it
         var _func: @TypeOf(func) = undefined;
 
-        fn native(vm: *Vm, bog_args: []*Value) Vm.Error!*Value {
+        fn native(ctx: Vm.Context, bog_args: []const bog.Bytecode.Ref) Value.NativeError!*Value {
             var args: std.meta.ArgsTuple(@TypeOf(_func)) = undefined;
 
             comptime var bog_arg_i: u8 = 0;
+            comptime var vm_passed = false;
+            comptime var this_passed = false;
             inline for (Fn.args) |arg, i| {
-                if (arg.arg_type.? == *Vm) {
-                    args[i] = vm;
+                const ArgT = arg.arg_type.?;
+                if (ArgT == Vm.Context) {
+                    if (vm_passed) @compileError("function takes more than one Vm.Context");
+                    // if (i == 1 and !this_passed)
+                    //     @compileError("Vm.Context must come after Value.This")
+                    // else if (i != 0)
+                    //     @compileError("Vm.Context must be first or second parameter");
+
+                    args[i] = ctx;
+                    vm_passed = true;
+                } else if (@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T")) {
+                    if (i != 0) @compileError("Value.This must be the first parameter");
+                    args[i] = ArgT{ .t = try ctx.this.bogToZig(ArgT.__bog_This_T, ctx) };
+                    this_passed = true;
                 } else {
-                    args[i] = try bog_args[bog_arg_i].bogToZig(arg.arg_type.?, vm);
+                    if (bog_arg_i > bog.Bytecode.max_params)
+                        @compileError("function takes too many arguments");
+                    const val = ctx.frame.val(bog_args[bog_arg_i]);
+                    args[i] = try val.bogToZig(ArgT, ctx);
                     bog_arg_i += 1;
                 }
             }
-            return Value.zigToBog(vm, @call(.{}, _func, args));
+            const res = @call(.{}, _func, args);
+            switch (@typeInfo(@TypeOf(res))) {
+                .ErrorSet => switch (@as(anyerror, res)) {
+                    error.FatalError, error.Throw => |e| return e,
+                    else => return Value.zigToBog(ctx.vm, res),
+                },
+                .ErrorUnion => if (res) |val| {
+                    return Value.zigToBog(ctx.vm, val);
+                } else |err| switch (@as(anyerror, err)) {
+                    error.FatalError, error.Throw => |e| return e,
+                    else => return Value.zigToBog(ctx.vm, res),
+                },
+                else => return Value.zigToBog(ctx.vm, res),
+            }
         }
     };
     S._func = func;
 
     // TODO can't use bog_arg_i due to a stage1 bug.
     comptime var bog_arg_count = 0;
-    comptime {
-        for (Fn.args) |arg| {
-            if (arg.arg_type != *Vm) bog_arg_count += 1;
+    comptime for (Fn.args) |arg| {
+        const ArgT = arg.arg_type.?;
+        if (ArgT != Vm.Context and !(@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T"))) {
+            bog_arg_count += 1;
         }
-    }
+    };
 
     return .{
         .arg_count = bog_arg_count,

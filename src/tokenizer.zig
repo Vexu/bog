@@ -115,245 +115,292 @@ pub const Token = struct {
     end: u32,
     id: Id,
 
-    pub const List = std.ArrayList(Token);
+    pub const List = std.MultiArrayList(Token);
     pub const Index = u32;
 
-    pub const Id = union(enum) {
-        Eof,
-        Indent: u16,
-        Comment,
-        Identifier,
-        String,
-        Integer,
-        Number,
-        Nl,
-        Pipe,
-        PipeEqual,
-        Equal,
-        EqualEqual,
-        BangEqual,
-        LParen,
-        RParen,
-        Percent,
-        PercentEqual,
-        LBrace,
-        RBrace,
-        LBracket,
-        RBracket,
-        Period,
-        EqualRarr,
-        Caret,
-        CaretEqual,
-        Plus,
-        PlusEqual,
-        PlusPlus,
-        Minus,
-        MinusEqual,
-        Asterisk,
-        AsteriskEqual,
-        AsteriskAsterisk,
-        AsteriskAsteriskEqual,
-        Slash,
-        SlashEqual,
-        SlashSlash,
-        SlashSlashEqual,
-        Comma,
-        Ampersand,
-        AmpersandEqual,
-        LArr,
-        LArrEqual,
-        LArrArr,
-        LArrArrEqual,
-        RArr,
-        RArrEqual,
-        RArrArr,
-        RArrArrEqual,
-        Tilde,
-        Colon,
-        Underscore,
-        At,
-        FormatStart,
-        Format,
-        FormatEnd,
+    pub const Id = enum(u8) {
+        eof,
+        identifier,
+        string,
+        integer,
+        number,
+        nl,
+        pipe,
+        pipe_equal,
+        equal,
+        equal_equal,
+        bang_equal,
+        l_paren,
+        r_paren,
+        percent,
+        percent_equal,
+        l_brace,
+        r_brace,
+        l_bracket,
+        r_bracket,
+        period,
+        equal_rarr,
+        caret,
+        caret_equal,
+        plus,
+        plus_equal,
+        plus_plus,
+        minus,
+        minus_equal,
+        asterisk,
+        asterisk_equal,
+        asterisk_asterisk,
+        asterisk_asterisk_equal,
+        slash,
+        slash_equal,
+        slash_slash,
+        slash_slash_equal,
+        comma,
+        ampersand,
+        ampersand_equal,
+        l_arr,
+        l_arr_equal,
+        l_arr_arr,
+        l_arr_arr_equal,
+        r_arr,
+        r_arr_equal,
+        r_arr_arr,
+        r_arr_arr_equal,
+        tilde,
+        colon,
+        underscore,
+        at,
+        format_start,
+        format,
+        format_end,
+
+        /// indentation
+        indent_1,
+        indent_2,
+        indent_3,
+        indent_4,
+        indent_5,
+        indent_6,
+        indent_7,
+        indent_8,
+        indent_9,
+        indent_10,
+        indent_11,
+        indent_12,
+        indent_13,
+        indent_14,
+        indent_15,
+        indent_16,
+        indent_17,
+        indent_18,
+        indent_19,
+        indent_20,
+        indent_21,
+        indent_22,
+        indent_23,
+        indent_24,
+        indent_25,
+        indent_26,
+        indent_27,
+        indent_28,
+        indent_29,
+        indent_30,
+        indent_31,
+        indent_32,
 
         /// keywords
-        Keyword_not,
-        Keyword_and,
-        Keyword_or,
-        Keyword_let,
-        Keyword_continue,
-        Keyword_break,
-        Keyword_return,
-        Keyword_if,
-        Keyword_else,
-        Keyword_false,
-        Keyword_true,
-        Keyword_for,
-        Keyword_while,
-        Keyword_match,
-        Keyword_catch,
-        Keyword_try,
-        Keyword_error,
-        Keyword_import,
-        Keyword_is,
-        Keyword_in,
-        Keyword_fn,
-        Keyword_as,
-        Keyword_const,
-        Keyword_this,
+        keyword_and,
+        keyword_as,
+        keyword_break,
+        keyword_catch,
+        keyword_continue,
+        keyword_else,
+        keyword_error,
+        keyword_false,
+        keyword_fn,
+        keyword_for,
+        keyword_if,
+        keyword_import,
+        keyword_in,
+        keyword_is,
+        keyword_let,
+        keyword_match,
+        keyword_mut,
+        keyword_null,
+        keyword_not,
+        keyword_or,
+        keyword_return,
+        keyword_this,
+        keyword_throw,
+        keyword_true,
+        keyword_try,
+        keyword_while,
     };
 
     pub const keywords = std.ComptimeStringMap(Id, .{
-        .{ "not", .Keyword_not },
-        .{ "and", .Keyword_and },
-        .{ "or", .Keyword_or },
-        .{ "let", .Keyword_let },
-        .{ "continue", .Keyword_continue },
-        .{ "break", .Keyword_break },
-        .{ "return", .Keyword_return },
-        .{ "if", .Keyword_if },
-        .{ "else", .Keyword_else },
-        .{ "false", .Keyword_false },
-        .{ "true", .Keyword_true },
-        .{ "for", .Keyword_for },
-        .{ "while", .Keyword_while },
-        .{ "match", .Keyword_match },
-        .{ "catch", .Keyword_catch },
-        .{ "try", .Keyword_try },
-        .{ "error", .Keyword_error },
-        .{ "import", .Keyword_import },
-        .{ "is", .Keyword_is },
-        .{ "in", .Keyword_in },
-        .{ "fn", .Keyword_fn },
-        .{ "as", .Keyword_as },
-        .{ "const", .Keyword_const },
-        .{ "this", .Keyword_this },
-        .{ "_", .Underscore },
+        .{ "and", .keyword_and },
+        .{ "as", .keyword_as },
+        .{ "break", .keyword_break },
+        .{ "catch", .keyword_catch },
+        .{ "continue", .keyword_continue },
+        .{ "else", .keyword_else },
+        .{ "error", .keyword_error },
+        .{ "false", .keyword_false },
+        .{ "fn", .keyword_fn },
+        .{ "for", .keyword_for },
+        .{ "if", .keyword_if },
+        .{ "import", .keyword_import },
+        .{ "in", .keyword_in },
+        .{ "is", .keyword_is },
+        .{ "let", .keyword_let },
+        .{ "match", .keyword_match },
+        .{ "mut", .keyword_mut },
+        .{ "null", .keyword_null },
+        .{ "not", .keyword_not },
+        .{ "or", .keyword_or },
+        .{ "return", .keyword_return },
+        .{ "this", .keyword_this },
+        .{ "throw", .keyword_throw },
+        .{ "true", .keyword_true },
+        .{ "try", .keyword_try },
+        .{ "while", .keyword_while },
+        .{ "_", .underscore },
     });
 
-    pub fn string(id: std.meta.Tag(Id)) []const u8 {
+    pub fn string(id: Id) []const u8 {
         return switch (id) {
-            .Comment => "<Comment>",
-            .Eof => "<EOF>",
-            .Nl => "<NL>",
-            .Indent => "<INDENT>",
-            .Identifier => "Identifier",
-            .String => "String",
-            .Integer => "Integer",
-            .Number => "Number",
-            .Pipe => "|",
-            .PipeEqual => "|=",
-            .Equal => "=",
-            .EqualEqual => "==",
-            .BangEqual => "!=",
-            .LParen => "(",
-            .RParen => ")",
-            .Percent => "%",
-            .PercentEqual => "%=",
-            .LBrace => "{",
-            .RBrace => "}",
-            .LBracket => "[",
-            .RBracket => "]",
-            .Period => ".",
-            .EqualRarr => "=>",
-            .Caret => "^",
-            .CaretEqual => "^=",
-            .Plus => "+",
-            .PlusEqual => "+=",
-            .PlusPlus => "++",
-            .Minus => "-",
-            .MinusEqual => "-=",
-            .Asterisk => "*",
-            .AsteriskEqual => "*=",
-            .AsteriskAsterisk => "**",
-            .AsteriskAsteriskEqual => "**=",
-            .Slash => "/",
-            .SlashEqual => "/=",
-            .SlashSlash => "//",
-            .SlashSlashEqual => "//=",
-            .Comma => ",",
-            .Ampersand => "&",
-            .AmpersandEqual => "&=",
-            .LArr => "<",
-            .LArrEqual => "<=",
-            .LArrArr => "<<",
-            .LArrArrEqual => "<<=",
-            .RArr => ">",
-            .RArrEqual => ">=",
-            .RArrArr => ">>",
-            .RArrArrEqual => ">>=",
-            .Tilde => "~",
-            .Colon => ":",
-            .Underscore => "_",
-            .At => "@",
-            .FormatStart, .Format, .FormatEnd => "Format string",
+            .eof => "<EOF>",
+            .nl => "<NL>",
+            // zig fmt: off
+            .indent_1, .indent_2, .indent_3, .indent_4,
+            .indent_5, .indent_6, .indent_7, .indent_8,
+            .indent_9, .indent_10, .indent_11, .indent_12,
+            .indent_13, .indent_14, .indent_15, .indent_16,
+            .indent_17, .indent_18, .indent_19, .indent_20,
+            .indent_21, .indent_22, .indent_23, .indent_24,
+            .indent_25, .indent_26, .indent_27, .indent_28,
+            .indent_29, .indent_30, .indent_31, .indent_32,
+            // zig fmt: on
+            => "<INDENT>",
+            .identifier => "Identifier",
+            .string => "String",
+            .integer => "Integer",
+            .number => "Number",
+            .pipe => "|",
+            .pipe_equal => "|=",
+            .equal => "=",
+            .equal_equal => "==",
+            .bang_equal => "!=",
+            .l_paren => "(",
+            .r_paren => ")",
+            .percent => "%",
+            .percent_equal => "%=",
+            .l_brace => "{",
+            .r_brace => "}",
+            .l_bracket => "[",
+            .r_bracket => "]",
+            .period => ".",
+            .equal_rarr => "=>",
+            .caret => "^",
+            .caret_equal => "^=",
+            .plus => "+",
+            .plus_equal => "+=",
+            .plus_plus => "++",
+            .minus => "-",
+            .minus_equal => "-=",
+            .asterisk => "*",
+            .asterisk_equal => "*=",
+            .asterisk_asterisk => "**",
+            .asterisk_asterisk_equal => "**=",
+            .slash => "/",
+            .slash_equal => "/=",
+            .slash_slash => "//",
+            .slash_slash_equal => "//=",
+            .comma => ",",
+            .ampersand => "&",
+            .ampersand_equal => "&=",
+            .l_arr => "<",
+            .l_arr_equal => "<=",
+            .l_arr_arr => "<<",
+            .l_arr_arr_equal => "<<=",
+            .r_arr => ">",
+            .r_arr_equal => ">=",
+            .r_arr_arr => ">>",
+            .r_arr_arr_equal => ">>=",
+            .tilde => "~",
+            .colon => ":",
+            .underscore => "_",
+            .at => "@",
+            .format_start, .format, .format_end => "Format string",
 
-            .Keyword_not => "not",
-            .Keyword_and => "and",
-            .Keyword_or => "or",
-            .Keyword_let => "let",
-            .Keyword_continue => "continue",
-            .Keyword_break => "break",
-            .Keyword_return => "return",
-            .Keyword_if => "if",
-            .Keyword_else => "else",
-            .Keyword_false => "false",
-            .Keyword_true => "true",
-            .Keyword_for => "for",
-            .Keyword_while => "while",
-            .Keyword_match => "match",
-            .Keyword_catch => "catch",
-            .Keyword_try => "try",
-            .Keyword_error => "error",
-            .Keyword_import => "import",
-            .Keyword_is => "is",
-            .Keyword_in => "in",
-            .Keyword_fn => "fn",
-            .Keyword_as => "as",
-            .Keyword_const => "const",
-            .Keyword_this => "this",
+            .keyword_and => "and",
+            .keyword_as => "as",
+            .keyword_break => "break",
+            .keyword_catch => "catch",
+            .keyword_continue => "continue",
+            .keyword_else => "else",
+            .keyword_error => "error",
+            .keyword_false => "false",
+            .keyword_fn => "fn",
+            .keyword_for => "for",
+            .keyword_if => "if",
+            .keyword_import => "import",
+            .keyword_in => "in",
+            .keyword_is => "is",
+            .keyword_let => "let",
+            .keyword_match => "match",
+            .keyword_mut => "mut",
+            .keyword_null => "null",
+            .keyword_not => "not",
+            .keyword_or => "or",
+            .keyword_return => "return",
+            .keyword_this => "this",
+            .keyword_throw => "throw",
+            .keyword_true => "true",
+            .keyword_try => "try",
+            .keyword_while => "while",
         };
     }
 };
 
-pub fn tokenize(allocator: mem.Allocator, source: []const u8, errors: *Errors) Tokenizer.Error![]const Token {
-    // estimate one token per 8 bytes to reduce allocation in the beginning
-    const estimated = source.len / 8;
+pub fn tokenize(gpa: mem.Allocator, source: []const u8, path: []const u8, errors: *Errors) Tokenizer.Error!Token.List {
     var tokenizer = Tokenizer{
-        .tokens = try Token.List.initCapacity(allocator, estimated),
         .errors = errors,
+        .path = path,
         .it = .{
             .i = 0,
             .bytes = source,
         },
         .repl = false,
     };
-    errdefer tokenizer.tokens.deinit();
+    errdefer tokenizer.tokens.deinit(gpa);
+
+    // estimate one token per 8 bytes to reduce allocation in the beginning
+    const estimated = source.len / 8;
+    try tokenizer.tokens.ensureUnusedCapacity(gpa, estimated);
+
     while (true) {
-        const tok = try tokenizer.tokens.addOne();
-        tok.* = try tokenizer.next();
-        if (tok.id == .Eof) {
-            // std.debug.warn("estimated: {}, actual: {}\n\n", .{estimated, tokenizer.tokens.items.len});
-            return tokenizer.tokens.toOwnedSlice();
-        }
+        const tok = try tokenizer.next();
+        try tokenizer.tokens.append(gpa, tok);
+        if (tok.id == .eof) return tokenizer.tokens;
     }
 }
 
 pub fn tokenizeRepl(repl: *@import("repl.zig").Repl) Tokenizer.Error!bool {
-    // remove previous eof
     const self = &repl.tokenizer;
     self.it.bytes = repl.buffer.items;
-    self.errors = &repl.vm.errors;
 
-    if (self.tokens.items.len > 0) _ = self.tokens.pop();
-    const start_len = self.tokens.items.len;
+    // remove previous eof
+    if (self.tokens.len > 0) self.tokens.len -= 1;
+    const start_len = self.tokens.len;
 
+    const gpa = repl.vm.gc.gpa;
     while (true) {
-        const tok = try self.tokens.addOne();
-        tok.* = try self.next();
-        if (tok.id == .Eof) {
+        const tok = try self.next();
+        try repl.tokenizer.tokens.append(gpa, tok);
+        if (tok.id == .eof) {
             // check if more input is expected
-            return if (self.tokens.items.len == start_len + 2)
+            return if (self.tokens.len == start_len + 2)
                 true
             else if (self.paren_level != 0 or
                 self.string or
@@ -369,7 +416,8 @@ pub fn tokenizeRepl(repl: *@import("repl.zig").Repl) Tokenizer.Error!bool {
 
 pub const Tokenizer = struct {
     errors: *Errors,
-    tokens: Token.List,
+    path: []const u8,
+    tokens: Token.List = .{},
     it: unicode.Utf8Iterator,
 
     /// indentation specific variables
@@ -400,6 +448,8 @@ pub const Tokenizer = struct {
     fn reportErr(self: *Tokenizer, msg: []const u8, c: u21) Error {
         try self.errors.add(
             .{ .data = msg },
+            self.it.bytes,
+            self.path,
             @truncate(u32, self.it.i - (unicode.utf8CodepointSequenceLength(c) catch unreachable)),
             .err,
         );
@@ -433,23 +483,22 @@ pub const Tokenizer = struct {
             },
         } else {
             if (self.repl) {
-                if (self.indent_level == 0 and self.tokens.items.len > 2) {
-                    switch (self.tokens.items[self.tokens.items.len - 3].id) {
+                if (self.indent_level == 0 and self.tokens.len > 2) {
+                    switch (self.tokens.items(.id)[self.tokens.len - 3]) {
                         // no further input is expected after these tokens
                         // so we can stop asking for more input
-                        .Comment,
-                        .Identifier,
-                        .Keyword_this,
-                        .String,
-                        .Integer,
-                        .Number,
-                        .RBrace,
-                        .RBracket,
-                        .Underscore,
-                        .Keyword_break,
-                        .Keyword_continue,
-                        .Keyword_false,
-                        .Keyword_true,
+                        .identifier,
+                        .keyword_this,
+                        .string,
+                        .integer,
+                        .number,
+                        .r_brace,
+                        .r_bracket,
+                        .underscore,
+                        .keyword_break,
+                        .keyword_continue,
+                        .keyword_false,
+                        .keyword_true,
                         => return null,
                         else => {},
                     }
@@ -482,14 +531,14 @@ pub const Tokenizer = struct {
         }
         const level = @divExact(count, self.chars_per_indent.?);
 
-        if (level > 50) {
-            return self.reportErr("indentation exceeds maximum of 50 levels", 'a');
+        if (level > 32) {
+            return self.reportErr("indentation exceeds maximum of 32 levels", 'a');
         }
 
         // needed by the repl tokenizer
         self.indent_level = level;
         return Token{
-            .id = .{ .Indent = level },
+            .id = @intToEnum(Token.Id, @enumToInt(Token.Id.indent_1) + (level - 1)),
             .start = @truncate(u32, start_index),
             .end = @truncate(u32, self.it.i),
         };
@@ -504,78 +553,70 @@ pub const Tokenizer = struct {
         }
         var start_index = self.it.i;
         var state: enum {
-            Start,
-            String,
-            EscapeSequence,
-            HexEscape,
-            UnicodeStart,
-            UnicodeEscape,
-            UnicodeEnd,
-            Identifier,
-            Equal,
-            Bang,
-            Pipe,
-            Percent,
-            Asterisk,
-            AsteriskAsterisk,
-            Plus,
-            LArr,
-            LArrArr,
-            RArr,
-            RArrArr,
-            Caret,
-            Minus,
-            Slash,
-            SlashSlash,
-            Ampersand,
-            LineComment,
-            BinaryNumber,
-            OctalNumber,
-            HexNumber,
-            Number,
-            Zero,
-            NumberDot,
-            FloatFraction,
-            FloatExponent,
-            FloatExponentDigits,
+            start,
+            string,
+            escape_sequence,
+            hex_escape,
+            unicode_start,
+            unicode_escape,
+            unicode_end,
+            identifier,
+            equal,
+            bang,
+            pipe,
+            percent,
+            asterisk,
+            asterisk_asterisk,
+            plus,
+            l_arr,
+            l_arr_arr,
+            r_arr,
+            r_arr_arr,
+            caret,
+            minus,
+            slash,
+            slash_slash,
+            ampersand,
+            line_comment,
+            binary_number,
+            octal_number,
+            hex_number,
+            number,
+            zero,
+            number_dot,
+            float_fraction,
+            float_exponent,
+            float_exponent_digits,
             f,
-            FormatString,
-            FormatBrace,
-        } = .Start;
-        var res: Token.Id = .Eof;
+            format_string,
+            format_brace,
+        } = .start;
+        var res: Token.Id = .eof;
         var str_delimit: u32 = undefined;
         var counter: u32 = 0;
         var dot_index: ?usize = null;
-        var escape_end_state: @TypeOf(state) = .String;
+        var escape_end_state: @TypeOf(state) = .string;
 
         while (self.it.nextCodepoint()) |c| {
             switch (state) {
-                .Start => switch (c) {
-                    '#' => {
-                        state = .LineComment;
-                    },
+                .start => switch (c) {
+                    '#' => state = .line_comment,
                     '\n', ';' => {
-                        res = .Nl;
+                        res = .nl;
                         self.expect_indent = true;
                         break;
                     },
                     '"', '\'' => {
                         self.string = true;
                         str_delimit = c;
-                        state = .String;
+                        state = .string;
                     },
-                    '=' => {
-                        state = .Equal;
-                    },
-                    '!' => {
-                        state = .Bang;
-                    },
-                    '|' => {
-                        state = .Pipe;
-                    },
+                    '=' => state = .equal,
+                    '!' => state = .bang,
+                    '|' => state = .pipe,
                     '(' => {
                         self.paren_level += 1;
-                        res = .LParen;
+                        res = .l_paren;
                         break;
                     },
                     ')' => {
@@ -583,12 +624,12 @@ pub const Tokenizer = struct {
                             return self.reportErr("unmatched ')'", c);
                         }
                         self.paren_level -= 1;
-                        res = .RParen;
+                        res = .r_paren;
                         break;
                     },
                     '[' => {
                         self.paren_level += 1;
-                        res = .LBracket;
+                        res = .l_bracket;
                         break;
                     },
                     ']' => {
@@ -596,135 +637,99 @@ pub const Tokenizer = struct {
                             return self.reportErr("unmatched ']'", c);
                         }
                         self.paren_level -= 1;
-                        res = .RBracket;
+                        res = .r_bracket;
                         break;
                     },
                     ',' => {
-                        res = .Comma;
+                        res = .comma;
                         break;
                     },
                     '@' => {
-                        res = .At;
+                        res = .at;
                         break;
                     },
-                    '%' => {
-                        state = .Percent;
-                    },
-                    '*' => {
-                        state = .Asterisk;
-                    },
-                    '+' => {
-                        state = .Plus;
-                    },
-                    '<' => {
-                        state = .LArr;
-                    },
-                    '>' => {
-                        state = .RArr;
-                    },
-                    '^' => {
-                        state = .Caret;
-                    },
+                    '%' => state = .percent,
+                    '*' => state = .asterisk,
+                    '+' => state = .plus,
+                    '<' => state = .l_arr,
+                    '>' => state = .r_arr,
+                    '^' => state = .caret,
                     '{' => {
                         self.paren_level += 1;
-                        res = .LBrace;
+                        res = .l_brace;
                         break;
                     },
                     '}' => {
                         if (self.format_string != 0 and self.format_paren_level == self.paren_level) {
-                            escape_end_state = .FormatString;
-                            state = .FormatString;
-                            res = .Format;
+                            escape_end_state = .format_string;
+                            state = .format_string;
+                            res = .format;
                             continue;
                         }
                         if (self.paren_level == 0) {
                             return self.reportErr("unmatched '}'", c);
                         }
                         self.paren_level -= 1;
-                        res = .RBrace;
+                        res = .r_brace;
                         break;
                     },
                     '~' => {
-                        res = .Tilde;
+                        res = .tilde;
                         break;
                     },
                     ':' => {
                         if (self.format_string != 0 and self.format_paren_level == self.paren_level) {
-                            escape_end_state = .FormatString;
-                            state = .FormatString;
-                            res = .Format;
+                            escape_end_state = .format_string;
+                            state = .format_string;
+                            res = .format;
                             continue;
                         }
-                        res = .Colon;
+                        res = .colon;
                         break;
                     },
                     '.' => {
-                        res = .Period;
+                        res = .period;
                         break;
                     },
-                    '-' => {
-                        state = .Minus;
-                    },
-                    '/' => {
-                        state = .Slash;
-                    },
-                    '&' => {
-                        state = .Ampersand;
-                    },
-                    '0' => {
-                        state = .Zero;
-                    },
-                    '1'...'9' => {
-                        state = .Number;
-                    },
+                    '-' => state = .minus,
+                    '/' => state = .slash,
+                    '&' => state = .ampersand,
+                    '0' => state = .zero,
+                    '1'...'9' => state = .number,
                     'f' => if (self.format_string != 0) {
-                        state = .Identifier;
+                        state = .identifier;
                     } else {
                         state = .f;
                     },
-                    else => {
-                        if (isWhiteSpace(c)) {
-                            start_index = self.it.i;
-                        } else if (isIdentifier(c)) {
-                            state = .Identifier;
-                        } else {
-                            return self.reportErr("invalid character", c);
-                        }
+                    else => if (isWhiteSpace(c)) {
+                        start_index = self.it.i;
+                    } else if (isIdentifier(c)) {
+                        state = .identifier;
+                    } else {
+                        return self.reportErr("invalid character", c);
                     },
                 },
-                .String => switch (c) {
-                    '\\' => {
-                        state = .EscapeSequence;
+                .string => switch (c) {
+                    '\\' => state = .escape_sequence,
+                    '\n', '\r' => if (str_delimit == '\'') {
+                        return self.reportErr("invalid newline, use'\"' for multiline strings", c);
                     },
-                    '\n', '\r' => {
-                        if (str_delimit == '\'') {
-                            return self.reportErr("invalid newline, use'\"' for multiline strings", c);
-                        }
-                    },
-                    else => {
-                        if (c == str_delimit) {
-                            self.string = false;
-                            res = .String;
-                            break;
-                        }
+                    else => if (c == str_delimit) {
+                        self.string = false;
+                        res = .string;
+                        break;
                     },
                 },
-                .EscapeSequence => switch (c) {
-                    '\'', '"', '\\', 'r', 't', 'n' => {
-                        state = escape_end_state;
-                    },
+                .escape_sequence => switch (c) {
+                    '\'', '"', '\\', 'r', 't', 'n' => state = escape_end_state,
                     'x' => {
                         counter = 0;
-                        state = .HexEscape;
+                        state = .hex_escape;
                     },
-                    'u' => {
-                        state = .UnicodeStart;
-                    },
-                    else => {
-                        return self.reportErr("invalid escape sequence", c);
-                    },
+                    'u' => state = .unicode_start,
+                    else => return self.reportErr("invalid escape sequence", c),
                 },
-                .HexEscape => switch (c) {
+                .hex_escape => switch (c) {
                     '0'...'9', 'a'...'f', 'A'...'F' => {
                         counter += 1;
                         if (counter > 2) {
@@ -739,27 +744,23 @@ pub const Tokenizer = struct {
                         state = escape_end_state;
                     },
                 },
-                .UnicodeStart => if (c == '{') {
+                .unicode_start => if (c == '{') {
                     counter = 0;
-                    state = .UnicodeEscape;
+                    state = .unicode_escape;
                 } else {
                     return self.reportErr("expected '{' after '\\u'", c);
                 },
-                .UnicodeEscape => switch (c) {
+                .unicode_escape => switch (c) {
                     '0'...'9', 'a'...'f', 'A'...'F' => {
                         counter += 1;
                         if (counter > 6) {
-                            state = .UnicodeEnd;
+                            state = .unicode_end;
                         }
                     },
-                    '}' => {
-                        state = escape_end_state;
-                    },
-                    else => {
-                        return self.reportErr("expected hex digits or '}'", c);
-                    },
+                    '}' => state = escape_end_state,
+                    else => return self.reportErr("expected hex digits or '}'", c),
                 },
-                .UnicodeEnd => if (c == '}') {
+                .unicode_end => if (c == '}') {
                     state = escape_end_state;
                 } else {
                     return self.reportErr("expected '}'", c);
@@ -768,467 +769,442 @@ pub const Tokenizer = struct {
                     '\'' => {
                         self.format_string = '\'';
                         self.format_paren_level = self.paren_level;
-                        res = .FormatStart;
-                        state = .FormatString;
-                        escape_end_state = .FormatString;
+                        res = .format_start;
+                        state = .format_string;
+                        escape_end_state = .format_string;
                     },
                     '"' => {
                         self.format_string = '"';
                         self.format_paren_level = self.paren_level;
-                        res = .FormatStart;
-                        state = .FormatString;
-                        escape_end_state = .FormatString;
+                        res = .format_start;
+                        state = .format_string;
+                        escape_end_state = .format_string;
                     },
                     else => {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        state = .Identifier;
+                        state = .identifier;
                     },
                 },
-                .FormatString => {
+                .format_string => {
                     if (c == self.format_string) {
-                        if (res == .FormatStart) {
-                            res = .String;
+                        if (res == .format_start) {
+                            res = .string;
                         } else {
-                            res = .FormatEnd;
+                            res = .format_end;
                         }
                         self.format_string = 0;
                         break;
                     } else if (c == '\\') {
-                        state = .EscapeSequence;
+                        state = .escape_sequence;
                     } else if (c == '\n' or c == '\r') {
                         if (self.format_string == '\'') {
                             return self.reportErr("invalid newline, use'\"' for multiline strings", c);
                         }
                     } else if (c == '{') {
-                        state = .FormatBrace;
+                        state = .format_brace;
                     }
                 },
-                .FormatBrace => {
+                .format_brace => {
                     if (c == '{') {
-                        state = .FormatString;
+                        state = .format_string;
                     } else {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         break;
                     }
                 },
-                .Identifier => {
+                .identifier => {
                     if (!isIdentifier(c)) {
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
                         const slice = self.it.bytes[start_index..self.it.i];
-                        res = Token.keywords.get(slice) orelse .Identifier;
+                        res = Token.keywords.get(slice) orelse .identifier;
                         break;
                     }
                 },
-                .Equal => switch (c) {
+                .equal => switch (c) {
                     '=' => {
-                        res = .EqualEqual;
+                        res = .equal_equal;
                         break;
                     },
                     '>' => {
-                        res = .EqualRarr;
+                        res = .equal_rarr;
                         break;
                     },
                     else => {
                         self.it.i = start_index + 1;
-                        res = .Equal;
+                        res = .equal;
                         break;
                     },
                 },
-                .Bang => switch (c) {
+                .bang => switch (c) {
                     '=' => {
-                        res = .BangEqual;
+                        res = .bang_equal;
                         break;
                     },
                     else => {
                         return self.reportErr("invalid character, use 'not' for boolean not", c);
                     },
                 },
-                .Pipe => switch (c) {
+                .pipe => switch (c) {
                     '=' => {
-                        res = .PipeEqual;
+                        res = .pipe_equal;
                         break;
                     },
                     else => {
                         self.it.i = start_index + 1;
-                        res = .Pipe;
+                        res = .pipe;
                         break;
                     },
                 },
-                .Percent => switch (c) {
+                .percent => switch (c) {
                     '=' => {
-                        res = .PercentEqual;
+                        res = .percent_equal;
                         break;
                     },
                     else => {
                         self.it.i = start_index + 1;
-                        res = .Percent;
+                        res = .percent;
                         break;
                     },
                 },
-                .Asterisk => switch (c) {
+                .asterisk => switch (c) {
                     '=' => {
-                        res = .AsteriskEqual;
+                        res = .asterisk_equal;
                         break;
                     },
-                    '*' => {
-                        state = .AsteriskAsterisk;
-                    },
+                    '*' => state = .asterisk_asterisk,
                     else => {
                         self.it.i = start_index + 1;
-                        res = .Asterisk;
+                        res = .asterisk;
                         break;
                     },
                 },
-                .AsteriskAsterisk => switch (c) {
+                .asterisk_asterisk => switch (c) {
                     '=' => {
-                        res = .AsteriskAsteriskEqual;
+                        res = .asterisk_asterisk_equal;
                         break;
                     },
                     else => {
                         self.it.i = start_index + 2;
-                        res = .AsteriskAsterisk;
+                        res = .asterisk_asterisk;
                         break;
                     },
                 },
-                .Plus => switch (c) {
+                .plus => switch (c) {
                     '=' => {
-                        res = .PlusEqual;
+                        res = .plus_equal;
                         break;
                     },
                     '+' => {
-                        res = .PlusPlus;
+                        res = .plus_plus;
                         break;
                     },
                     else => {
                         self.it.i = start_index + 1;
-                        res = .Plus;
+                        res = .plus;
                         break;
                     },
                 },
-                .LArr => switch (c) {
-                    '<' => {
-                        state = .LArrArr;
-                    },
+                .l_arr => switch (c) {
+                    '<' => state = .l_arr_arr,
                     '=' => {
-                        res = .LArrEqual;
+                        res = .l_arr_equal;
                         break;
                     },
                     else => {
                         self.it.i = start_index + 1;
-                        res = .LArr;
+                        res = .l_arr;
                         break;
                     },
                 },
-                .LArrArr => switch (c) {
+                .l_arr_arr => switch (c) {
                     '=' => {
-                        res = .LArrArrEqual;
+                        res = .l_arr_arr_equal;
                         break;
                     },
                     else => {
                         self.it.i = start_index + 2;
-                        res = .LArrArr;
+                        res = .l_arr_arr;
                         break;
                     },
                 },
-                .RArr => switch (c) {
-                    '>' => {
-                        state = .RArrArr;
-                    },
+                .r_arr => switch (c) {
+                    '>' => state = .r_arr_arr,
                     '=' => {
-                        res = .RArrEqual;
+                        res = .r_arr_equal;
                         break;
                     },
                     else => {
                         self.it.i = start_index + 1;
-                        res = .RArr;
+                        res = .r_arr;
                         break;
                     },
                 },
-                .RArrArr => switch (c) {
+                .r_arr_arr => switch (c) {
                     '=' => {
-                        res = .RArrArrEqual;
+                        res = .r_arr_arr_equal;
                         break;
                     },
                     else => {
                         self.it.i = start_index + 2;
-                        res = .RArrArr;
+                        res = .r_arr_arr;
                         break;
                     },
                 },
-                .Caret => switch (c) {
+                .caret => switch (c) {
                     '=' => {
-                        res = .CaretEqual;
+                        res = .caret_equal;
                         break;
                     },
                     else => {
                         self.it.i = start_index + 1;
-                        res = .Caret;
+                        res = .caret;
                         break;
                     },
                 },
-                .Minus => switch (c) {
+                .minus => switch (c) {
                     '=' => {
-                        res = .MinusEqual;
+                        res = .minus_equal;
                         break;
                     },
                     else => {
                         self.it.i = start_index + 1;
-                        res = .Minus;
+                        res = .minus;
                         break;
                     },
                 },
-                .Slash => switch (c) {
-                    '/' => {
-                        state = .SlashSlash;
-                    },
+                .slash => switch (c) {
+                    '/' => state = .slash_slash,
                     '=' => {
-                        res = .SlashEqual;
+                        res = .slash_equal;
                         break;
                     },
                     else => {
                         self.it.i = start_index + 1;
-                        res = .Slash;
+                        res = .slash;
                         break;
                     },
                 },
-                .SlashSlash => switch (c) {
+                .slash_slash => switch (c) {
                     '=' => {
-                        res = .SlashSlashEqual;
+                        res = .slash_slash_equal;
                         break;
                     },
                     else => {
                         self.it.i = start_index + 2;
-                        res = .SlashSlash;
+                        res = .slash_slash;
                         break;
                     },
                 },
-                .Ampersand => switch (c) {
+                .ampersand => switch (c) {
                     '=' => {
-                        res = .AmpersandEqual;
+                        res = .ampersand_equal;
                         break;
                     },
                     else => {
                         self.it.i = start_index + 1;
-                        res = .Ampersand;
+                        res = .ampersand;
                         break;
                     },
                 },
-                .LineComment => switch (c) {
-                    '\n', '\r' => {
-                        self.it.i -= 1;
-                        res = .Comment;
-                        break;
+                .line_comment => switch (c) {
+                    '\n' => {
+                        start_index = self.it.i;
+                        state = .start;
+                        self.expect_indent = false;
+                        if (try self.getIndent()) |some|
+                            return some;
                     },
                     else => {},
                 },
-                .Zero => switch (c) {
-                    'b' => {
-                        state = .BinaryNumber;
-                    },
-                    'o' => {
-                        state = .OctalNumber;
-                    },
-                    'x' => {
-                        state = .HexNumber;
-                    },
-                    '.', ',' => {
-                        state = .NumberDot;
+                .zero => switch (c) {
+                    'b' => state = .binary_number,
+                    'o' => state = .octal_number,
+                    'x' => state = .hex_number,
+                    '.' => {
+                        state = .number_dot;
                         dot_index = self.it.i - 1;
                     },
                     '0'...'7' => {
                         return self.reportErr("invalid character, octal literals start with '0o'", c);
                     },
-                    '_' => {
-                        state = .Number;
-                    },
+                    '_' => state = .number,
                     else => {
                         if (isIdentifier(c)) {
-                            state = .Identifier;
+                            state = .identifier;
                             continue;
                         }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res = .Integer;
+                        res = .integer;
                         break;
                     },
                 },
-                .NumberDot => switch (c) {
+                .number_dot => switch (c) {
                     '.' => {
                         self.it.i -= 2;
-                        res = .Integer;
+                        res = .integer;
                         break;
                     },
                     '0'...'9', 'e', 'E', '_' => {
                         self.it.i -= 1;
-                        state = .FloatFraction;
+                        state = .float_fraction;
                     },
                     else => {
                         self.it.i = dot_index.?;
-                        res = .Integer;
+                        res = .integer;
                         break;
                     },
                 },
-                .BinaryNumber => switch (c) {
+                .binary_number => switch (c) {
                     '0', '1', '_' => {},
                     else => {
                         if (isIdentifier(c)) {
-                            state = .Identifier;
+                            state = .identifier;
                             continue;
                         }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res = .Integer;
+                        res = .integer;
                         break;
                     },
                 },
-                .OctalNumber => switch (c) {
+                .octal_number => switch (c) {
                     '0'...'7', '_' => {},
                     else => {
                         if (isIdentifier(c)) {
-                            state = .Identifier;
+                            state = .identifier;
                             continue;
                         }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res = .Integer;
+                        res = .integer;
                         break;
                     },
                 },
-                .HexNumber => switch (c) {
+                .hex_number => switch (c) {
                     '0'...'9', 'a'...'f', 'A'...'F', '_' => {},
-                    'p', 'P' => {
-                        state = .FloatExponent;
-                    },
+                    'p', 'P' => state = .float_exponent,
                     else => {
                         if (isIdentifier(c)) {
-                            state = .Identifier;
+                            state = .identifier;
                             continue;
                         }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res = .Integer;
+                        res = .integer;
                         break;
                     },
                 },
-                .Number => switch (c) {
+                .number => switch (c) {
                     '0'...'9', '_' => {},
                     '.' => {
-                        state = .NumberDot;
+                        state = .number_dot;
                         dot_index = self.it.i - 1;
                     },
-                    'e', 'E' => {
-                        state = .FloatExponent;
-                    },
+                    'e', 'E' => state = .float_exponent,
                     else => {
                         if (isIdentifier(c)) {
-                            state = .Identifier;
+                            state = .identifier;
                             continue;
                         }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res = .Integer;
+                        res = .integer;
                         break;
                     },
                 },
-                .FloatFraction => switch (c) {
+                .float_fraction => switch (c) {
                     '0'...'9', '_' => {},
-                    'e', 'E' => {
-                        state = .FloatExponent;
-                    },
-                    '.', ',' => {
+                    'e', 'E' => state = .float_exponent,
+                    '.' => {
                         self.it.i -= 1;
-                        res = .Number;
+                        res = .number;
                         break;
                     },
                     else => {
                         if (isIdentifier(c)) {
                             self.it.i = dot_index orelse {
-                                state = .Identifier;
+                                state = .identifier;
                                 continue;
                             };
-                            res = .Integer;
+                            res = .integer;
                             break;
                         }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        res = .Number;
+                        res = .number;
                         break;
                     },
                 },
-                .FloatExponent => switch (c) {
-                    '+', '-' => {
-                        state = .FloatExponentDigits;
-                    },
+                .float_exponent => switch (c) {
+                    '+', '-' => state = .float_exponent_digits,
                     else => {
                         if (isIdentifier(c)) {
                             self.it.i = dot_index orelse {
-                                state = .Identifier;
+                                state = .identifier;
                                 continue;
                             };
-                            res = .Integer;
+                            res = .integer;
                             break;
                         }
                         self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                        state = .FloatExponentDigits;
+                        state = .float_exponent_digits;
                     },
                 },
-                .FloatExponentDigits => switch (c) {
-                    '0'...'9' => {
-                        counter += 1;
-                    },
+                .float_exponent_digits => switch (c) {
+                    '0'...'9' => counter += 1,
                     '_' => {},
                     else => {
                         if (counter != 0 and !isIdentifier(c)) {
                             self.it.i -= unicode.utf8CodepointSequenceLength(c) catch unreachable;
-                            res = .Number;
+                            res = .number;
                             break;
                         }
                         self.it.i = dot_index orelse {
                             self.it.i = start_index;
-                            state = .Identifier;
+                            state = .identifier;
                             continue;
                         };
-                        res = .Integer;
+                        res = .integer;
                         break;
                     },
                 },
             }
         } else {
             switch (state) {
-                .Start => {},
-                .Identifier => {
+                .line_comment, .start => {},
+                .identifier => {
                     const slice = self.it.bytes[start_index..];
-                    res = Token.keywords.get(slice) orelse .Identifier;
+                    res = Token.keywords.get(slice) orelse .identifier;
                 },
-                .BinaryNumber,
-                .OctalNumber,
-                .HexNumber,
-                .Number,
-                .Zero,
-                => res = .Integer,
-                .FormatBrace => {},
+                .binary_number,
+                .octal_number,
+                .hex_number,
+                .number,
+                .zero,
+                => res = .integer,
+                .format_brace => {},
 
-                .String, .FormatString => {
-                    if (self.repl) {
-                        // if running in repl this might be a multiline string
-                        self.it.i = start_index;
-                        res = .Eof;
-                    } else return self.reportErr("unterminated string", 'a');
+                .string, .format_string => if (self.repl) {
+                    // if running in repl this might be a multiline string
+                    self.it.i = start_index;
+                    res = .eof;
+                } else {
+                    return self.reportErr("unterminated string", 'a');
                 },
-                .LineComment => res = .Comment,
-                .FloatFraction => res = .Number,
-                .Equal => res = .Equal,
-                .Minus => res = .Minus,
-                .Slash => res = .Slash,
-                .SlashSlash => res = .SlashSlash,
-                .Ampersand => res = .Ampersand,
-                .Pipe => res = .Pipe,
-                .RArr => res = .RArr,
-                .RArrArr => res = .RArrArr,
-                .LArr => res = .LArr,
-                .LArrArr => res = .LArrArr,
-                .Plus => res = .Plus,
-                .Percent => res = .Percent,
-                .Caret => res = .Caret,
-                .Asterisk => res = .Asterisk,
-                .AsteriskAsterisk => res = .AsteriskAsterisk,
-                .NumberDot => {
+                .float_fraction => res = .number,
+                .equal => res = .equal,
+                .minus => res = .minus,
+                .slash => res = .slash,
+                .slash_slash => res = .slash_slash,
+                .ampersand => res = .ampersand,
+                .pipe => res = .pipe,
+                .r_arr => res = .r_arr,
+                .r_arr_arr => res = .r_arr_arr,
+                .l_arr => res = .l_arr,
+                .l_arr_arr => res = .l_arr_arr,
+                .plus => res = .plus,
+                .percent => res = .percent,
+                .caret => res = .caret,
+                .asterisk => res = .asterisk,
+                .asterisk_asterisk => res = .asterisk_asterisk,
+                .number_dot => {
                     self.it.i -= 1;
-                    res = .Integer;
+                    res = .integer;
                 },
                 else => {
                     return self.reportErr("unexpected EOF", 'a');
@@ -1247,6 +1223,7 @@ fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) !void {
     var errors = Errors.init(std.testing.allocator);
     defer errors.deinit();
     var tokenizer = Tokenizer{
+        .path = "<test buf>",
         .tokens = undefined,
         .errors = &errors,
         .repl = false,
@@ -1261,11 +1238,11 @@ fn expectTokens(source: []const u8, expected_tokens: []const Token.Id) !void {
             try std.testing.expectEqual(expected_token, token.id);
         }
         const last_token = tokenizer.next() catch break :blk;
-        try std.testing.expect(last_token.id == .Eof);
+        try std.testing.expect(last_token.id == .eof);
         return;
     }
-    errors.render(source, std.io.getStdErr().writer()) catch {};
-    @panic("test failed");
+    errors.render(std.io.getStdErr().writer()) catch {};
+    return error.TestFailed;
 }
 
 test "operators" {
@@ -1277,91 +1254,89 @@ test "operators" {
         \\, & &= < <= <<
         \\<<= > >= >> >>= ~ _
         \\#hello world
-    , &[_]Token.Id{
-        .BangEqual,
-        .Pipe,
-        .PipeEqual,
-        .Equal,
-        .EqualEqual,
-        .Nl,
-        .LParen,
-        .RParen,
-        .LBrace,
-        .RBrace,
-        .LBracket,
-        .RBracket,
-        .Period,
-        .At,
-        .EqualRarr,
-        .Nl,
-        .Caret,
-        .CaretEqual,
-        .Plus,
-        .PlusEqual,
-        .PlusPlus,
-        .Minus,
-        .MinusEqual,
-        .Nl,
-        .Asterisk,
-        .AsteriskEqual,
-        .AsteriskAsterisk,
-        .AsteriskAsteriskEqual,
-        .Percent,
-        .PercentEqual,
-        .Slash,
-        .SlashEqual,
-        .SlashSlash,
-        .SlashSlashEqual,
-        .Nl,
-        .Comma,
-        .Ampersand,
-        .AmpersandEqual,
-        .LArr,
-        .LArrEqual,
-        .LArrArr,
-        .Nl,
-        .LArrArrEqual,
-        .RArr,
-        .RArrEqual,
-        .RArrArr,
-        .RArrArrEqual,
-        .Tilde,
-        .Underscore,
-        .Nl,
-        .Comment,
+    , &.{
+        .bang_equal,
+        .pipe,
+        .pipe_equal,
+        .equal,
+        .equal_equal,
+        .nl,
+        .l_paren,
+        .r_paren,
+        .l_brace,
+        .r_brace,
+        .l_bracket,
+        .r_bracket,
+        .period,
+        .at,
+        .equal_rarr,
+        .nl,
+        .caret,
+        .caret_equal,
+        .plus,
+        .plus_equal,
+        .plus_plus,
+        .minus,
+        .minus_equal,
+        .nl,
+        .asterisk,
+        .asterisk_equal,
+        .asterisk_asterisk,
+        .asterisk_asterisk_equal,
+        .percent,
+        .percent_equal,
+        .slash,
+        .slash_equal,
+        .slash_slash,
+        .slash_slash_equal,
+        .nl,
+        .comma,
+        .ampersand,
+        .ampersand_equal,
+        .l_arr,
+        .l_arr_equal,
+        .l_arr_arr,
+        .nl,
+        .l_arr_arr_equal,
+        .r_arr,
+        .r_arr_equal,
+        .r_arr_arr,
+        .r_arr_arr_equal,
+        .tilde,
+        .underscore,
+        .nl,
     });
 }
 
 test "keywords" {
     try expectTokens(
         \\not　and or let continue break return if else false true for
-        \\while match catch try error import is in fn as const this
-    , &[_]Token.Id{
-        .Keyword_not,
-        .Keyword_and,
-        .Keyword_or,
-        .Keyword_let,
-        .Keyword_continue,
-        .Keyword_break,
-        .Keyword_return,
-        .Keyword_if,
-        .Keyword_else,
-        .Keyword_false,
-        .Keyword_true,
-        .Keyword_for,
-        .Nl,
-        .Keyword_while,
-        .Keyword_match,
-        .Keyword_catch,
-        .Keyword_try,
-        .Keyword_error,
-        .Keyword_import,
-        .Keyword_is,
-        .Keyword_in,
-        .Keyword_fn,
-        .Keyword_as,
-        .Keyword_const,
-        .Keyword_this,
+        \\while match catch try error import is in fn as this
+    , &.{
+        .keyword_not,
+        .keyword_and,
+        .keyword_or,
+        .keyword_let,
+        .keyword_continue,
+        .keyword_break,
+        .keyword_return,
+        .keyword_if,
+        .keyword_else,
+        .keyword_false,
+        .keyword_true,
+        .keyword_for,
+        .nl,
+        .keyword_while,
+        .keyword_match,
+        .keyword_catch,
+        .keyword_try,
+        .keyword_error,
+        .keyword_import,
+        .keyword_is,
+        .keyword_in,
+        .keyword_fn,
+        .keyword_as,
+        .keyword_this,
     });
 }
 
@@ -1375,23 +1350,23 @@ test "indentation" {
         \\ if
         \\ if
         \\
-    , &[_]Token.Id{
-        .Keyword_if,
-        .Nl,
-        .{ .Indent = 1 },
-        .Keyword_if,
-        .Nl,
-        .{ .Indent = 2 },
-        .Keyword_if,
-        .Nl,
-        .Keyword_if,
-        .Nl,
-        .{ .Indent = 1 },
-        .Keyword_if,
-        .Nl,
-        .{ .Indent = 1 },
-        .Keyword_if,
-        .Nl,
+    , &.{
+        .keyword_if,
+        .nl,
+        .indent_1,
+        .keyword_if,
+        .nl,
+        .indent_2,
+        .keyword_if,
+        .nl,
+        .keyword_if,
+        .nl,
+        .indent_1,
+        .keyword_if,
+        .nl,
+        .indent_1,
+        .keyword_if,
+        .nl,
     });
 }
 
@@ -1402,16 +1377,16 @@ test "identifiers" {
         \\0o1gg
         \\0gg
         \\1gg
-    , &[_]Token.Id{
-        .Identifier,
-        .Nl,
-        .Identifier,
-        .Nl,
-        .Identifier,
-        .Nl,
-        .Identifier,
-        .Nl,
-        .Identifier,
+    , &.{
+        .identifier,
+        .nl,
+        .identifier,
+        .nl,
+        .identifier,
+        .nl,
+        .identifier,
+        .nl,
+        .identifier,
     });
     try expectTokens(
         \\30.30f
@@ -1419,80 +1394,68 @@ test "identifiers" {
         \\30.30e+12a
         \\30.30e+12-
         \\30.30e+-
-    , &[_]Token.Id{
-        .Integer,
-        .Period,
-        .Identifier,
-        .Nl,
-        .Integer,
-        .Period,
-        .Identifier,
-        .Nl,
-        .Integer,
-        .Period,
-        .Identifier,
-        .Plus,
-        .Identifier,
-        .Nl,
-        .Number,
-        .Minus,
-        .Nl,
-        .Integer,
-        .Period,
-        .Identifier,
-        .Plus,
-        .Minus,
+    , &.{
+        .integer,
+        .period,
+        .identifier,
+        .nl,
+        .integer,
+        .period,
+        .identifier,
+        .nl,
+        .integer,
+        .period,
+        .identifier,
+        .plus,
+        .identifier,
+        .nl,
+        .number,
+        .minus,
+        .nl,
+        .integer,
+        .period,
+        .identifier,
+        .plus,
+        .minus,
     });
 }
 
 test "numbers" {
     try expectTokens(
         \\0.
-        \\0,
         \\0.0
-        \\0,0
         \\0.0.0
-        \\0,0,0
-    , &[_]Token.Id{
-        .Integer,
-        .Period,
-        .Nl,
-        .Integer,
-        .Comma,
-        .Nl,
-        .Number,
-        .Nl,
-        .Number,
-        .Nl,
-        .Number,
-        .Period,
-        .Integer,
-        .Nl,
-        .Number,
-        .Comma,
-        .Integer,
+    , &.{
+        .integer,
+        .period,
+        .nl,
+        .number,
+        .nl,
+        .number,
+        .period,
+        .integer,
     });
 }
 
 test "format string" {
     try expectTokens(
         \\f f"\u{12}{12:12} foo \t\n {f"foo bar" ++ {1:2} as str:3} \x12 " :
-    , &[_]Token.Id{
-        .Identifier,
-        .FormatStart,
-        .Integer,
-        .Format,
-        .Identifier,
-        .String,
-        .PlusPlus,
-        .LBrace,
-        .Integer,
-        .Colon,
-        .Integer,
-        .RBrace,
-        .Keyword_as,
-        .Identifier,
-        .FormatEnd,
-        .Colon,
+    , &.{
+        .identifier,
+        .format_start,
+        .integer,
+        .format,
+        .identifier,
+        .string,
+        .plus_plus,
+        .l_brace,
+        .integer,
+        .colon,
+        .integer,
+        .r_brace,
+        .keyword_as,
+        .identifier,
+        .format_end,
+        .colon,
     });
 }

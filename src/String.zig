@@ -77,67 +77,155 @@ pub fn dump(str: String, writer: anytype) !void {
     try writer.print("\"{}\"", .{std.zig.fmtEscapes(str.data)});
 }
 
-pub fn get(str: *const String, vm: *Vm, index: *const Value, res: *?*Value) Vm.Error!void {
+pub fn get(str: *const String, ctx: Vm.Context, index: *const Value, res: *?*Value) Value.NativeError!void {
     switch (index.*) {
-        .int => return vm.fatal("TODO get str"),
-        .range => return vm.fatal("TODO get with ranges"),
+        .int => return ctx.frame.fatal(ctx.vm, "TODO str get int"),
+        .range => return ctx.frame.fatal(ctx.vm, "TODO str get with ranges"),
         .str => |*s| {
             if (res.* == null) {
-                res.* = try vm.gc.alloc();
+                res.* = try ctx.vm.gc.alloc();
             }
 
             if (mem.eql(u8, s.data, "len")) {
                 res.*.?.* = .{ .int = @intCast(i64, str.data.len) };
-            } else if (mem.eql(u8, s.data, "append")) {
-                res.* = try Value.zigToBog(vm, struct {
-                    fn append(_vm: *Vm, val: String) !void {
-                        if (_vm.last_get.* != .str)
-                            return _vm.fatal("expected string");
-
-                        try _vm.last_get.str.append(_vm.gc.gpa, val.data);
-                    }
-                }.append);
-            } else if (mem.eql(u8, s.data, "format")) {
-                res.* = try Value.zigToBog(vm, struct {
-                    fn format(_vm: *Vm, args: []const *Value) !*Value {
-                        if (_vm.last_get.* != .str)
-                            return _vm.fatal("expected string");
-
-                        return _vm.last_get.str.format(_vm, args);
-                    }
-                }.format);
-            } else if (mem.eql(u8, s.data, "join")) {
-                res.* = try Value.zigToBog(vm, struct {
-                    fn join(_vm: *Vm, args: []const *Value) !*Value {
-                        if (_vm.last_get.* != .str)
-                            return _vm.fatal("expected string");
-
-                        return _vm.last_get.str.join(_vm, args);
-                    }
-                }.join);
+            } else inline for (@typeInfo(methods).Struct.decls) |method| {
+                if (mem.eql(u8, s.data, method.name)) {
+                    res.* = try Value.zigToBog(ctx.vm, @field(methods, method.name));
+                    return;
+                }
             } else {
-                return vm.fatal("no such property");
+                return ctx.throw("no such property");
             }
         },
-        else => return vm.fatal("invalid index type"),
+        else => return ctx.throw("invalid index type"),
     }
 }
 
-pub fn set(str: *String, vm: *Vm, index: *const Value, new_val: *const Value) Vm.Error!void {
+pub const methods = struct {
+    pub fn append(str: Value.This(*String), ctx: Vm.Context, data: []const u8) !void {
+        var b = builder(ctx.vm.gc.gpa);
+        errdefer b.cancel();
+
+        try b.append(str.t.data);
+        try b.append(data);
+
+        str.t.deinit(ctx.vm.gc.gpa);
+        str.t.* = b.finish();
+    }
+
+    pub fn format(str: Value.This([]const u8), ctx: Vm.Context, args: []const *Value) !*Value {
+        var b = builder(ctx.vm.gc.gpa);
+        errdefer b.cancel();
+
+        try b.inner.ensureTotalCapacity(str.t.len);
+
+        const w = b.writer();
+        var state: enum {
+            start,
+            brace,
+            format,
+        } = .start;
+        var arg_i: usize = 0;
+        var format_start: usize = 0;
+        var options = std.fmt.FormatOptions{};
+
+        var i: usize = 0;
+        while (i < str.t.len) : (i += 1) {
+            const c = str.t[i];
+            switch (state) {
+                .start => if (c == '{') {
+                    state = .brace;
+                } else {
+                    try w.writeByte(c);
+                },
+                .brace => if (c == '{') {
+                    try w.writeByte(c);
+                } else {
+                    if (arg_i >= args.len) {
+                        return ctx.throw("not enough arguments to format string");
+                    }
+                    format_start = i;
+                    state = .format;
+                    options = .{};
+                    i -= 1;
+                },
+                .format => if (c == '}') {
+                    const fmt = str.t[format_start..i];
+                    var fmt_type: u8 = 0;
+
+                    if (fmt.len == 1) {
+                        fmt_type = fmt[0];
+                    } else {
+                        // TODO properly parse format options
+                    }
+
+                    switch (fmt_type) {
+                        'x', 'X' => {
+                            if (args[arg_i].* != .int) {
+                                return ctx.throwFmt("'x' takes an integer as an argument, got '{s}'", .{@tagName(args[arg_i].*)});
+                            }
+                            try std.fmt.formatInt(args[arg_i].int, 16, @intToEnum(std.fmt.Case, @boolToInt(fmt[0] == 'X')), options, w);
+                        },
+                        0 => if (args[arg_i].* == .str) {
+                            try b.append(args[arg_i].str.data);
+                        } else {
+                            try args[arg_i].dump(w, default_dump_depth);
+                        },
+                        else => {
+                            return ctx.throw("unknown format specifier");
+                        },
+                    }
+
+                    state = .start;
+                    arg_i += 1;
+                },
+            }
+        }
+        if (arg_i != args.len) {
+            return ctx.throw("unused arguments");
+        }
+
+        const ret = try ctx.vm.gc.alloc();
+        ret.* = Value{ .str = b.finish() };
+        return ret;
+    }
+
+    pub fn join(str: Value.This([]const u8), ctx: Vm.Context, args: []const *Value) !*Value {
+        var b = builder(ctx.vm.gc.gpa);
+        errdefer b.cancel();
+        try b.inner.ensureTotalCapacity(args.len * str.t.len);
+
+        for (args) |arg, i| {
+            if (i != 0) {
+                try b.append(str.t);
+            }
+            if (arg.* != .str) {
+                return ctx.throwFmt("join only accepts strings, got '{s}'", .{@tagName(arg.*)});
+            }
+            try b.append(arg.str.data);
+        }
+
+        const ret = try ctx.vm.gc.alloc();
+        ret.* = Value{ .str = b.finish() };
+        return ret;
+    }
+};
+
+pub fn set(str: *String, ctx: Vm.Context, index: *const Value, new_val: *const Value) Vm.Error!void {
     _ = str;
     _ = index;
     _ = new_val;
-    return vm.fatal("TODO set string");
+    return ctx.frame.fatal(ctx.vm, "TODO set string");
 }
 
 pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {
-    if (type_id == .none) {
-        return &Value.None;
+    if (type_id == .@"null") {
+        return Value.Null;
     } else if (type_id == .bool) {
         if (mem.eql(u8, str.data, "true"))
-            return &Value.True
+            return Value.True
         else if (mem.eql(u8, str.data, "false"))
-            return &Value.False
+            return Value.False
         else
             return vm.errorVal("cannot cast string to bool");
     }
@@ -145,19 +233,19 @@ pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {
     const new_val = try vm.gc.alloc();
     new_val.* = switch (type_id) {
         .int => .{
-            .int = @import("util.zig").parseInt(str.data) catch
-                return vm.errorVal("cannot cast string to int"),
+            .int = std.fmt.parseInt(i64, str.data, 0) catch |err|
+                return vm.errorFmt("cannot cast string to int: {s}", .{@errorName(err)}),
         },
         .num => .{
-            .num = @import("util.zig").parseNum(str.data) catch
-                return vm.errorVal("cannot cast string to num"),
+            .num = std.fmt.parseFloat(f64, str.data) catch |err|
+                return vm.errorFmt("cannot cast string to num: {s}", .{@errorName(err)}),
         },
         .bool => unreachable,
         .str => unreachable, // already string
         .tuple,
         .map,
         .list,
-        => return vm.fatal("TODO more casts from string"),
+        => return vm.errorVal("TODO more casts from string"),
         else => unreachable,
     };
     return new_val;
@@ -166,8 +254,8 @@ pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {
 pub fn from(val: *Value, vm: *Vm) Vm.Error!*Value {
     const str = try vm.gc.alloc();
 
-    if (val.* == .none) {
-        str.* = Value.string("none");
+    if (val.* == .@"null") {
+        str.* = Value.string("null");
     } else if (val.* == .bool) {
         str.* = if (val.bool)
             Value.string("true")
@@ -184,111 +272,4 @@ pub fn from(val: *Value, vm: *Vm) Vm.Error!*Value {
 pub fn in(str: *const String, val: *const Value) bool {
     if (val.* != .str) return false;
     return mem.indexOf(u8, str.data, val.str.data) != null;
-}
-
-pub fn append(str: *String, allocator: Allocator, data: []const u8) !void {
-    var b = builder(allocator);
-    errdefer b.cancel();
-
-    try b.append(str.data);
-    try b.append(data);
-
-    str.deinit(allocator);
-    str.* = b.finish();
-}
-
-pub fn format(str: String, vm: *Vm, args: []const *Value) !*Value {
-    var b = builder(vm.gc.gpa);
-    errdefer b.cancel();
-    try b.inner.ensureTotalCapacity(str.data.len);
-
-    const w = b.writer();
-    var state: enum {
-        start,
-        brace,
-        format,
-    } = .start;
-    var arg_i: usize = 0;
-    var format_start: usize = 0;
-    var options = std.fmt.FormatOptions{};
-
-    var i: usize = 0;
-    while (i < str.data.len) : (i += 1) {
-        const c = str.data[i];
-        switch (state) {
-            .start => if (c == '{') {
-                state = .brace;
-            } else {
-                try w.writeByte(c);
-            },
-            .brace => if (c == '{') {
-                try w.writeByte(c);
-            } else {
-                if (arg_i >= args.len) {
-                    return vm.errorVal("too few arguments");
-                }
-                format_start = i;
-                state = .format;
-                options = .{};
-                i -= 1;
-            },
-            .format => if (c == '}') {
-                const fmt = str.data[format_start..i];
-                var fmt_type: u8 = 0;
-
-                if (fmt.len == 1) {
-                    fmt_type = fmt[0];
-                } else {
-                    // TODO properly parse format options
-                }
-
-                switch (fmt_type) {
-                    'x', 'X' => {
-                        if (args[arg_i].* != .int) {
-                            return vm.typeError(.int, args[arg_i].*);
-                        }
-                        try std.fmt.formatInt(args[arg_i].int, 16, @intToEnum(std.fmt.Case, @boolToInt(fmt[0] == 'X')), options, w);
-                    },
-                    0 => if (args[arg_i].* == .str) {
-                        try b.append(args[arg_i].str.data);
-                    } else {
-                        try args[arg_i].dump(w, default_dump_depth);
-                    },
-                    else => {
-                        return vm.errorVal("unknown format specifier");
-                    },
-                }
-
-                state = .start;
-                arg_i += 1;
-            },
-        }
-    }
-    if (arg_i != args.len) {
-        return vm.errorVal("unused arguments");
-    }
-
-    const ret = try vm.gc.alloc();
-    ret.* = Value{ .str = b.finish() };
-    return ret;
-}
-
-pub fn join(str: String, vm: *Vm, args: []const *Value) !*Value {
-    var b = builder(vm.gc.gpa);
-    errdefer b.cancel();
-    try b.inner.ensureTotalCapacity(args.len * str.data.len);
-
-    for (args) |arg, i| {
-        if (i != 0) {
-            try b.append(str.data);
-        }
-        if (arg.* != .str) {
-            return vm.typeError(.str, arg.*);
-        }
-        try b.append(arg.str.data);
-    }
-
-    const ret = try vm.gc.alloc();
-    ret.* = Value{ .str = b.finish() };
-    return ret;
 }

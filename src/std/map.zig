@@ -4,55 +4,58 @@ const Value = bog.Value;
 const Vm = bog.Vm;
 
 /// Creates a list of the maps keys
-pub fn keys(vm: *Vm, map: *const Value.Map) !*Value {
-    var ret = try vm.gc.alloc();
+pub fn keys(ctx: Vm.Context, map: *const Value.Map) !*Value {
+    const gc = &ctx.vm.gc;
+    var ret = try gc.alloc();
     ret.* = .{ .list = .{} };
-    try ret.list.resize(vm.gc.gpa, map.count());
+    try ret.list.resize(gc.gpa, map.count());
     const items = ret.list.items;
 
     var i: usize = 0;
     var iter = map.iterator();
     while (iter.next()) |e| : (i += 1) {
-        items[i] = try vm.gc.dupe(e.key_ptr.*);
+        items[i] = try gc.dupe(e.key_ptr.*);
     }
 
     return ret;
 }
 
 /// Creates a list of the maps values
-pub fn values(vm: *Vm, map: *const Value.Map) !*Value {
-    var ret = try vm.gc.alloc();
+pub fn values(ctx: Vm.Context, map: *const Value.Map) !*Value {
+    const gc = &ctx.vm.gc;
+    var ret = try gc.alloc();
     ret.* = .{ .list = .{} };
-    try ret.list.resize(vm.gc.gpa, map.count());
+    try ret.list.resize(gc.gpa, map.count());
     const items = ret.list.items;
 
     var i: usize = 0;
     var iter = map.iterator();
     while (iter.next()) |e| : (i += 1) {
-        items[i] = try vm.gc.dupe(e.value_ptr.*);
+        items[i] = try gc.dupe(e.value_ptr.*);
     }
 
     return ret;
 }
 
 /// Creates a list of kv pairs
-pub fn entries(vm: *Vm, map: *const Value.Map) !*Value {
-    var ret = try vm.gc.alloc();
+pub fn entries(ctx: Vm.Context, map: *const Value.Map) !*Value {
+    const gc = &ctx.vm.gc;
+    var ret = try ctx.vm.gc.alloc();
     ret.* = .{ .list = .{} };
-    try ret.list.resize(vm.gc.gpa, map.count());
+    try ret.list.resize(gc.gpa, map.count());
     const items = ret.list.items;
 
     var i: usize = 0;
     var iter = map.iterator();
     while (iter.next()) |e| : (i += 1) {
-        var entry = try vm.gc.alloc();
+        var entry = try gc.alloc();
         entry.* = .{ .map = .{} };
-        try entry.map.ensureTotalCapacity(vm.gc.gpa, 2);
+        try entry.map.ensureTotalCapacity(gc.gpa, 2);
 
         const val_str = Value.string("value");
         const key_str = Value.string("key");
-        entry.map.putAssumeCapacityNoClobber(try vm.gc.dupe(&key_str), try vm.gc.dupe(e.key_ptr.*));
-        entry.map.putAssumeCapacityNoClobber(try vm.gc.dupe(&val_str), try vm.gc.dupe(e.value_ptr.*));
+        entry.map.putAssumeCapacityNoClobber(try gc.dupe(&key_str), try gc.dupe(e.key_ptr.*));
+        entry.map.putAssumeCapacityNoClobber(try gc.dupe(&val_str), try gc.dupe(e.value_ptr.*));
 
         items[i] = entry;
     }

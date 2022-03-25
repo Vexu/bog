@@ -27,12 +27,6 @@ pub fn main() !void {
             if (mem.eql(u8, args[1], "debug:tokens")) {
                 return debugTokens(gpa, args[2..]);
             }
-            if (mem.eql(u8, args[1], "debug:write")) {
-                return debugWrite(gpa, args[2..]);
-            }
-            if (mem.eql(u8, args[1], "debug:read")) {
-                return debugRead(gpa, args[2..]);
-            }
         }
         if (!mem.startsWith(u8, "-", args[1])) {
             return run(gpa, args[1..]);
@@ -71,15 +65,15 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
     const S = struct {
         var _args: [][]const u8 = undefined;
 
-        fn argsToBog(_vm: *bog.Vm) bog.Vm.Error!*bog.Value {
-            const ret = try _vm.gc.alloc();
+        fn argsToBog(ctx: bog.Vm.Context) bog.Vm.Error!*bog.Value {
+            const ret = try ctx.vm.gc.alloc();
             ret.* = .{ .list = .{} };
             var list = &ret.list;
-            errdefer list.deinit(_vm.gc.gpa);
-            try list.ensureTotalCapacity(_vm.gc.gpa, _args.len);
+            errdefer list.deinit(ctx.vm.gc.gpa);
+            try list.ensureTotalCapacity(ctx.vm.gc.gpa, _args.len);
 
             for (_args) |arg| {
-                const str = try _vm.gc.alloc();
+                const str = try ctx.vm.gc.alloc();
                 str.* = bog.Value.string(arg);
                 list.appendAssumeCapacity(str);
             }
@@ -89,32 +83,15 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
     S._args = args[0..];
     try vm.imports.putNoClobber(vm.gc.gpa, "args", S.argsToBog);
 
-    const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => |err| {
-            fatal("unable to open '{s}': {}", .{ file_name, err });
-        },
-    };
-    defer gpa.free(source);
-
-    var module = bog.Module.read(source) catch |e| switch (e) {
-        // not a bog bytecode file
-        error.InvalidMagic => null,
-        else => |err| fatal("cannot execute file '{s}': {}", .{ file_name, err }),
-    };
-
-    // TODO this doesn't cast nicely for some reason
-    const res_with_err = (if (module) |*some| blk: {
-        vm.ip = some.entry;
-        break :blk vm.exec(some);
-    } else vm.run(source));
-    const res = res_with_err catch |e| switch (e) {
-        error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
-            vm.errors.render(source, std.io.getStdErr().writer()) catch {};
+    const res = vm.compileAndRun(file_name) catch |e| switch (e) {
+        error.FatalError, error.TokenizeError, error.ParseError, error.CompileError => {
+            vm.errors.render(std.io.getStdErr().writer()) catch {};
             process.exit(1);
         },
-        error.MalformedByteCode => if (is_debug) @panic("malformed") else fatal("attempted to execute invalid bytecode", .{}),
         error.OutOfMemory => return error.OutOfMemory,
+        else => {
+            fatal("cannot run '{s}': {s}", .{ file_name, @errorName(e) });
+        },
     };
 
     switch (res.*) {
@@ -132,7 +109,7 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
             try stderr.writeAll("\n");
             process.exit(1);
         },
-        .none => {},
+        .@"null" => {},
         else => fatal("invalid return type '{s}'", .{@tagName(res.*)}),
     }
 }
@@ -186,20 +163,25 @@ fn fmtFile(gpa: std.mem.Allocator, name: []const u8) FmtError!bool {
     var errors = bog.Errors.init(gpa);
     defer errors.deinit();
 
-    var tree = bog.parse(gpa, source, &errors) catch |e| switch (e) {
+    var tree = bog.parse(gpa, source, name, &errors) catch |e| switch (e) {
         error.TokenizeError, error.ParseError => {
-            try errors.render(source, std.io.getStdErr().writer());
+            try errors.render(std.io.getStdErr().writer());
             return true;
         },
         error.OutOfMemory => return error.OutOfMemory,
     };
-    defer tree.deinit();
+    defer tree.deinit(gpa);
+
+    var buf = std.ArrayList(u8).init(gpa);
+    defer buf.deinit();
+
+    // TODO add check mode
+    _ = try tree.render(buf.writer());
 
     const file = try std.fs.cwd().createFile(name, .{});
     defer file.close();
 
-    // TODO add check mode
-    _ = try tree.render(file.writer());
+    try file.writeAll(buf.items);
     return false;
 }
 
@@ -223,27 +205,28 @@ const usage_debug =
 fn debugDump(gpa: std.mem.Allocator, args: [][]const u8) !void {
     const file_name = getFileName(usage_debug, args);
 
-    const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => |err| {
-            fatal("unable to open '{s}': {}", .{ file_name, err });
-        },
-    };
-    defer gpa.free(source);
-
     var errors = bog.Errors.init(gpa);
     defer errors.deinit();
+    var mod = mod: {
+        const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
+            error.OutOfMemory => return error.OutOfMemory,
+            else => |err| {
+                fatal("unable to open '{s}': {}", .{ file_name, err });
+            },
+        };
+        errdefer gpa.free(source);
 
-    var module = bog.compile(gpa, source, &errors) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.TokenizeError, error.ParseError, error.CompileError => {
-            try errors.render(source, std.io.getStdErr().writer());
-            process.exit(1);
-        },
+        break :mod bog.compile(gpa, source, file_name, &errors) catch |e| switch (e) {
+            error.OutOfMemory => return error.OutOfMemory,
+            error.TokenizeError, error.ParseError, error.CompileError => {
+                try errors.render(std.io.getStdErr().writer());
+                process.exit(1);
+            },
+        };
     };
-    defer module.deinit(gpa);
+    defer mod.deinit(gpa);
 
-    try module.dump(gpa, std.io.getStdOut().writer());
+    mod.dump(mod.main);
 }
 
 fn debugTokens(gpa: std.mem.Allocator, args: [][]const u8) !void {
@@ -260,76 +243,35 @@ fn debugTokens(gpa: std.mem.Allocator, args: [][]const u8) !void {
     var errors = bog.Errors.init(gpa);
     defer errors.deinit();
 
-    const tokens = bog.tokenize(gpa, source, &errors) catch |e| switch (e) {
+    var tokens = bog.tokenize(gpa, source, file_name, &errors) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.TokenizeError => {
-            try errors.render(source, std.io.getStdErr().writer());
+            try errors.render(std.io.getStdErr().writer());
             process.exit(1);
         },
     };
-    defer gpa.free(tokens);
+    defer tokens.deinit(gpa);
 
     const stream = std.io.getStdOut().writer();
-    for (tokens) |tok| {
-        switch (tok.id) {
-            .Nl, .Eof => try stream.print("{s}\n", .{@tagName(tok.id)}),
-            .Indent => |level| try stream.print("{s} {}\n", .{ @tagName(tok.id), level }),
-            else => try stream.print("{s} |{s}|\n", .{ @tagName(tok.id), source[tok.start..tok.end] }),
+    const starts = tokens.items(.start);
+    const ends = tokens.items(.end);
+    for (tokens.items(.id)) |id, i| {
+        switch (id) {
+            .nl,
+            .eof,
+            // zig fmt: off
+            .indent_1, .indent_2, .indent_3, .indent_4, .indent_5,
+            .indent_6, .indent_7, .indent_8, .indent_9, .indent_10,
+            .indent_11, .indent_12, .indent_13, .indent_14, .indent_15,
+            .indent_16, .indent_17, .indent_18, .indent_19, .indent_20,
+            .indent_21, .indent_22, .indent_23, .indent_24, .indent_25,
+            .indent_26, .indent_27, .indent_28, .indent_29, .indent_30,
+            .indent_31, .indent_32,
+            // zig fmt: on
+            => try stream.print("{s}\n", .{@tagName(id)}),
+            else => try stream.print("{s} |{s}|\n", .{ @tagName(id), source[starts[i]..ends[i]] }),
         }
     }
-}
-
-const usage_debug_write =
-    \\usage: bog debug:write [file] [out]
-    \\
-;
-
-fn debugWrite(gpa: std.mem.Allocator, args: [][]const u8) !void {
-    if (args.len != 2) {
-        fatal("{s}", .{usage_debug_write});
-    }
-    const file_name = args[0];
-
-    const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => |err| {
-            fatal("unable to open '{s}': {}", .{ file_name, err });
-        },
-    };
-    defer gpa.free(source);
-
-    var errors = bog.Errors.init(gpa);
-    defer errors.deinit();
-
-    var module = bog.compile(gpa, source, &errors) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        error.TokenizeError, error.ParseError, error.CompileError => {
-            try errors.render(source, std.io.getStdErr().writer());
-            process.exit(1);
-        },
-    };
-    defer module.deinit(gpa);
-
-    const file = try std.fs.cwd().createFile(args[1], .{});
-    defer file.close();
-
-    try module.write(file.writer());
-}
-
-fn debugRead(gpa: std.mem.Allocator, args: [][]const u8) !void {
-    const file_name = getFileName(usage_debug, args);
-
-    const source = std.fs.cwd().readFileAlloc(gpa, file_name, 1024 * 1024) catch |e| switch (e) {
-        error.OutOfMemory => return error.OutOfMemory,
-        else => |err| {
-            fatal("unable to open '{s}': {}", .{ file_name, err });
-        },
-    };
-    defer gpa.free(source);
-
-    const module = try bog.Module.read(source);
-
-    try module.dump(gpa, std.io.getStdOut().writer());
 }
 
 comptime {
