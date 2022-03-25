@@ -55,17 +55,24 @@ pub fn parse(gpa: Allocator, source: []const u8, path: []const u8, errors: *bog.
 }
 
 pub fn parseRepl(repl: *@import("repl.zig").Repl) Parser.Error!?Node.Index {
-    var parser = Parser{
-        .errors = &repl.vm.errors,
-        .tok_ids = repl.tokenizer.tokens.items(.id),
-        .tok_i = repl.tok_i,
-    };
-    defer repl.tok_i = @intCast(u32, parser.tok_ids.len - 1);
+    repl.parser.tok_ids = repl.tokenizer.tokens.items(.id);
+    repl.parser.tok_starts = repl.tokenizer.tokens.items(.start);
+    repl.parser.source = repl.tokenizer.it.bytes;
 
-    if (parser.eatToken(.eof, .skip_nl)) |_| return null;
-    const ret = try parser.decl(0);
-    _ = try parser.expectToken(.nl, .skip_nl);
-    _ = try parser.expectToken(.eof, .skip_nl);
+    if (repl.parser.eatToken(.eof, .skip_nl)) |_| return null;
+    const ret = try repl.parser.stmt(0);
+    _ = try repl.parser.expectToken(.nl, .skip_nl);
+    _ = try repl.parser.expectToken(.eof, .skip_nl);
+    repl.parser.tok_i -= 1; // go before EOF
+
+    repl.tree = .{
+        .root_nodes = repl.parser.node_buf.items,
+        .tokens = repl.tokenizer.tokens,
+        .extra = repl.parser.extra.items,
+        .nodes = repl.parser.nodes,
+        .source = repl.tokenizer.it.bytes,
+        .path = "<stdin>",
+    };
     return ret;
 }
 

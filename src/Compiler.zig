@@ -85,6 +85,38 @@ pub fn compile(gpa: Allocator, source: []const u8, path: []const u8, errors: *Er
     };
 }
 
+pub fn compileRepl(repl: *@import("repl.zig").Repl, node: Node.Index) Compiler.Error!void {
+    if (repl.compiler.instructions.len == 0) {
+        try repl.compiler.instructions.append(repl.compiler.gpa, .{ .op = .ret, .data = undefined });
+    } else {
+        _ = repl.compiler.code.pop();
+        repl.frame.ip -= 1;
+    }
+
+    const res_val = try repl.compiler.genNode(node, .value);
+    const res_ref = try repl.compiler.makeRuntime(res_val, node);
+
+    // add return
+    const data = repl.compiler.instructions.items(.data);
+    data[0] = .{ .un = res_ref };
+    try repl.compiler.code.append(repl.compiler.gpa, Bytecode.indexToRef(0));
+
+    try repl.compiler.resolveGlobals();
+
+    repl.bytecode = .{
+        .code = repl.compiler.instructions.slice(),
+        .extra = repl.compiler.extra.items,
+        .strings = repl.compiler.strings.items,
+        .main = repl.code.items,
+        .debug_info = .{
+            .lines = repl.compiler.lines.items,
+            .source = repl.tree.source,
+            .path = "<stdin>",
+        },
+    };
+    repl.frame.body = repl.code.items;
+}
+
 pub fn deinit(c: *Compiler) void {
     c.scopes.deinit(c.gpa);
     c.globals.deinit(c.gpa);
@@ -99,7 +131,7 @@ pub fn deinit(c: *Compiler) void {
     c.* = undefined;
 }
 
-const Code = std.ArrayListUnmanaged(Bytecode.Ref);
+pub const Code = std.ArrayListUnmanaged(Bytecode.Ref);
 
 const Fn = struct {
     code: Code = .{},

@@ -36,9 +36,6 @@ pub fn main() !void {
     const in = std.io.bufferedReader(std.io.getStdIn().reader()).reader();
     var stdout = std.io.getStdOut().writer();
 
-    if (true) {
-        @panic("TODO re-enable repl");
-    }
     try repl.run(gpa, in, stdout);
 }
 

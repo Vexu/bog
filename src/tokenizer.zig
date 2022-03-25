@@ -387,20 +387,20 @@ pub fn tokenize(gpa: mem.Allocator, source: []const u8, path: []const u8, errors
 }
 
 pub fn tokenizeRepl(repl: *@import("repl.zig").Repl) Tokenizer.Error!bool {
-    // remove previous eof
     const self = &repl.tokenizer;
     self.it.bytes = repl.buffer.items;
-    self.errors = &repl.vm.errors;
 
-    if (self.tokens.items.len > 0) _ = self.tokens.pop();
-    const start_len = self.tokens.items.len;
+    // remove previous eof
+    if (self.tokens.len > 0) self.tokens.len -= 1;
+    const start_len = self.tokens.len;
 
+    const gpa = repl.vm.gc.gpa;
     while (true) {
         const tok = try self.next();
-        try repl.tokenizer.tokens.append(repl.gpa, tok);
+        try repl.tokenizer.tokens.append(gpa, tok);
         if (tok.id == .eof) {
             // check if more input is expected
-            return if (self.tokens.items.len == start_len + 2)
+            return if (self.tokens.len == start_len + 2)
                 true
             else if (self.paren_level != 0 or
                 self.string or
