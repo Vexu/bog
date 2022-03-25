@@ -486,11 +486,7 @@ fn wrapResult(c: *Compiler, node: Node.Index, val: Value, res: Result) Error!Val
     } else if (res == .ref) {
         const val_ref = try c.makeRuntime(val);
         if (val_ref == res.ref) return val;
-        if (val == .mut) {
-            _ = try c.addBin(.copy, res.ref, val_ref, null);
-        } else {
-            _ = try c.addBin(.move, res.ref, val_ref, null);
-        }
+        _ = try c.addBin(.move, res.ref, val_ref, null);
         return Value{ .ref = res.ref };
     } else if (res == .ret) {
         _ = try c.addUn(.ret, try c.makeRuntime(val), null);
@@ -1981,14 +1977,7 @@ fn genFn(c: *Compiler, node: Node.Index) Error!Value {
 
     // destructure parameters
     for (params) |param, i| {
-        var arg_ref = @intToEnum(Ref, i);
-        switch (c.tree.nodes.items(.id)[c.getLastNode(param)]) {
-            .ident_expr, .mut_ident_expr => {
-                arg_ref = try c.addUn(.copy_un, arg_ref, null);
-            },
-            else => {},
-        }
-        try c.genLval(param, .{ .let = &.{ .ref = arg_ref } });
+        try c.genLval(param, .{ .let = &.{ .ref = @intToEnum(Ref, i) } });
     }
 
     // for one liner functions return the value of the expression,
@@ -2310,7 +2299,7 @@ fn genLvalEnum(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
             .extra = extra,
             .len = @intCast(u32, slice.len),
         },
-    }, tokens[node]);
+    }, node);
 
     const rhs_val = Value{ .ref = unwrapped_ref };
     try c.genLval(data[node].un, switch (lval) {
@@ -2508,7 +2497,6 @@ fn genLvalArrayAccess(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
         return c.reportErr("cannot declare a subscript", node);
     }
     const data = c.tree.nodes.items(.data);
-    const tokens = c.tree.nodes.items(.token);
     const lhs = data[node].bin.lhs;
     const rhs = data[node].bin.rhs;
 
@@ -2539,7 +2527,7 @@ fn genLvalArrayAccess(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
                     .start = lhs_ref,
                     .extra = extra,
                 },
-            }, tokens[node]);
+            }, node);
         },
         else => unreachable,
     }
