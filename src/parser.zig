@@ -111,16 +111,6 @@ pub const Parser = struct {
         return @intCast(Node.Index, index);
     }
 
-    fn addTyBin(p: *Parser, id: Node.Id, token: Token.Index, lhs: Node.Index, ty_name: Token.Index) !Node.Index {
-        const index = p.nodes.len;
-        try p.nodes.append(p.extra.allocator, .{
-            .id = id,
-            .token = token,
-            .data = .{ .ty_bin = .{ .lhs = lhs, .rhs = ty_name } },
-        });
-        return @intCast(Node.Index, index);
-    }
-
     fn addList(p: *Parser, id: Node.Id, token: Token.Index, nodes: []const Node.Index) Allocator.Error!Node.Index {
         const start = @intCast(u32, p.extra.items.len);
         try p.extra.appendSlice(nodes);
@@ -352,7 +342,7 @@ pub const Parser = struct {
             .equal_equal => return p.addBin(.equal_expr, tok, lhs, try p.rangeExpr(skip_nl, level)),
             .bang_equal => return p.addBin(.not_equal_expr, tok, lhs, try p.rangeExpr(skip_nl, level)),
             .keyword_in => return p.addBin(.in_expr, tok, lhs, try p.rangeExpr(skip_nl, level)),
-            .keyword_is => return p.addTyBin(.is_expr, tok, lhs, try p.typeName(skip_nl)),
+            .keyword_is => return p.addUn(.is_expr, try p.typeName(skip_nl), lhs),
             else => {
                 p.tok_i = start;
                 return lhs;
@@ -511,9 +501,9 @@ pub const Parser = struct {
     fn castExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
         var lhs = try p.prefixExpr(skip_nl, level);
 
-        if (p.eatTokenNoNl(.keyword_as)) |tok| {
+        if (p.eatTokenNoNl(.keyword_as)) |_| {
             p.skipNl();
-            lhs = try p.addTyBin(.as_expr, tok, lhs, try p.typeName(skip_nl));
+            lhs = try p.addUn(.as_expr, try p.typeName(skip_nl), lhs);
         }
 
         return lhs;

@@ -84,7 +84,7 @@ pub const Errors = struct {
         var i: u32 = 0;
         while (i < byte_offset) : (i += 1) {
             if (source[i] == '\n') {
-                start = i;
+                start = i + 1;
                 line_num += 1;
             }
         }

@@ -257,7 +257,7 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .negate_expr,
         .match_case_catch_all,
         => cur = data[cur].un,
-        .is_expr, .as_expr => return data[cur].ty_bin.rhs,
+        .is_expr, .as_expr => return data[cur].un,
         .decl,
         .assign,
         .add_assign,
@@ -381,10 +381,6 @@ pub const Node = struct {
         bin: struct {
             lhs: Index,
             rhs: Index,
-        },
-        ty_bin: struct {
-            lhs: Index,
-            rhs: Token.Index,
         },
         range: struct {
             start: u32,

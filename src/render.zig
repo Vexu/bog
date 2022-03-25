@@ -145,9 +145,9 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
             try renderToken(tree, tree.nextToken(tree.lastToken(data[node].bin.rhs)), aiw, space);
         },
         .as_expr, .is_expr => {
-            try renderNode(tree, data[node].ty_bin.lhs, aiw, .space);
-            try renderToken(tree, tokens[node], aiw, .space);
-            try renderToken(tree, data[node].ty_bin.rhs, aiw, space);
+            try renderNode(tree, data[node].un, aiw, .space);
+            try renderToken(tree, tree.prevToken(tokens[node]), aiw, .space);
+            try renderToken(tree, tokens[node], aiw, space);
         },
         .paren_expr => {
             try renderToken(tree, tokens[node], aiw, getBlockIndent(tree, data[node].un, .none));

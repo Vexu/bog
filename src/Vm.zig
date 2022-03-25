@@ -154,28 +154,8 @@ pub const Frame = struct {
     pub fn fatalExtra(f: *Frame, vm: *Vm, msg: Value.String, kind: bog.Errors.Kind) Error {
         @setCold(true);
 
-        const line_num = f.mod.debug_info.getLineForIndex(f.ip);
-        var i: u32 = 0;
-        var lines_seen: u32 = 1;
-        const source = f.mod.debug_info.source;
-        while (lines_seen < line_num and i < source.len) : (i += 1) {
-            if (source[i] == '\n') {
-                lines_seen += 1;
-            }
-        }
-        const start = i;
-        // find the end of the line
-        while (i < source.len) : (i += 1) {
-            if (source[i] == '\n') break;
-        }
-        try vm.errors.list.append(vm.errors.arena.child_allocator, .{
-            .msg = msg,
-            .line = try vm.errors.arena.allocator().dupe(u8, source[start..i]),
-            .path = try vm.errors.arena.allocator().dupe(u8, f.mod.debug_info.path),
-            .line_num = line_num,
-            .col_num = 1, // TODO
-            .kind = kind,
-        });
+        const byte_offset = f.mod.debug_info.lines.get(f.body[f.ip - 1]).?;
+        try vm.errors.add(msg, f.mod.debug_info.source, f.mod.debug_info.path, byte_offset, kind);
         if (f.caller_frame) |some| return some.fatalExtra(vm, .{ .data = "called here" }, .trace);
         return error.FatalError;
     }

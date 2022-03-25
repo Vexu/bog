@@ -19,7 +19,7 @@ pub fn deinit(b: *Bytecode, gpa: Allocator) void {
     gpa.free(b.extra);
     gpa.free(b.main);
     gpa.free(b.strings);
-    gpa.free(b.debug_info.lines);
+    b.debug_info.lines.deinit(gpa);
     gpa.free(b.debug_info.path);
     gpa.free(b.debug_info.source);
     b.code.deinit(gpa);
@@ -207,6 +207,21 @@ pub const Inst = struct {
         ret,
         ret_null,
         throw,
+
+        pub fn needsDebugInfo(op: Op) bool {
+            return switch (op) {
+                // zig fmt: off
+                .call, .call_one, .call_zero, .this_call, .this_call_zero, .set,
+                .get, .assert_len, .unwrap_tagged, .unwrap_error, .bit_not,
+                .bool_not, .negate, .as, .in, .less_than, .less_than_equal,
+                .greater_than, .greater_than_equal, .mul, .pow, .add, .sub,
+                .l_shift, .r_shift, .bit_and, .bit_or, .bit_xor, .rem, .div,
+                .div_floor, .import, .build_range_step, .build_range,
+                .iter_init, .iter_next => true,
+                // zig fmt: on
+                else => false,
+            };
+        }
     };
 
     pub const Data = union {
@@ -261,33 +276,33 @@ pub const Inst = struct {
 pub const DebugInfo = struct {
     path: []const u8 = "",
     source: []const u8 = "",
-    lines: []const Line,
+    lines: Lines,
 
-    pub const Line = struct {
-        index: u32,
-        line: u32,
-    };
-
-    pub fn getLineForIndex(d: DebugInfo, index: u32) u32 {
-        return for (d.lines) |line| {
-            if (line.index >= index) break line.line;
-        } else if (d.lines.len != 0)
-            d.lines[d.lines.len - 1].line
-        else
-            0;
-    }
+    pub const Lines = std.AutoHashMapUnmanaged(Ref, u32);
 };
+
+fn dumpLineCol(b: *Bytecode, byte_offset: u32) void {
+    var start: u32 = 0;
+    // find the start of the line which is either a newline or a splice
+    var line_num: u32 = 1;
+    var i: u32 = 0;
+    while (i < byte_offset) : (i += 1) {
+        if (b.debug_info.source[i] == '\n') {
+            start = i;
+            line_num += 1;
+        }
+    }
+    const col_num = byte_offset - start;
+    std.debug.print("{s}:{d}:{d}\n", .{ b.debug_info.path, line_num, col_num });
+}
 
 pub fn dump(b: *Bytecode, body: []const Ref) void {
     const ops = b.code.items(.op);
     const data = b.code.items(.data);
-    var prev_line: u32 = 0;
     for (body) |ref, inst| {
         const i = refToIndex(ref);
-        const line = b.debug_info.getLineForIndex(i);
-        if (line != prev_line) {
-            std.debug.print("line {d}:\n", .{line});
-            prev_line = line;
+        if (ops[i].needsDebugInfo()) {
+            dumpLineCol(b, b.debug_info.lines.get(ref).?);
         }
         std.debug.print("{d:4} {} = {s} ", .{ inst, ref, @tagName(ops[i]) });
         switch (ops[i]) {
@@ -326,7 +341,7 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
                 const fn_body = extra[1..];
                 std.debug.print("\n\nfn(args: {d}, captures: {d}) {{\n", .{ fn_info.args, fn_info.captures });
                 b.dump(fn_body);
-                std.debug.print("}}\n\nline {d}:\n", .{line});
+                std.debug.print("}}\n\n", .{});
             },
             .build_tagged_null => {
                 const str = b.strings[data[i].str.offset..][0..data[i].str.len];
