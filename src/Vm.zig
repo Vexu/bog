@@ -26,6 +26,8 @@ options: Options = .{},
 /// Current call stack depth, used to prevent stack overflow.
 call_depth: u32 = 0,
 
+frame_cache: std.ArrayListUnmanaged(struct { s: Stack, e: ErrHandlers }) = .{},
+
 const max_depth = 512;
 
 pub const Options = struct {
@@ -43,6 +45,8 @@ pub const Options = struct {
     /// default 2 GiB.
     page_limit: u32 = 2048,
 };
+
+pub const Stack = std.AutoArrayHashMapUnmanaged(u32, *Value);
 
 pub const Frame = struct {
     /// List of instructions part of this function.
@@ -63,7 +67,7 @@ pub const Frame = struct {
     /// Where to store a capture after a build_func instruction
     store_capture_index: u24 = 0,
     /// This function frames stack.
-    stack: std.AutoArrayHashMapUnmanaged(u32, *Value) = .{},
+    stack: Stack = .{},
     /// Stack of error handlers that have been set up.
     err_handlers: ErrHandlers = .{ .short = .{} },
 
@@ -233,6 +237,12 @@ pub fn deinit(vm: *Vm) void {
         mod.value_ptr.*.deinit(vm.gc.gpa);
     }
     vm.imported_modules.deinit(vm.gc.gpa);
+    for (vm.frame_cache.items) |*c| {
+        c.s.deinit(vm.gc.gpa);
+        c.e.deinit(vm.gc.gpa);
+    }
+    vm.frame_cache.deinit(vm.gc.gpa);
+    vm.* = undefined;
 }
 
 // TODO we might not want to require `importable` to be comptime
@@ -321,47 +331,42 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 res.* = Value.string(str);
             },
             .build_tuple => {
-                const res = try f.newVal(vm, ref);
                 const items = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
 
-                const tuple = try vm.gc.gpa.alloc(*Value, items.len);
-                errdefer vm.gc.gpa.free(tuple);
+                const res = try f.newVal(vm, ref);
+                res.* = .{ .tuple = try vm.gc.gpa.alloc(*Value, items.len) };
+
                 for (items) |item_ref, tuple_i| {
-                    tuple[tuple_i] = f.val(item_ref);
+                    res.tuple[tuple_i] = f.val(item_ref);
                 }
-                res.* = .{ .tuple = tuple };
             },
             .build_list => {
-                const res = try f.newVal(vm, ref);
                 const items = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
 
-                var list = Value.List{};
-                errdefer list.deinit(vm.gc.gpa);
+                const res = try f.newVal(vm, ref);
+                res.* = .{ .list = .{} };
 
-                try list.ensureUnusedCapacity(vm.gc.gpa, items.len);
-                list.items.len = items.len;
+                try res.list.ensureUnusedCapacity(vm.gc.gpa, items.len);
+                res.list.items.len = items.len;
 
                 for (items) |item_ref, list_I| {
-                    list.items[list_I] = f.val(item_ref);
+                    res.list.items[list_I] = f.val(item_ref);
                 }
-                res.* = .{ .list = list };
             },
             .build_map => {
-                const res = try f.newVal(vm, ref);
                 const items = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
 
-                var map = Value.Map{};
-                errdefer map.deinit(vm.gc.gpa);
+                const res = try f.newVal(vm, ref);
+                res.* = .{ .map = .{} };
 
-                try map.ensureUnusedCapacity(vm.gc.gpa, items.len);
+                try res.map.ensureUnusedCapacity(vm.gc.gpa, items.len);
 
                 var map_i: u32 = 0;
                 while (map_i < items.len) : (map_i += 2) {
                     const key = f.val(items[map_i]);
                     const val = f.val(items[map_i + 1]);
-                    map.putAssumeCapacity(key, val);
+                    res.map.putAssumeCapacity(key, val);
                 }
-                res.* = .{ .map = map };
             },
             .build_error => {
                 const res = try f.newVal(vm, ref);
@@ -1046,7 +1051,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         .this = this,
                         .captures = &.{},
                     };
-                    defer new_frame.deinit(vm);
+                    errdefer new_frame.deinit(vm);
+                    vm.getFrame(&new_frame);
 
                     try new_frame.stack.ensureUnusedCapacity(vm.gc.gpa, args.len);
 
@@ -1068,6 +1074,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     }
                     const res = try f.newRef(vm, ref);
                     res.* = returned;
+                    try vm.storeFrame(&new_frame);
                 } else {
                     try f.throwFmt(vm, "cannot call '{s}'", .{@tagName(callee.*)});
                 }
@@ -1186,6 +1193,18 @@ fn isNegative(val: *Value) bool {
     }
 }
 
+fn getFrame(vm: *Vm, f: *Frame) void {
+    const cached = vm.frame_cache.popOrNull() orelse return;
+    f.stack = cached.s;
+    f.err_handlers = cached.e;
+}
+
+fn storeFrame(vm: *Vm, f: *Frame) !void {
+    f.stack.clearRetainingCapacity();
+    f.err_handlers.short.len = 0;
+    try vm.frame_cache.append(vm.gc.gpa, .{ .s = f.stack, .e = f.err_handlers });
+}
+
 fn importFile(vm: *Vm, path: []const u8) !*Bytecode {
     if (!vm.options.import_files) return error.ImportingDisabled;
 
@@ -1244,14 +1263,17 @@ fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) !*Value {
         .this = Value.Null,
         .captures = &.{},
     };
-    defer frame.deinit(vm);
+    errdefer frame.deinit(vm);
+    vm.getFrame(&frame);
     frame.module_frame = &frame;
 
     var frame_val = try vm.gc.alloc();
     frame_val.* = .{ .frame = &frame };
     defer frame_val.* = .{ .int = 0 }; // clear frame
 
-    return vm.run(&frame);
+    const res = vm.run(&frame);
+    try vm.storeFrame(&frame);
+    return res;
 }
 
 pub fn errorFmt(vm: *Vm, comptime fmt: []const u8, args: anytype) Vm.Error!*Value {
