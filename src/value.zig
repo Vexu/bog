@@ -6,15 +6,22 @@ const Vm = bog.Vm;
 
 pub const Type = enum(u8) {
     @"null",
+    bool,
+
     int,
     num,
-    bool,
     str,
+    range,
+
+    /// native being separate from .func is an implementation detail
+    native_fn,
+    ///
+    native_val,
+
     tuple,
     map,
     list,
     err,
-    range,
     func,
     tagged,
 
@@ -23,12 +30,58 @@ pub const Type = enum(u8) {
 
     /// pseudo type user should not have access to via valid bytecode
     iterator,
-
-    /// native being separate from .func is an implementation detail
-    native,
 };
 
-pub const Value = union(Type) {
+pub const Value = opaque {
+    pub const Range = struct {
+        start: i64 = 0,
+        end: i64 = std.math.maxInt(i64),
+        step: i64 = 1,
+    };
+    pub const String = @import("value/String.zig");
+    pub const NativeError = Vm.Error || error{Throw};
+    pub const NativeFn = fn (Vm.Context, []const bog.Bytecode.Ref) NativeError!*Value;
+    pub const NativeVal = struct {
+        vtable: *const Vtable,
+
+        pub const Vtable = struct {
+            get: fn (*NativeVal, Vm.Context, index: *const Value, res: *?*Value) NativeError!void,
+            set: fn (*NativeVal, Vm.Context, index: *const Value, new_val: *Value) NativeError!void,
+            is: fn (*NativeVal, Vm.Context, Type) bool,
+            as: fn (*NativeVal, Vm.Context, Type) NativeError!*Value,
+        };
+    };
+
+    pub const Tagged = struct {
+        value: *Value,
+        name: [*:0]const u8,
+    };
+    pub const Func = extern struct {
+        /// module in which this function exists
+        module: *bog.Bytecode,
+
+        args: u32,
+        captures_len: u32,
+        body_len: u32,
+        body_index: u32,
+
+        pub inline fn captures(f: *Func) []*Value {
+            return (@ptrCast([*]Value, f) + 3)[0..f.captures_len];
+        }
+
+        pub inline fn body(f: @This()) u32 {
+            return @enumToInt(f.module.extra[f.body_index..][0..f.body_len]);
+        }
+    };
+    pub const List = @import("value/List.zig");
+    pub const Map = @import("value/Map.zig");
+};
+
+pub const TaggedValue = union(enum) {
+    a: u32,
+};
+
+pub const Valuee = union(Type) {
     tuple: []*Value,
     map: Map,
     list: List,
@@ -172,6 +225,17 @@ pub const Value = union(Type) {
         func: fn (Vm.Context, []const bog.Bytecode.Ref) NativeError!*Value,
     };
     pub const NativeError = Vm.Error || error{Throw};
+    pub const NativeFn = fn (Vm.Context, []const bog.Bytecode.Ref) NativeError!*Value;
+    pub const NativeVal = struct {
+        vtable: *const Vtable,
+
+        pub const Vtable = struct {
+            get: fn (*NativeVal, Vm.Context, index: *const Value, res: *?*Value) NativeError!void,
+            set: fn (*NativeVal, Vm.Context, index: *const Value, new_val: *Value) NativeError!void,
+            is: fn (*NativeVal, Vm.Context, Type) bool,
+            as: fn (*NativeVal, Vm.Context, Type) NativeError!*Value,
+        };
+    };
 
     /// Makes a distinct type which can be used as the parameter of a native function
     /// to easily get the value of `this`.

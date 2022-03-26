@@ -9,6 +9,117 @@ const bog = @import("bog.zig");
 const Value = bog.Value;
 const expect = std.testing.expect;
 
+/// 2^20, 1 MiB
+const page_size = 1_048_576;
+
+pub const SimpleValue = union(enum) {
+    int: i64,
+    num: f64,
+    str: Value.String,
+    const_str: [*:0]const u8,
+    native_fn: Value.NativeFn,
+    native_val: *Value.NativeVal,
+    range: *Value.Range,
+};
+
+const State = enum(u2) {
+    empty = 0,
+    white,
+    gray,
+    black,
+};
+
+const SimplePage = struct {
+    comptime {
+        // 2^20, 1 MiB
+        assert(@sizeOf(SimplePage) == page_size);
+        assert(@sizeOf(Val) == Value);
+    }
+    const val_count = @divFloor((@sizeOf(Val) + @sizeOf(Info)), page_size);
+    const pad_size = page_size - @sizeOf(u32) * 2 - (@sizeOf(Val) + @sizeOf(Info)) * val_count;
+
+    const Tag = std.meta.Tag(SimpleValue);
+
+    const Val = extern union {
+        int: i64,
+        num: f64,
+        str: *Value.String,
+        const_str: [*:0]const u8,
+        native_fn: Value.NativeFn,
+        native_val: Value.NativeVal,
+    };
+
+    const Info = packed struct {
+        tag: Tag,
+        state: State,
+    };
+
+    /// States of all values.
+    meta: [val_count]Info,
+    /// Padding to ensure size is 1 MiB.
+    __padding: [pad_size]u8 = @compileError("do not initiate directly"),
+
+    /// Index to the first free slot.
+    free: u32,
+
+    /// used during the collection phase to detect whether the Gc should keep
+    /// checking values in this page.
+    marked: u32,
+
+    /// Actual values, all pointers will stay valid as long as they are
+    /// referenced from a root.
+    values: [val_count]Val,
+};
+
+pub const AggregateValue = union(enum) {
+    tuple: Value,
+    map: Value.Map,
+    list: Value.List,
+    err: *Value,
+    tagged: *Value.Tagged,
+    func: *Value.Func,
+};
+
+const AggregatePage = struct {
+    comptime {
+        // 2^20, 1 MiB
+        assert(@sizeOf(SimplePage) == page_size);
+        assert(@sizeOf(Val) == Value);
+    }
+    const val_count = @divFloor((@sizeOf(Val) + @sizeOf(Info)), page_size);
+    const pad_size = page_size - @sizeOf(u32) * 2 - (@sizeOf(Val) + @sizeOf(Info)) * val_count;
+
+    const Tag = std.meta.Tag(AggregateValue);
+
+    const Val = extern union {
+        int: i64,
+        num: f64,
+        str: *Value.String,
+        const_str: [*:0]const u8,
+    };
+
+    const Info = packed struct {
+        tag: Tag,
+        state: State,
+    };
+
+    /// States of all values.
+    meta: [val_count]Info,
+    /// Padding to ensure size is 1 MiB.
+    __padding: [pad_size]u8 = @compileError("do not initiate directly"),
+
+    /// Index to the first free slot.
+    free: u32,
+
+    /// used during the collection phase to detect whether the Gc should keep
+    /// checking values in this page.
+    marked: u32,
+
+    /// Actual values, all pointers will stay valid as long as they are
+    /// referenced from a root.
+    values: [val_count]Val,
+};
+
 /// A pool of values prefixed with a header containing two bitmaps for
 /// the old and young generation.
 const Page = struct {
@@ -19,13 +130,6 @@ const Page = struct {
     }
     const val_count = 25_574;
     const pad_size = max_size - @sizeOf(u32) * 2 - (@sizeOf(Value) + @sizeOf(State)) * val_count;
-
-    const State = enum(u8) {
-        empty = 0,
-        white,
-        gray,
-        black,
-    };
 
     /// States of all values.
     meta: [val_count]State,
@@ -63,6 +167,7 @@ const Page = struct {
 
             if (page.meta[page.free] == .empty) {
                 page.meta[page.free] = .white;
+                page.values[page.free] = .{ .int = 0 };
                 return &page.values[page.free];
             }
         }
@@ -119,7 +224,7 @@ fn markVal(gc: *Gc, value: *const Value) void {
 
         // value is in this page
         const index = (@ptrToInt(value) - @ptrToInt(&page.values[0])) / @sizeOf(Value);
-        if (page.meta[index] != .empty) {
+        if (page.meta[index] == .white) {
             page.meta[index] = .gray;
         }
         return;
