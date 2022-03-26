@@ -31,8 +31,10 @@ pub const max_params = 32;
 pub const Ref = enum(u32) {
     _,
     pub fn format(ref: Ref, _: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        try writer.writeByte('%');
-        try std.fmt.formatInt(@enumToInt(ref), 10, .lower, options, writer);
+        var buf: [8]u8 = undefined;
+        buf[0] = '%';
+        const end = std.fmt.formatIntBuf(buf[1..], @enumToInt(ref), 10, .lower, .{});
+        try std.fmt.formatBuf(buf[0 .. end + 1], options, writer);
     }
 };
 
@@ -222,6 +224,18 @@ pub const Inst = struct {
                 else => false,
             };
         }
+
+        pub fn hasResult(op: Op) bool {
+            return switch (op) {
+                // zig fmt: off
+                .discard, .copy, .move, .store_capture, .append, .check_len,
+                .assert_len, .set, .push_err_handler, .pop_err_handler,
+                .jump, .jump_if_true, .jump_if_false, .jump_if_null, .ret,
+                .ret_null, .throw => false,
+                // zig fmt: on
+                else => true,
+            };
+        }
     };
 
     pub const Data = union {
@@ -304,7 +318,13 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
         if (ops[i].needsDebugInfo()) {
             dumpLineCol(b, b.debug_info.lines.get(ref).?);
         }
-        std.debug.print("{d:4} {} = {s} ", .{ inst, ref, @tagName(ops[i]) });
+        std.debug.print("{d:4} ", .{inst});
+        if (ops[i].hasResult()) {
+            std.debug.print("{:4} = ", .{ref});
+        } else {
+            std.debug.print("       ", .{});
+        }
+        std.debug.print("{s} ", .{@tagName(ops[i])});
         switch (ops[i]) {
             .primitive => std.debug.print("{s}\n", .{@tagName(data[i].primitive)}),
             .int => std.debug.print("{d}\n", .{data[i].int}),
