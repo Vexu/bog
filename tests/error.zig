@@ -15,14 +15,14 @@ test "unexpected token" {
     );
 }
 
-// test "unexpected arg count" {
-//     try expectError(
-//         \\const foo = fn (a, b) a + b
-//         \\foo(1)
-//     ,
-//         \\expected 2 args, got 1
-//     );
-// }
+test "unexpected arg count" {
+    try expectError(
+        \\let foo = fn (a, b) a + b
+        \\foo(1)
+    ,
+        \\expected 2 args, got 1
+    );
+}
 
 test "extra cases after catch-all" {
     try expectError(
@@ -31,24 +31,24 @@ test "extra cases after catch-all" {
         \\    1 => null
         \\
     ,
-        \\additional cases after catch-all case
+        \\additional cases after a catch-all case
     );
 }
 
-// test "extra handlers after catch-all" {
-//     try expectError(
-//         \\const foo = fn() null
-//         \\try
-//         \\    foo()
-//         \\catch
-//         \\    2
-//         \\catch (1)
-//         \\    3
-//         \\
-//     ,
-//         \\additional handlers after catch-all handler
-//     );
-// }
+test "extra handlers after catch-all" {
+    try expectError(
+        \\let foo = fn() null
+        \\try
+        \\    foo()
+        \\catch
+        \\    2
+        \\catch 1
+        \\    3
+        \\
+    ,
+        \\additional handlers after a catch-all handler
+    );
+}
 
 test "invalid tag unwrap" {
     try expectError(
@@ -133,8 +133,10 @@ fn expectError(source: []const u8, expected: []const u8) !void {
             return;
         },
     };
-    mod.debug_info.source = "";
-    defer mod.deinit(vm.gc.gpa);
+    defer {
+        mod.debug_info.source = "";
+        mod.deinit(vm.gc.gpa);
+    }
 
     var frame = bog.Vm.Frame{
         .mod = &mod,

@@ -1008,11 +1008,11 @@ pub const Tokenizer = struct {
                 },
                 .line_comment => switch (c) {
                     '\n' => {
-                        start_index = self.it.i;
                         state = .start;
                         self.expect_indent = false;
                         if (try self.getIndent()) |some|
                             return some;
+                        start_index = self.it.i;
                     },
                     else => {},
                 },

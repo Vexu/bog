@@ -1013,7 +1013,7 @@ fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     var seen_catch_all = false;
     for (cases[1..]) |case, case_i| {
         if (seen_catch_all) {
-            return c.reportErr("additional cases after catch-all case", case);
+            return c.reportErr("additional cases after a catch-all case", case);
         }
 
         const scope_count = c.scopes.items.len;
@@ -1329,7 +1329,7 @@ fn genIs(c: *Compiler, node: Node.Index) Error!Value {
         const ref = try c.addInst(.is, .{ .bin_ty = .{
             .operand = lhs.getRt(),
             .ty = type_id,
-        } }, node);
+        } }, null);
         return Value{ .ref = ref };
     }
 
@@ -1440,7 +1440,7 @@ fn genBoolOr(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         const lhs_ref = try c.makeRuntime(lhs_val);
 
         const ret_skip = try c.addJump(.jump_if_false, lhs_ref, null);
-        _ = try c.addUn(.ret, lhs_ref, lhs);
+        _ = try c.addUn(.ret, lhs_ref, null);
         c.finishJump(ret_skip);
 
         _ = try c.genNode(rhs, res);

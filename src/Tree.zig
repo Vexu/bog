@@ -257,7 +257,7 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .negate_expr,
         .match_case_catch_all,
         => cur = data[cur].un,
-        .is_expr, .as_expr => return data[cur].un,
+        .is_expr, .as_expr => return tokens[cur],
         .decl,
         .assign,
         .add_assign,

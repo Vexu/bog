@@ -251,7 +251,7 @@ test "modifying collections" {
         \\bar(foo)
         \\return foo
     ,
-        \\[1]
+        \\[2]
     );
 }
 
@@ -493,7 +493,7 @@ test "const value not modified by function" {
         \\inc(x)
         \\return x
     ,
-        \\[2]
+        \\[2, 1]
     );
 }
 
