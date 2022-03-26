@@ -226,7 +226,7 @@ fn debugDump(gpa: std.mem.Allocator, args: [][]const u8) !void {
     };
     defer mod.deinit(gpa);
 
-    mod.dump(mod.main);
+    mod.dump(mod.main, 0);
 }
 
 fn debugTokens(gpa: std.mem.Allocator, args: [][]const u8) !void {

@@ -144,6 +144,7 @@ fn expectError(source: []const u8, expected: []const u8) !void {
         .caller_frame = null,
         .module_frame = undefined,
         .captures = &.{},
+        .params = 0,
     };
     defer frame.deinit(&vm);
     frame.module_frame = &frame;

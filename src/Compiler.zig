@@ -33,8 +33,7 @@ list_buf: std.ArrayListUnmanaged(Ref) = .{},
 unwrap_jump_buf: JumpList = .{},
 cur_loop: ?*Loop = null,
 cur_fn: ?*Fn = null,
-cur_line: u32 = 1,
-prev_line_offset: u32 = 0,
+params: u32 = 0,
 
 code: *Code,
 
@@ -66,10 +65,7 @@ pub fn compile(gpa: Allocator, source: []const u8, path: []const u8, errors: *Er
     }
     {
         // ensure module ends in a return
-        const new_index = compiler.instructions.len;
-        const ref = Bytecode.indexToRef(new_index);
-        try compiler.instructions.append(gpa, .{ .op = .ret_null, .data = undefined });
-        try compiler.code.append(gpa, ref);
+        _ = try compiler.addUn(.ret_null, undefined, null);
     }
     try compiler.resolveGlobals();
 
@@ -100,7 +96,7 @@ pub fn compileRepl(repl: *@import("repl.zig").Repl, node: Node.Index) Compiler.E
     // add return
     const data = repl.compiler.instructions.items(.data);
     data[0] = .{ .un = res_ref };
-    try repl.compiler.code.append(repl.compiler.gpa, Bytecode.indexToRef(0));
+    try repl.compiler.code.append(repl.compiler.gpa, 0);
 
     try repl.compiler.resolveGlobals();
 
@@ -131,11 +127,12 @@ pub fn deinit(c: *Compiler) void {
     c.* = undefined;
 }
 
-pub const Code = std.ArrayListUnmanaged(Bytecode.Ref);
+pub const Code = std.ArrayListUnmanaged(u32);
 
 const Fn = struct {
     code: Code = .{},
     captures: std.ArrayListUnmanaged(Capture) = .{},
+    params: u32,
 
     const Capture = struct {
         name: []const u8,
@@ -147,7 +144,7 @@ const Fn = struct {
 
 const UnresolvedGlobal = struct {
     tok: TokenIndex,
-    ref: Ref,
+    index: u32,
 };
 
 const Symbol = struct {
@@ -172,7 +169,7 @@ const Try = struct {
     err_ref: Ref,
 };
 
-const JumpList = std.ArrayListUnmanaged(Ref);
+const JumpList = std.ArrayListUnmanaged(u32);
 
 const Value = union(enum) {
     /// result of continue, break, return and assignment; cannot exist at runtime
@@ -258,18 +255,22 @@ const Value = union(enum) {
 
 pub const Error = error{CompileError} || Allocator.Error;
 
+fn indexToRef(code_len: usize, params: u32) Ref {
+    return @intToEnum(Ref, code_len + params);
+}
+
 fn addInst(c: *Compiler, op: Bytecode.Inst.Op, data: Bytecode.Inst.Data, node: ?Node.Index) !Ref {
-    const new_index = c.instructions.len;
-    const ref = Bytecode.indexToRef(new_index);
+    const new_index = @intCast(u32, c.instructions.len);
+    const ref = indexToRef(c.code.items.len, c.params);
     try c.instructions.append(c.gpa, .{ .op = op, .data = data });
-    try c.code.append(c.gpa, ref);
+    try c.code.append(c.gpa, new_index);
 
     assert(op.needsDebugInfo() == (node != null));
     if (node) |some| {
         const starts = c.tree.tokens.items(.start);
         const tok = c.tree.nodes.items(.token)[some];
         const byte_offset = starts[tok];
-        try c.lines.putNoClobber(c.gpa, ref, byte_offset);
+        try c.lines.putNoClobber(c.gpa, new_index, byte_offset);
     }
 
     return ref;
@@ -283,13 +284,15 @@ fn addBin(c: *Compiler, op: Bytecode.Inst.Op, lhs: Ref, rhs: Ref, node: ?Node.In
     return c.addInst(op, .{ .bin = .{ .lhs = lhs, .rhs = rhs } }, node);
 }
 
-fn addJump(c: *Compiler, op: Bytecode.Inst.Op, operand: Ref, node: ?Node.Index) !Ref {
-    return c.addInst(op, .{
+fn addJump(c: *Compiler, op: Bytecode.Inst.Op, operand: Ref) !u32 {
+    const new_index = @intCast(u32, c.instructions.len);
+    _ = try c.addInst(op, .{
         .jump_condition = .{
             .operand = operand,
             .offset = undefined, // set later
         },
-    }, node);
+    }, null);
+    return new_index;
 }
 
 fn addExtra(c: *Compiler, op: Bytecode.Inst.Op, items: []const Ref, node: ?Node.Index) !Ref {
@@ -303,11 +306,10 @@ fn addExtra(c: *Compiler, op: Bytecode.Inst.Op, items: []const Ref, node: ?Node.
     }, node);
 }
 
-fn finishJump(c: *Compiler, jump_ref: Ref) void {
+fn finishJump(c: *Compiler, jump_index: u32) void {
     const offset = @intCast(u32, c.code.items.len);
     const data = c.instructions.items(.data);
     const ops = c.instructions.items(.op);
-    const jump_index = Bytecode.refToIndex(jump_ref);
     if (ops[jump_index] == .jump or ops[jump_index] == .pop_err_handler) {
         data[jump_index] = .{ .jump = offset };
     } else {
@@ -360,8 +362,9 @@ fn findSymbol(c: *Compiler, tok: TokenIndex) !FoundSymbol {
     }
     return c.findSymbolExtra(tok, c.scopes.items.len) catch |err| switch (err) {
         error.SymbolNotFound => {
+            const new_inst = @intCast(u32, c.instructions.len);
             const ref = try c.addInst(.load_global, undefined, null);
-            try c.unresolved_globals.append(c.gpa, .{ .tok = tok, .ref = ref });
+            try c.unresolved_globals.append(c.gpa, .{ .tok = tok, .index = new_inst });
             return FoundSymbol{ .ref = ref, .mut = false, .global = true };
         },
         else => |e| return e,
@@ -388,12 +391,13 @@ fn findSymbolExtra(c: *Compiler, tok: TokenIndex, start_index: usize) FindSymbol
                 }
 
                 const sym = try c.findSymbolExtra(tok, i);
-                const loaded_capture = Bytecode.indexToRef(c.instructions.len);
+                const loaded_capture = indexToRef(f.code.items.len, f.params);
+                const new_inst = @intCast(u32, c.instructions.len);
                 try c.instructions.append(c.gpa, .{
                     .op = .load_capture,
                     .data = .{ .un = @intToEnum(Ref, f.captures.items.len) },
                 });
-                try f.code.append(c.gpa, loaded_capture);
+                try f.code.append(c.gpa, new_inst);
                 try f.captures.append(c.gpa, .{
                     .name = name,
                     .parent_ref = sym.ref,
@@ -434,8 +438,7 @@ fn resolveGlobals(c: *Compiler) !void {
         const name = c.tree.tokenSlice(unresolved.tok);
         for (c.globals.items) |global| {
             if (mem.eql(u8, global.name, name)) {
-                const index = Bytecode.refToIndex(unresolved.ref);
-                data[index] = .{ .un = global.ref };
+                data[unresolved.index] = .{ .un = global.ref };
                 break;
             }
         } else {
@@ -753,7 +756,7 @@ fn genBreak(c: *Compiler, node: Node.Index) !void {
     const loop = c.cur_loop orelse
         return c.reportErr("break outside of loop", node);
 
-    const jump = try c.addInst(.jump, undefined, null);
+    const jump = try c.addJump(.jump, undefined);
     try loop.breaks.append(c.gpa, jump);
 }
 
@@ -803,7 +806,13 @@ fn genFor(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     c.cur_loop = &loop;
 
     // iter next is fused with a jump_null, offset is set after body is generated
-    const elem_ref = try c.addJump(.iter_next, iter_ref, for_expr.cond);
+    const jump_index = @intCast(u32, c.instructions.len);
+    const elem_ref = try c.addInst(.iter_next, .{
+        .jump_condition = .{
+            .operand = iter_ref,
+            .offset = undefined, // set later
+        },
+    }, for_expr.cond);
 
     if (for_expr.capture) |some| {
         try c.genLval(some, .{ .let = &.{ .ref = elem_ref } });
@@ -823,7 +832,7 @@ fn genFor(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     _ = try c.addInst(.jump, .{ .jump = loop.first_inst }, null);
 
     // exit loop when IterNext results in None
-    c.finishJump(elem_ref);
+    c.finishJump(jump_index);
 
     for (loop.breaks.items) |@"break"| {
         c.finishJump(@"break");
@@ -857,13 +866,13 @@ fn genWhile(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     c.cur_loop = &loop;
 
     // beginning of condition
-    var cond_jump: ?Ref = null;
+    var cond_jump: ?u32 = null;
 
     const cond_val = try c.genNode(while_expr.cond, .value);
     if (while_expr.capture) |capture| {
         if (cond_val.isRt()) {
             // exit loop if cond == null
-            cond_jump = try c.addJump(.jump_if_null, cond_val.getRt(), null);
+            cond_jump = try c.addJump(.jump_if_null, cond_val.getRt());
         } else if (cond_val == .@"null") {
             // never executed
             return sub_res.toVal();
@@ -872,7 +881,7 @@ fn genWhile(c: *Compiler, node: Node.Index, res: Result) Error!Value {
 
         try c.genLval(capture, .{ .let = &.{ .ref = cond_ref } });
     } else if (cond_val.isRt()) {
-        cond_jump = try c.addJump(.jump_if_false, cond_val.getRt(), null);
+        cond_jump = try c.addJump(.jump_if_false, cond_val.getRt());
     } else {
         const bool_val = try cond_val.getBool(c, while_expr.cond);
         if (bool_val == false) {
@@ -925,8 +934,8 @@ fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         const cond_ref = try c.makeRuntime(cond_val);
         switch (c.tree.nodes.items(.id)[c.getLastNode(capture)]) {
             .ident_expr, .mut_ident_expr, .discard_expr => {
-                const jump_null_ref = try c.addJump(.jump_if_null, cond_ref, null);
-                try c.unwrap_jump_buf.append(c.gpa, jump_null_ref);
+                const jump_null_index = try c.addJump(.jump_if_null, cond_ref);
+                try c.unwrap_jump_buf.append(c.gpa, jump_null_index);
             },
             else => {},
         }
@@ -944,16 +953,14 @@ fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         return c.wrapResult(node, res_val, res);
     } else {
         // jump past if_body if cond == false
-        const skip_jump = try c.addJump(.jump_if_false, cond_val.getRt(), null);
+        const skip_jump = try c.addJump(.jump_if_false, cond_val.getRt());
         try c.unwrap_jump_buf.append(c.gpa, skip_jump);
     }
     const sub_res = switch (res) {
         .ref, .discard, .ret => res,
         .value => val: {
             // add a dummy instruction we can store the value into
-            const res_ref = Bytecode.indexToRef(c.instructions.len);
-            try c.instructions.append(c.gpa, undefined);
-            break :val Result{ .ref = res_ref };
+            break :val Result{ .ref = try c.addUn(.nop, undefined, null) };
         },
     };
 
@@ -962,7 +969,7 @@ fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
 
     // jump past else_body since if_body was executed
     const else_skip = if (if_expr.else_body != null or sub_res == .ref)
-        try c.addUn(.jump, undefined, null)
+        try c.addJump(.jump, undefined)
     else
         null;
 
@@ -992,9 +999,7 @@ fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .ref, .discard, .ret => res,
         .value => val: {
             // add a dummy instruction we can store the value into
-            const res_ref = Bytecode.indexToRef(c.instructions.len);
-            try c.instructions.append(c.gpa, undefined);
-            break :val Result{ .ref = res_ref };
+            break :val Result{ .ref = try c.addUn(.nop, undefined, null) };
         },
     };
 
@@ -1048,16 +1053,16 @@ fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
                     const item_ref = try c.makeRuntime(item_val);
                     // if not equal to the error value jump over this handler
                     const eq_ref = try c.addBin(.equal, item_ref, cond_ref, null);
-                    try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, eq_ref, null));
+                    try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, eq_ref));
                 } else {
                     for (items[0 .. items.len - 1]) |item| {
                         const item_val = try c.genNode(item, .value);
                         const item_ref = try c.makeRuntime(item_val);
 
                         const eq_ref = try c.addBin(.equal, item_ref, cond_ref, null);
-                        try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_true, eq_ref, null));
+                        try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_true, eq_ref));
                     }
-                    const exit_jump = try c.addUn(.jump, undefined, null);
+                    const exit_jump = try c.addJump(.jump, undefined);
 
                     for (c.unwrap_jump_buf.items[jump_buf_top..]) |some| {
                         c.finishJump(some);
@@ -1075,7 +1080,7 @@ fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
 
         // exit match (unless it's this is the last case)
         const exit_jump = if (case_i + 2 != cases.len)
-            try c.addUn(.jump, undefined, null)
+            try c.addJump(.jump, undefined)
         else
             null;
 
@@ -1115,19 +1120,12 @@ fn genTry(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .ref, .discard, .ret => res,
         .value => val: {
             // add a dummy instruction we can store the value into
-            const res_ref = Bytecode.indexToRef(c.instructions.len);
-            try c.instructions.append(c.gpa, undefined);
-            break :val Result{ .ref = res_ref };
+            break :val Result{ .ref = try c.addUn(.nop, undefined, null) };
         },
     };
 
-    const err_ref = err_ref: {
-        // add a dummy instruction for the thrown value
-        const res_ref = Bytecode.indexToRef(c.instructions.len);
-        try c.instructions.append(c.gpa, undefined);
-        break :err_ref res_ref;
-    };
-    const err_handler_inst = try c.addJump(.push_err_handler, err_ref, null);
+    const err_ref = try c.addUn(.nop, undefined, null);
+    const err_handler_inst = try c.addJump(.push_err_handler, err_ref);
 
     _ = try c.genNode(cond, sub_res);
 
@@ -1135,7 +1133,7 @@ fn genTry(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     c.finishJump(err_handler_inst);
 
     // if no error jump over all catchers
-    const skip_all = try c.addUn(.pop_err_handler, undefined, null);
+    const skip_all = try c.addJump(.pop_err_handler, undefined);
 
     const scope_count = c.scopes.items.len;
     defer c.scopes.items.len = scope_count;
@@ -1168,7 +1166,7 @@ fn genTry(c: *Compiler, node: Node.Index, res: Result) Error!Value {
                 const capture_ref = try c.makeRuntime(capture_val);
                 // if not equal to the error value jump over this handler
                 const eq_ref = try c.addBin(.equal, capture_ref, err_ref, null);
-                try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, eq_ref, null));
+                try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, eq_ref));
             }
         } else {
             seen_catch_all = true;
@@ -1177,11 +1175,11 @@ fn genTry(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         const expr = data[catcher].bin.rhs;
         _ = try c.genNode(expr, sub_res);
 
-        var exit_handler: ?Ref = null;
+        var exit_handler: ?u32 = null;
 
         // exit this handler (unless it's the last one)
         if (catcher_i + 1 != catches.len) {
-            exit_handler = try c.addUn(.jump, undefined, null);
+            exit_handler = try c.addJump(.jump, undefined);
         }
 
         // jump over this handler if the value doesn't match
@@ -1403,7 +1401,7 @@ fn genBoolAnd(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     if (res == .ret) {
         const lhs_ref = try c.makeRuntime(lhs_val);
 
-        const ret_skip = try c.addJump(.jump_if_true, lhs_ref, null);
+        const ret_skip = try c.addJump(.jump_if_true, lhs_ref);
         _ = try c.addUn(.ret, lhs_ref, null);
         c.finishJump(ret_skip);
 
@@ -1416,7 +1414,7 @@ fn genBoolAnd(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     else
         try c.makeRuntime(lhs_val);
 
-    const rhs_skip = try c.addJump(.jump_if_false, lhs_ref, null);
+    const rhs_skip = try c.addJump(.jump_if_false, lhs_ref);
 
     _ = try c.genNode(rhs, .{ .ref = lhs_ref });
     c.finishJump(rhs_skip);
@@ -1439,7 +1437,7 @@ fn genBoolOr(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     if (res == .ret) {
         const lhs_ref = try c.makeRuntime(lhs_val);
 
-        const ret_skip = try c.addJump(.jump_if_false, lhs_ref, null);
+        const ret_skip = try c.addJump(.jump_if_false, lhs_ref);
         _ = try c.addUn(.ret, lhs_ref, null);
         c.finishJump(ret_skip);
 
@@ -1452,7 +1450,7 @@ fn genBoolOr(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     else
         try c.makeRuntime(lhs_val);
 
-    const rhs_skip = try c.addJump(.jump_if_true, lhs_ref, null);
+    const rhs_skip = try c.addJump(.jump_if_true, lhs_ref);
 
     _ = try c.genNode(rhs, .{ .ref = lhs_ref });
     c.finishJump(rhs_skip);
@@ -1951,77 +1949,75 @@ fn genFn(c: *Compiler, node: Node.Index) Error!Value {
     const params = items[@boolToInt(items[0] == 0) .. items.len - 1];
     const body = items[items.len - 1];
 
-    if (params.len > Bytecode.max_params) {
-        return c.reportErr("too many parameters", node);
-    }
-
-    var func = Fn{};
+    var func = Fn{ .params = @intCast(u32, params.len) };
     defer func.code.deinit(c.gpa);
     defer func.captures.deinit(c.gpa);
+    {
+        const old_code = c.code;
+        const scope_count = c.scopes.items.len;
+        const old_loop = c.cur_loop;
+        const old_fn = c.cur_fn;
+        const old_params = c.params;
+        defer {
+            c.code = old_code;
+            c.scopes.items.len = scope_count;
+            c.cur_loop = old_loop;
+            c.cur_fn = old_fn;
+            c.params = old_params;
+        }
+        c.code = &func.code;
+        c.cur_loop = null;
+        c.cur_fn = &func;
+        c.params = func.params;
 
-    const old_code = c.code;
-    const scope_count = c.scopes.items.len;
-    const old_loop = c.cur_loop;
-    const old_fn = c.cur_fn;
-    defer {
-        c.code = old_code;
-        c.scopes.items.len = scope_count;
-        c.cur_loop = old_loop;
-        c.cur_fn = old_fn;
+        try c.scopes.append(c.gpa, .{ .func = &func });
+
+        // destructure parameters
+        for (params) |param, i| {
+            try c.genLval(param, .{ .let = &.{ .ref = @intToEnum(Ref, i) } });
+        }
+
+        // for one liner functions return the value of the expression,
+        // otherwise require an explicit return statement
+        const last = c.getLastNode(body);
+        const ids = c.tree.nodes.items(.id);
+        const sub_res: Result = switch (ids[last]) {
+            // zig fmt: off
+            .block_stmt_two, .block_stmt, .assign, .add_assign, .sub_assign, .mul_assign,
+            .pow_assign, .div_assign, .div_floor_assign, .rem_assign, .l_shift_assign,
+            .r_shift_assign, .bit_and_assign, .bit_or_assign, .bit_xor_assign => .discard,
+            // zig fmt: on
+            else => .value,
+        };
+
+        const body_val = try c.genNode(body, sub_res);
+        if (body_val == .empty or body_val == .@"null") {
+            _ = try c.addUn(.ret_null, undefined, null);
+        } else {
+            const body_ref = try c.makeRuntime(body_val);
+            _ = try c.addUn(.ret, body_ref, null);
+        }
     }
-    c.code = &func.code;
-    c.cur_loop = null;
-    c.cur_fn = &func;
 
-    try c.scopes.append(c.gpa, .{ .func = &func });
-
-    // destructure parameters
-    for (params) |param, i| {
-        try c.genLval(param, .{ .let = &.{ .ref = @intToEnum(Ref, i) } });
-    }
-
-    // for one liner functions return the value of the expression,
-    // otherwise require an explicit return statement
-    const last = c.getLastNode(body);
-    const ids = c.tree.nodes.items(.id);
-    const sub_res: Result = switch (ids[last]) {
-        // zig fmt: off
-        .block_stmt_two, .block_stmt, .assign, .add_assign, .sub_assign, .mul_assign,
-        .pow_assign, .div_assign, .div_floor_assign, .rem_assign, .l_shift_assign,
-        .r_shift_assign, .bit_and_assign, .bit_or_assign, .bit_xor_assign => .discard,
-        // zig fmt: on
-        else => .value,
-    };
-
-    const body_val = try c.genNode(body, sub_res);
-    if (body_val == .empty or body_val == .@"null") {
-        _ = try c.addUn(.ret_null, undefined, null);
-    } else {
-        const body_ref = try c.makeRuntime(body_val);
-        _ = try c.addUn(.ret, body_ref, null);
-    }
-
-    // done generating the new function
-    c.code = old_code;
-
-    const fn_info = Bytecode.Inst.Data.FnInfo{
-        .args = @intCast(u8, params.len),
-        .captures = @intCast(u24, func.captures.items.len),
-    };
+    const has_captures = func.captures.items.len != 0;
 
     const extra = @intCast(u32, c.extra.items.len);
-    try c.extra.append(c.gpa, @intToEnum(Ref, @bitCast(u32, fn_info)));
-    try c.extra.appendSlice(c.gpa, func.code.items);
-    const func_ref = try c.addInst(.build_func, .{
+    try c.extra.append(c.gpa, @intToEnum(Ref, params.len));
+    if (has_captures) {
+        try c.extra.ensureUnusedCapacity(c.gpa, 1 + func.captures.items.len);
+        c.extra.appendAssumeCapacity(@intToEnum(Ref, func.captures.items.len));
+        for (func.captures.items) |capture| {
+            c.extra.appendAssumeCapacity(capture.parent_ref);
+        }
+    }
+    try c.extra.appendSlice(c.gpa, @bitCast([]const Ref, func.code.items));
+
+    const func_ref = try c.addInst(if (has_captures) .build_func_capture else .build_func, .{
         .extra = .{
             .extra = extra,
-            .len = @intCast(u32, func.code.items.len + 1),
+            .len = @intCast(u32, c.extra.items.len - extra),
         },
     }, null);
-
-    for (func.captures.items) |capture| {
-        _ = try c.addBin(.store_capture, func_ref, capture.parent_ref, null);
-    }
     return Value{ .ref = func_ref };
 }
 
@@ -2042,13 +2038,9 @@ fn genCall(c: *Compiler, node: Node.Index) Error!Value {
     const this = switch (c.tree.nodes.items(.id)[last_node]) {
         .member_access_expr,
         .array_access_expr,
-        => c.instructions.items(.data)[Bytecode.refToIndex(callee_ref)].bin.lhs,
+        => c.instructions.items(.data)[@enumToInt(callee_ref) - c.params].bin.lhs,
         else => null,
     };
-
-    if (args.len > Bytecode.max_params) {
-        return c.reportErr("too many arguments", node);
-    }
 
     const list_buf_top = c.list_buf.items.len;
     defer c.list_buf.items.len = list_buf_top;
@@ -2585,7 +2577,7 @@ fn genTryUnwrapEnum(c: *Compiler, node: Node.Index, val: *const Value) Error!voi
             .len = @intCast(u32, slice.len),
         },
     }, null);
-    try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_null, unwrapped_ref, null));
+    try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_null, unwrapped_ref));
 
     try c.genTryUnwrap(data[node].un, &.{ .ref = unwrapped_ref });
 }
@@ -2598,8 +2590,14 @@ fn genTryUnwrapError(c: *Compiler, node: Node.Index, val: *const Value) Error!vo
     if (data[node].un == 0) {
         return c.reportErr("expected a destructuring", node);
     }
-    const unwrapped_ref = try c.addJump(.unwrap_error_or_jump, val.getRt(), null);
-    try c.unwrap_jump_buf.append(c.gpa, unwrapped_ref);
+    const jump_index = @intCast(u32, c.instructions.len);
+    const unwrapped_ref = try c.addInst(.unwrap_error_or_jump, .{
+        .jump_condition = .{
+            .operand = val.getRt(),
+            .offset = undefined, // set later
+        },
+    }, null);
+    try c.unwrap_jump_buf.append(c.gpa, jump_index);
 
     try c.genTryUnwrap(data[node].un, &.{ .ref = unwrapped_ref });
 }
@@ -2614,7 +2612,7 @@ fn genTryUnwrapRange(c: *Compiler, node: Node.Index, val: *const Value) Error!vo
     const is_range_ref = try c.addInst(.is, .{
         .bin_ty = .{ .operand = range_ref, .ty = .range },
     }, null);
-    try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, is_range_ref, null));
+    try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, is_range_ref));
 
     try c.genUnwrapRangePart(range.start, range_ref, "start");
     if (range.end) |some| {
@@ -2644,7 +2642,7 @@ fn genTryUnwrapTupleList(c: *Compiler, node: Node.Index, val: *const Value) Erro
     const ids = c.tree.nodes.items(.id);
 
     const len_ref = try c.addBin(.check_len, val.getRt(), @intToEnum(Ref, items.len), null);
-    try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, len_ref, null));
+    try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, len_ref));
 
     for (items) |item, i| {
         const last_node = c.getLastNode(item);
@@ -2701,7 +2699,7 @@ fn genTryUnwrapMap(c: *Compiler, node: Node.Index, val: *const Value) Error!void
         }
 
         const res_ref = try c.addBin(.get_or_null, container_ref, key, null);
-        try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_null, res_ref, null));
+        try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_null, res_ref));
 
         try c.genTryUnwrap(data[item].bin.rhs, &.{ .ref = res_ref });
     }

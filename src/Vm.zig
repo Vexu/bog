@@ -46,17 +46,21 @@ pub const Options = struct {
     page_limit: u32 = 2048,
 };
 
-pub const Stack = std.AutoArrayHashMapUnmanaged(u32, *Value);
+/// NOTE: should be ?*Value, but that makes stage1 shit its pants.
+pub const Stack = std.ArrayListUnmanaged(*Value);
 
 pub const Frame = struct {
     /// List of instructions part of this function.
-    body: []const Ref,
+    body: []const u32,
     /// Index into `body`.
     ip: u32 = 0,
     /// The module in which this function lives in.
     mod: *Bytecode,
     /// Values this function captures.
     captures: []*Value,
+    /// Number of parameters current function has. Needed to calculate
+    /// a reference to instructions.
+    params: u32,
 
     /// Value of `this` as set by the caller.
     this: *Value = Value.Null,
@@ -64,8 +68,6 @@ pub const Frame = struct {
     caller_frame: ?*Frame,
     /// Frame of `mod.main`.
     module_frame: *Frame,
-    /// Where to store a capture after a build_func instruction
-    store_capture_index: u24 = 0,
     /// This function frames stack.
     stack: Stack = .{},
     /// Stack of error handlers that have been set up.
@@ -95,18 +97,26 @@ pub const Frame = struct {
     }
 
     pub fn newRef(f: *Frame, vm: *Vm, ref: Ref) !*?*Value {
-        const gop = try f.stack.getOrPut(vm.gc.gpa, @enumToInt(ref));
-        const casted = @ptrCast(*?*Value, gop.value_ptr);
-        if (!gop.found_existing) casted.* = null;
-        return casted;
+        const ref_int = @enumToInt(ref);
+        if (ref_int < f.stack.items.len) {
+            return @ptrCast(*?*Value, &f.stack.items[ref_int]);
+        }
+        try f.stack.ensureTotalCapacity(vm.gc.gpa, ref_int + 1);
+        std.mem.set(
+            ?*Value,
+            @bitCast([]?*Value, f.stack.items.ptr[f.stack.items.len .. ref_int + 1]),
+            null,
+        );
+        f.stack.items.len = ref_int + 1;
+        return @ptrCast(*?*Value, &f.stack.items[ref_int]);
     }
 
-    pub fn refAssert(f: *Frame, ref: Ref) **Value {
-        return f.stack.getPtr(@enumToInt(ref)).?;
+    pub inline fn refAssert(f: *Frame, ref: Ref) **Value {
+        return &f.stack.items[@enumToInt(ref)];
     }
 
-    pub fn val(f: *Frame, ref: Ref) *Value {
-        return f.stack.get(@enumToInt(ref)).?;
+    pub inline fn val(f: *Frame, ref: Ref) *Value {
+        return f.stack.items[@enumToInt(ref)];
     }
 
     pub fn int(f: *Frame, vm: *Vm, ref: Ref) !?i64 {
@@ -261,6 +271,7 @@ pub fn compileAndRun(vm: *Vm, file_path: []const u8) !*Value {
         .caller_frame = null,
         .module_frame = undefined,
         .captures = &.{},
+        .params = 0,
     };
     defer frame.deinit(vm);
     frame.module_frame = &frame;
@@ -282,10 +293,11 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
     const data = mod.code.items(.data);
 
     while (true) {
-        const ref = body[f.ip];
+        const inst = body[f.ip];
+        const ref = Bytecode.indexToRef(f.ip, f.params);
         f.ip += 1;
-        const inst = Bytecode.refToIndex(ref);
         switch (ops[inst]) {
+            .nop => continue,
             .primitive => {
                 const res = try f.newRef(vm, ref);
                 res.* = switch (data[inst].primitive) {
@@ -378,21 +390,39 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .build_func => {
                 const res = try f.newVal(vm, ref);
                 const extra = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
-                const fn_info = @bitCast(Bytecode.Inst.Data.FnInfo, extra[0]);
                 const fn_body = extra[1..];
-
-                const captures = try vm.gc.gpa.alloc(*Value, fn_info.captures);
 
                 res.* = .{
                     .func = .{
-                        .info = fn_info,
-                        .body = fn_body.ptr,
+                        .info_index = data[inst].extra.extra,
+                        .body = @ptrCast([*]const u32, fn_body.ptr),
                         .body_len = @intCast(u32, fn_body.len),
                         .module = mod,
-                        .captures = captures.ptr,
+                        .captures_ptr = null,
                     },
                 };
-                f.store_capture_index = 0;
+            },
+            .build_func_capture => {
+                const res = try f.newVal(vm, ref);
+                const extra = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
+                const captures_len = @enumToInt(extra[1]);
+                const fn_captures = extra[2..][0..captures_len];
+                const fn_body = extra[captures_len + 2 ..];
+
+                const captures = try vm.gc.gpa.alloc(*Value, captures_len);
+                for (fn_captures) |capture_ref, i| {
+                    captures[i] = f.val(capture_ref);
+                }
+
+                res.* = .{
+                    .func = .{
+                        .info_index = data[inst].extra.extra,
+                        .body = @ptrCast([*]const u32, fn_body.ptr),
+                        .body_len = @intCast(u32, fn_body.len),
+                        .module = mod,
+                        .captures_ptr = captures.ptr,
+                    },
+                };
             },
             .build_range => {
                 const start = (try f.int(vm, data[inst].bin.lhs)) orelse continue;
@@ -457,20 +487,15 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .load_global => {
                 const res = try f.newRef(vm, ref);
-                res.* = f.module_frame.stack.get(@enumToInt(data[inst].un)) orelse
+                const ref_int = @enumToInt(data[inst].un);
+                if (ref_int > f.module_frame.stack.items.len)
                     return f.fatal(vm, "use of undefined variable");
+                res.* = f.module_frame.stack.items[ref_int];
             },
             .load_capture => {
                 const index = @enumToInt(data[inst].un);
-                const res = try f.newRef(vm, data[inst].bin.lhs);
+                const res = try f.newRef(vm, ref);
                 res.* = f.captures[index];
-            },
-            .store_capture => {
-                const res = f.val(data[inst].bin.lhs);
-                const val = f.val(data[inst].bin.rhs);
-
-                res.func.captures[f.store_capture_index] = val;
-                f.store_capture_index += 1;
             },
             .load_this => {
                 const res = try f.newRef(vm, ref);
@@ -882,7 +907,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const offset = data[inst].jump_condition.offset;
 
                 // Clear the error value ref in case we're in a loop
-                _ = f.stack.swapRemove(@enumToInt(err_val_ref));
+                const res_ref = try f.newRef(vm, err_val_ref);
+                res_ref.* = null;
 
                 try f.err_handlers.push(vm.gc.gpa, .{
                     .operand = err_val_ref,
@@ -893,7 +919,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const handler = f.err_handlers.pop();
 
                 // Jump past error handlers in case nothing was thrown
-                if (f.stack.get(@enumToInt(handler.operand)) == null) {
+                const res_ref = f.newRef(vm, handler.operand) catch unreachable;
+                if (res_ref.* == null) {
                     f.ip = data[inst].jump;
                 }
             },
@@ -1008,11 +1035,12 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     const returned = try f.newRef(vm, ref);
                     returned.* = res;
                 } else if (callee.* == .func) {
-                    if (callee.func.info.args != args.len) {
+                    const callee_args = callee.func.args();
+                    if (callee_args != args.len) {
                         try f.throwFmt(
                             vm,
                             "expected {} args, got {}",
-                            .{ callee.func.info.args, args.len },
+                            .{ callee_args, args.len },
                         );
                         continue;
                     }
@@ -1029,15 +1057,16 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         .caller_frame = f,
                         .module_frame = f.module_frame,
                         .this = this,
-                        .captures = &.{},
+                        .params = callee_args,
+                        .captures = callee.func.captures(),
                     };
                     errdefer new_frame.deinit(vm);
                     vm.getFrame(&new_frame);
 
                     try new_frame.stack.ensureUnusedCapacity(vm.gc.gpa, args.len);
 
-                    for (args) |arg_ref, i| {
-                        new_frame.stack.putAssumeCapacity(@intCast(u32, i), f.val(arg_ref));
+                    for (args) |arg_ref| {
+                        new_frame.stack.appendAssumeCapacity(f.val(arg_ref));
                     }
 
                     var frame_val = try vm.gc.alloc();
@@ -1180,7 +1209,7 @@ fn getFrame(vm: *Vm, f: *Frame) void {
 }
 
 fn storeFrame(vm: *Vm, f: *Frame) !void {
-    f.stack.clearRetainingCapacity();
+    f.stack.items.len = 0;
     f.err_handlers.short.len = 0;
     try vm.frame_cache.append(vm.gc.gpa, .{ .s = f.stack, .e = f.err_handlers });
 }
@@ -1242,6 +1271,7 @@ fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) !*Value {
         .module_frame = undefined,
         .this = Value.Null,
         .captures = &.{},
+        .params = 0,
     };
     errdefer frame.deinit(vm);
     vm.getFrame(&frame);

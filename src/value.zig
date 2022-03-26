@@ -42,15 +42,24 @@ pub const Value = union(Type) {
     },
     str: String,
     func: struct {
-        info: bog.Bytecode.Inst.Data.FnInfo,
+        info_index: u32,
         body_len: u32,
         /// `len` broken into body_len to save space
-        body: [*]const bog.Bytecode.Ref,
-        /// `len` stored in `info`
-        captures: [*]*Value,
+        body: [*]const u32,
+        captures_ptr: ?[*]*Value,
 
         /// module in which this function exists
         module: *bog.Bytecode,
+
+        pub fn captures(f: @This()) []*Value {
+            const captures_ptr = f.captures_ptr orelse return &[_]*Value{};
+            const captures_len = f.module.extra[f.info_index + 1];
+            return captures_ptr[0..@enumToInt(captures_len)];
+        }
+
+        pub inline fn args(f: @This()) u32 {
+            return @enumToInt(f.module.extra[f.info_index]);
+        }
     },
     frame: *Vm.Frame,
     native: Native,
@@ -209,7 +218,7 @@ pub const Value = union(Type) {
             .map => |*m| m.deinit(allocator),
             .list => |*l| l.deinit(allocator),
             .str => |*s| s.deinit(allocator),
-            .func => |*f| allocator.free(f.captures[0..f.info.captures]),
+            .func => |*f| allocator.free(f.captures()),
         }
         value.* = undefined;
     }
@@ -250,7 +259,6 @@ pub const Value = union(Type) {
             },
             .func => |*func| {
                 autoHash(&hasher, func.body);
-                autoHash(&hasher, func.info);
                 autoHash(&hasher, func.module);
             },
             .native => |*func| {
@@ -382,7 +390,7 @@ pub const Value = union(Type) {
             },
             .str => |s| try s.dump(writer),
             .func => |*f| {
-                try writer.print("fn({})@0x{X}[{}]", .{ f.info.args, f.body[0], f.info.captures });
+                try writer.print("fn({})@0x{X}[{}]", .{ f.args(), f.body[0], f.captures().len });
             },
             .frame => |f| {
                 try writer.print("frame@x{X}", .{f.body[0]});
@@ -923,8 +931,6 @@ fn wrapZigFunc(func: anytype) Value.Native {
                     args[i] = ArgT{ .t = try ctx.this.bogToZig(ArgT.__bog_This_T, ctx) };
                     this_passed = true;
                 } else {
-                    if (bog_arg_i > bog.Bytecode.max_params)
-                        @compileError("function takes too many arguments");
                     const val = ctx.frame.val(bog_args[bog_arg_i]);
                     args[i] = try val.bogToZig(ArgT, ctx);
                     bog_arg_i += 1;

@@ -25,7 +25,7 @@ pub fn run(gpa: Allocator, reader: anytype, writer: anytype) !void {
             error.EndOfStream => return,
             error.TokenizeError, error.ParseError, error.CompileError => try repl.vm.errors.render(writer),
             error.FatalError => {
-                try repl.frame.stack.put(gpa, 0, bog.Value.Null);
+                repl.frame.stack.items[0] = bog.Value.Null;
                 try repl.vm.errors.render(writer);
             },
             else => |e| return e,
@@ -79,6 +79,7 @@ pub const Repl = struct {
             .gpa = gpa,
             .arena = repl.arena.allocator(),
             .code = &repl.code,
+            .params = 1, // ans
         };
         errdefer repl.compiler.deinit();
 
@@ -112,9 +113,12 @@ pub const Repl = struct {
             .caller_frame = null,
             .module_frame = undefined,
             .captures = &.{},
+            .params = 1,
         };
-        errdefer repl.frame.deinit(repl.vm);
+        errdefer repl.frame.deinit(&repl.vm);
         repl.frame.module_frame = &repl.frame;
+
+        try repl.frame.stack.append(gpa, bog.Value.Null);
     }
 
     fn deinit(repl: *Repl) void {
@@ -141,7 +145,7 @@ pub const Repl = struct {
         try repl.compile(node);
 
         const res = try repl.vm.run(&repl.frame);
-        try repl.frame.stack.put(repl.vm.gc.gpa, 0, res);
+        repl.frame.stack.items[0] = res;
         if (res.* == .@"null") return;
         try res.dump(writer, 2);
         try writer.writeByte('\n');

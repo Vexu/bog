@@ -10,7 +10,7 @@ const Bytecode = @This();
 code: Inst.List.Slice,
 extra: []const Ref,
 
-main: []const Ref,
+main: []const u32,
 
 strings: []const u8,
 debug_info: DebugInfo,
@@ -26,8 +26,6 @@ pub fn deinit(b: *Bytecode, gpa: Allocator) void {
     b.* = undefined;
 }
 
-pub const max_params = 32;
-
 pub const Ref = enum(u32) {
     _,
     pub fn format(ref: Ref, _: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
@@ -38,11 +36,11 @@ pub const Ref = enum(u32) {
     }
 };
 
-pub inline fn indexToRef(i: u64) Ref {
-    return @intToEnum(Ref, i + max_params);
+pub inline fn indexToRef(i: u64, params: u32) Ref {
+    return @intToEnum(Ref, i + params);
 }
-pub inline fn refToIndex(r: Ref) u32 {
-    return @enumToInt(r) - max_params;
+pub inline fn refToIndex(r: Ref, params: u32) u32 {
+    return @enumToInt(r) - params;
 }
 
 /// All integers are little endian
@@ -53,6 +51,9 @@ pub const Inst = struct {
     pub const List = std.MultiArrayList(Inst);
 
     pub const Op = enum(u8) {
+        /// No operation.
+        nop,
+
         // literal construction
 
         /// null, true, false
@@ -79,9 +80,16 @@ pub const Inst = struct {
         build_tagged,
         /// uses Data.str
         build_tagged_null,
-        /// uses Data.func with
-        // extra[0] == Data.FnInfo
+        /// uses Data.extra with
+        /// extra[0] == args_len
+        /// extra[1..] == body
         build_func,
+        /// uses Data.extra with
+        /// extra[0] == args_len
+        /// extra[1] == captures_len
+        /// extra[2..][0..captures_len] == captures
+        /// extra[2 + captures_len..] == body
+        build_func_capture,
         /// uses Data.bin
         build_range,
         /// uses Data.range
@@ -99,12 +107,10 @@ pub const Inst = struct {
         copy,
         // lhs = rhs
         move,
-        // res = CAPTURE(operand)
+        // res = GLOBAL(operand)
         load_global,
         // res = CAPTURE(operand)
         load_capture,
-        // CAPTURE(lhs func).append(rhs)
-        store_capture,
         // res = THIS
         load_this,
 
@@ -228,7 +234,7 @@ pub const Inst = struct {
         pub fn hasResult(op: Op) bool {
             return switch (op) {
                 // zig fmt: off
-                .discard, .copy, .move, .store_capture, .append, .check_len,
+                .discard, .copy, .move, .append, .check_len,
                 .assert_len, .set, .push_err_handler, .pop_err_handler,
                 .jump, .jump_if_true, .jump_if_false, .jump_if_null, .ret,
                 .ret_null, .throw => false,
@@ -275,11 +281,6 @@ pub const Inst = struct {
             operand: Ref,
             offset: u32,
         },
-
-        pub const FnInfo = packed struct {
-            captures: u24,
-            args: u8,
-        };
     };
 
     comptime {
@@ -292,7 +293,7 @@ pub const DebugInfo = struct {
     source: []const u8 = "",
     lines: Lines,
 
-    pub const Lines = std.AutoHashMapUnmanaged(Ref, u32);
+    pub const Lines = std.AutoHashMapUnmanaged(u32, u32);
 };
 
 fn dumpLineCol(b: *Bytecode, byte_offset: u32) void {
@@ -302,21 +303,22 @@ fn dumpLineCol(b: *Bytecode, byte_offset: u32) void {
     var i: u32 = 0;
     while (i < byte_offset) : (i += 1) {
         if (b.debug_info.source[i] == '\n') {
-            start = i;
+            start = i + 1;
             line_num += 1;
         }
     }
-    const col_num = byte_offset - start;
+    const col_num = byte_offset - start + 1;
     std.debug.print("{s}:{d}:{d}\n", .{ b.debug_info.path, line_num, col_num });
 }
 
-pub fn dump(b: *Bytecode, body: []const Ref) void {
+pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
     const ops = b.code.items(.op);
     const data = b.code.items(.data);
-    for (body) |ref, inst| {
-        const i = refToIndex(ref);
+    for (body) |i, inst| {
+        if (ops[i] == .nop) continue;
+        const ref = indexToRef(inst, params);
         if (ops[i].needsDebugInfo()) {
-            dumpLineCol(b, b.debug_info.lines.get(ref).?);
+            dumpLineCol(b, b.debug_info.lines.get(@intCast(u32, i)).?);
         }
         std.debug.print("{d:4} ", .{inst});
         if (ops[i].hasResult()) {
@@ -326,6 +328,7 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
         }
         std.debug.print("{s} ", .{@tagName(ops[i])});
         switch (ops[i]) {
+            .nop => unreachable,
             .primitive => std.debug.print("{s}\n", .{@tagName(data[i].primitive)}),
             .int => std.debug.print("{d}\n", .{data[i].int}),
             .num => std.debug.print("{d}\n", .{data[i].num}),
@@ -357,10 +360,22 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
             },
             .build_func => {
                 const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
-                const fn_info = @bitCast(Inst.Data.FnInfo, extra[0]);
-                const fn_body = extra[1..];
-                std.debug.print("\n\nfn(args: {d}, captures: {d}) {{\n", .{ fn_info.args, fn_info.captures });
-                b.dump(fn_body);
+                const args = @enumToInt(extra[0]);
+                const fn_body = @bitCast([]const u32, extra[1..]);
+                std.debug.print("\n\nfn(args: {d}) {{\n", .{args});
+                b.dump(fn_body, args);
+                std.debug.print("}}\n\n", .{});
+            },
+            .build_func_capture => {
+                const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
+                const args = @enumToInt(extra[0]);
+                const captures_len = @enumToInt(extra[1]);
+                const fn_captures = extra[2..][0..captures_len];
+                const fn_body = @bitCast([]const u32, extra[2 + captures_len ..]);
+                std.debug.print("\n\nfn(args: {d}, captures: [", .{args});
+                dumpList(fn_captures);
+                std.debug.print("]) {{\n", .{});
+                b.dump(fn_body, args);
                 std.debug.print("}}\n\n", .{});
             },
             .build_tagged_null => {
@@ -395,7 +410,6 @@ pub fn dump(b: *Bytecode, body: []const Ref) void {
             },
             .load_global => std.debug.print("GLOBAL({})\n", .{data[i].un}),
             .load_capture => std.debug.print("CAPTURE({d})\n", .{@enumToInt(data[i].un)}),
-            .store_capture => std.debug.print("CAPTURE({}) = {}\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
             .copy,
             .move,
             .get,

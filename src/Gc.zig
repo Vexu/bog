@@ -166,12 +166,12 @@ fn markGray(gc: *Gc) void {
                         gc.markVal(err);
                     },
                     .func => |func| {
-                        for (func.captures[0..func.info.captures]) |val| {
+                        for (func.captures()) |val| {
                             gc.markVal(val);
                         }
                     },
                     .frame => |frame| {
-                        for (frame.stack.values()) |val| {
+                        for (frame.stack.items) |val| {
                             gc.markVal(val);
                         }
                         for (frame.captures) |val| {
