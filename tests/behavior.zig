@@ -1,5 +1,4 @@
 test "capture" {
-    if (true) return error.SkipZigTest;
     try expectOutput(
         \\let foo = fn()
         \\    let a = 1
@@ -92,7 +91,6 @@ test "boolean short-circuit" {
 }
 
 test "match" {
-    if (true) return error.SkipZigTest;
     try expectOutput(
         \\let getNum = fn (arg)
         \\    return match (arg)
@@ -329,7 +327,6 @@ test "containers do not overwrite memoized values" {
 }
 
 test "this" {
-    if (true) return error.SkipZigTest;
     try expectOutput(
         \\let x = {
         \\    a = 69,
@@ -492,7 +489,6 @@ test "fibonacci" {
 }
 
 test "const value not modified by function" {
-    if (true) return error.SkipZigTest;
     try expectOutput(
         \\let x = 2
         \\let inc = fn(mut n)
@@ -791,10 +787,9 @@ const bog = @import("bog");
 const Vm = bog.Vm;
 
 fn expectCallOutput(source: []const u8, args: anytype, expected: []const u8) !void {
-    var vm = Vm.init(std.testing.allocator, .{});
-    defer vm.deinit();
-
-    var mod = bog.compile(vm.gc.gpa, source, "<test buf>", &vm.errors) catch |e| switch (e) {
+    const alloc = std.testing.allocator;
+    var vm = Vm.init(alloc, .{});
+    var mod = bog.compile(alloc, source, "<test buf>", &vm.errors) catch |e| switch (e) {
         else => return e,
         error.TokenizeError, error.ParseError, error.CompileError => {
             vm.errors.render(std.io.getStdErr().writer()) catch {};
@@ -802,7 +797,9 @@ fn expectCallOutput(source: []const u8, args: anytype, expected: []const u8) !vo
         },
     };
     mod.debug_info.source = "";
-    defer mod.deinit(vm.gc.gpa);
+    defer mod.deinit(alloc);
+    defer vm.deinit();
+    vm.addStd() catch unreachable;
 
     var frame = bog.Vm.Frame{
         .mod = &mod,
@@ -844,11 +841,9 @@ fn expectCallOutput(source: []const u8, args: anytype, expected: []const u8) !vo
 }
 
 fn expectOutput(source: []const u8, expected: []const u8) !void {
-    var vm = Vm.init(std.testing.allocator, .{});
-    defer vm.deinit();
-    vm.addStd() catch unreachable;
-
-    var mod = bog.compile(vm.gc.gpa, source, "<test buf>", &vm.errors) catch |e| switch (e) {
+    const alloc = std.testing.allocator;
+    var vm = Vm.init(alloc, .{});
+    var mod = bog.compile(alloc, source, "<test buf>", &vm.errors) catch |e| switch (e) {
         else => return e,
         error.TokenizeError, error.ParseError, error.CompileError => {
             vm.errors.render(std.io.getStdErr().writer()) catch {};
@@ -856,7 +851,9 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
         },
     };
     mod.debug_info.source = "";
-    defer mod.deinit(vm.gc.gpa);
+    defer mod.deinit(alloc);
+    defer vm.deinit();
+    vm.addStd() catch unreachable;
 
     var frame = bog.Vm.Frame{
         .mod = &mod,
@@ -882,7 +879,7 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
         },
     };
 
-    var out_buf = std.ArrayList(u8).init(std.testing.allocator);
+    var out_buf = std.ArrayList(u8).init(alloc);
     defer out_buf.deinit();
     try res.dump(out_buf.writer(), 2);
     try testing.expectEqualStrings(expected, out_buf.items);

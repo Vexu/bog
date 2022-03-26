@@ -1052,7 +1052,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     defer vm.call_depth -= 1;
 
                     var new_frame = Frame{
-                        .mod = mod,
+                        .mod = callee.func.module,
                         .body = callee.func.body[0..callee.func.body_len],
                         .caller_frame = f,
                         .module_frame = f.module_frame,

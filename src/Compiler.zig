@@ -2038,7 +2038,7 @@ fn genCall(c: *Compiler, node: Node.Index) Error!Value {
     const this = switch (c.tree.nodes.items(.id)[last_node]) {
         .member_access_expr,
         .array_access_expr,
-        => c.instructions.items(.data)[@enumToInt(callee_ref) - c.params].bin.lhs,
+        => c.instructions.items(.data)[c.code.items[@enumToInt(callee_ref) - c.params]].bin.lhs,
         else => null,
     };
 
