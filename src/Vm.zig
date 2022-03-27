@@ -351,7 +351,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const res = try f.newVal(vm, ref);
                 res.* = .{ .map = .{} };
 
-                try res.map.ensureUnusedCapacity(vm.gc.gpa, items.len);
+                try res.map.ensureUnusedCapacity(vm.gc.gpa, @intCast(u32, items.len));
 
                 var map_i: u32 = 0;
                 while (map_i < items.len) : (map_i += 2) {

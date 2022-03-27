@@ -48,7 +48,7 @@ pub const Inst = struct {
     op: Op,
     data: Data,
 
-    pub const List = std.MultiArrayList(Inst);
+    pub const List = @import("multi_array_list.zig").MultiArrayList(Inst);
 
     pub const Op = enum(u8) {
         /// No operation.

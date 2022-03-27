@@ -405,7 +405,7 @@ pub const Node = struct {
         },
     };
 
-    pub const List = std.MultiArrayList(Node);
+    pub const List = @import("multi_array_list.zig").MultiArrayList(Node);
 
     pub const Index = u32;
 

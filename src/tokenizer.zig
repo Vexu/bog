@@ -115,7 +115,7 @@ pub const Token = struct {
     end: u32,
     id: Id,
 
-    pub const List = std.MultiArrayList(Token);
+    pub const List = @import("multi_array_list.zig").MultiArrayList(Token);
     pub const Index = u32;
 
     pub const Id = enum(u8) {
@@ -376,7 +376,7 @@ pub fn tokenize(gpa: mem.Allocator, source: []const u8, path: []const u8, errors
     errdefer tokenizer.tokens.deinit(gpa);
 
     // estimate one token per 8 bytes to reduce allocation in the beginning
-    const estimated = source.len / 8;
+    const estimated = @intCast(u32, source.len / 8);
     try tokenizer.tokens.ensureUnusedCapacity(gpa, estimated);
 
     while (true) {

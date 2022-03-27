@@ -153,20 +153,7 @@ pub const Value = union(Type) {
 
     pub const String = @import("String.zig");
 
-    const ValueMapContext = struct {
-        pub fn hash(self: @This(), v: *const Value) u32 {
-            _ = self;
-            return Value.hash(v);
-        }
-
-        pub fn eql(self: @This(), a: *const Value, b: *const Value, b_index: usize) bool {
-            _ = self;
-            _ = b_index;
-            return Value.eql(a, b);
-        }
-    };
-
-    pub const Map = std.array_hash_map.ArrayHashMapUnmanaged(*const Value, *Value, Value.ValueMapContext, true);
+    pub const Map = @import("Map.zig");
     pub const List = std.ArrayListUnmanaged(*Value);
     pub const Native = struct {
         arg_count: u8,
@@ -226,7 +213,6 @@ pub const Value = union(Type) {
 
     pub fn hash(key: *const Value) u32 {
         const autoHash = std.hash.autoHash;
-        const autoHashStrat = std.hash.autoHashStrat;
 
         var hasher = std.hash.Wyhash.init(0);
         autoHash(&hasher, @as(Type, key.*));
@@ -240,17 +226,15 @@ pub const Value = union(Type) {
             .str => |*str| hasher.update(str.data),
             .tuple => |tuple| {
                 autoHash(&hasher, tuple.len);
-                autoHash(&hasher, tuple.ptr);
+                // TODO more hashing?
             },
             .map => |*map| {
                 autoHash(&hasher, map.count());
-                autoHashStrat(&hasher, map.keys(), .Shallow);
-                autoHashStrat(&hasher, map.values(), .Shallow);
-                autoHash(&hasher, map.index_header);
+                // TODO more hashing?
             },
             .list => |*list| {
                 autoHash(&hasher, list.items.len);
-                autoHash(&hasher, list.items.ptr);
+                // TODO more hashing?
             },
             .err => |err| autoHash(&hasher, @as(Type, err.*)),
             .range => |*range| {
@@ -667,15 +651,14 @@ pub const Value = union(Type) {
             },
             type => switch (@typeInfo(val)) {
                 .Struct => |info| {
-                    var map = Value.Map{};
-                    errdefer map.deinit(vm.gc.gpa);
-
                     comptime var pub_decls = 0;
                     inline for (info.decls) |decl| {
                         if (decl.is_pub) pub_decls += 1;
                     }
 
-                    try map.ensureTotalCapacity(vm.gc.gpa, pub_decls);
+                    const res = try vm.gc.alloc();
+                    res.* = .{ .map = .{} };
+                    try res.map.ensureTotalCapacity(vm.gc.gpa, pub_decls);
 
                     inline for (info.decls) |decl| {
                         if (!decl.is_pub) continue;
@@ -687,14 +670,10 @@ pub const Value = union(Type) {
                         const key = try vm.gc.alloc();
                         key.* = Value.string(decl.name);
                         const value = try zigToBog(vm, @field(val, decl.name));
-                        map.putAssumeCapacityNoClobber(key, value);
+                        res.map.putAssumeCapacityNoClobber(key, value);
                     }
 
-                    const ret = try vm.gc.alloc();
-                    ret.* = .{
-                        .map = map,
-                    };
-                    return ret;
+                    return res;
                 },
                 else => @compileError("unsupported type: " ++ @typeName(val)),
             },

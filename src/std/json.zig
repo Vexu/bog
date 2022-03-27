@@ -15,8 +15,7 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
     switch (token) {
         .ObjectBegin => {
             const res = try vm.gc.alloc();
-            res.* = .{ .map = Value.Map{} };
-            const map = &res.map;
+            res.* = .{ .map = .{} };
 
             while (true) {
                 var tok = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
@@ -27,14 +26,13 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
                 const key = try parseInternal(vm, tok, tokens);
                 tok = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
                 const val = try parseInternal(vm, tok, tokens);
-                try map.put(vm.gc.gpa, key, val);
+                try res.map.put(vm.gc.gpa, key, val);
             }
             return res;
         },
         .ArrayBegin => {
             const res = try vm.gc.alloc();
-            res.* = .{ .list = Value.List{} };
-            const list = &res.list;
+            res.* = .{ .list = .{} };
 
             while (true) {
                 const tok = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
@@ -42,7 +40,7 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
                     .ArrayEnd => break,
                     else => {},
                 }
-                try list.append(vm.gc.gpa, try parseInternal(vm, tok, tokens));
+                try res.list.append(vm.gc.gpa, try parseInternal(vm, tok, tokens));
             }
             return res;
         },

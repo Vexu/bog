@@ -17,7 +17,7 @@ const Page = struct {
         // 2^20, 1 MiB
         assert(@sizeOf(Page) == max_size);
     }
-    const val_count = 25_574;
+    const val_count = @divFloor(max_size - @sizeOf(u32) * 2, (@sizeOf(Value) + @sizeOf(State)));
     const pad_size = max_size - @sizeOf(u32) * 2 - (@sizeOf(Value) + @sizeOf(State)) * val_count;
 
     const State = enum(u8) {
@@ -119,7 +119,7 @@ fn markVal(gc: *Gc, value: *const Value) void {
 
         // value is in this page
         const index = (@ptrToInt(value) - @ptrToInt(&page.values[0])) / @sizeOf(Value);
-        if (page.meta[index] != .empty) {
+        if (page.meta[index] == .white) {
             page.meta[index] = .gray;
         }
         return;
