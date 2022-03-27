@@ -41,26 +41,7 @@ pub const Value = union(Type) {
         step: i64 = 1,
     },
     str: String,
-    func: struct {
-        info_index: u32,
-        body_len: u32,
-        /// `len` broken into body_len to save space
-        body: [*]const u32,
-        captures_ptr: ?[*]*Value,
-
-        /// module in which this function exists
-        module: *bog.Bytecode,
-
-        pub fn captures(f: @This()) []*Value {
-            const captures_ptr = f.captures_ptr orelse return &[_]*Value{};
-            const captures_len = f.module.extra[f.info_index + 1];
-            return captures_ptr[0..@enumToInt(captures_len)];
-        }
-
-        pub inline fn args(f: @This()) u32 {
-            return @enumToInt(f.module.extra[f.info_index]);
-        }
-    },
+    func: Func,
     frame: *Vm.Frame,
     native: Native,
     tagged: struct {
@@ -149,6 +130,26 @@ pub const Value = union(Type) {
     /// always memoized
     bool: bool,
     @"null",
+
+    pub const Func = struct {
+        /// module in which this function exists
+        module: *bog.Bytecode,
+        captures_ptr: [*]*Value,
+        body_len: u32,
+        extra_index: u32,
+
+        pub fn args(f: Func) u32 {
+            return @enumToInt(f.module.extra[f.extra_index]);
+        }
+
+        pub fn captures(f: Func) []*Value {
+            return f.captures_ptr[0..@enumToInt(f.module.extra[f.extra_index + 1])];
+        }
+
+        pub fn body(f: Func) []const u32 {
+            return @bitCast([]const u32, f.module.extra[f.extra_index + 2 + @enumToInt(f.module.extra[f.extra_index + 1]) ..][0..f.body_len]);
+        }
+    };
 
     pub const String = @import("String.zig");
 
@@ -258,7 +259,7 @@ pub const Value = union(Type) {
                 autoHash(&hasher, range.step);
             },
             .func => |*func| {
-                autoHash(&hasher, func.body);
+                autoHash(&hasher, func.extra_index);
                 autoHash(&hasher, func.module);
             },
             .native => |*func| {
@@ -317,7 +318,7 @@ pub const Value = union(Type) {
             },
             .func => |*f| {
                 const b_f = b.func;
-                return f.module == b_f.module and f.body == b_f.body;
+                return f.module == b_f.module and f.extra_index == b_f.extra_index;
             },
             .native => |*n| n.func == b.native.func,
             .tagged => |*t| {
@@ -390,7 +391,7 @@ pub const Value = union(Type) {
             },
             .str => |s| try s.dump(writer),
             .func => |*f| {
-                try writer.print("fn({})@0x{X}[{}]", .{ f.args(), f.body[0], f.captures().len });
+                try writer.print("fn({})@0x{X}[{}]", .{ f.args(), f.body()[0], f.captures().len });
             },
             .frame => |f| {
                 try writer.print("frame@x{X}", .{f.body[0]});

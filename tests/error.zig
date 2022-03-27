@@ -122,21 +122,22 @@ const Vm = bog.Vm;
 const Errors = bog.Errors;
 
 fn expectError(source: []const u8, expected: []const u8) !void {
-    var vm = Vm.init(std.testing.allocator, .{});
-    defer vm.deinit();
-
-    var mod = bog.compile(vm.gc.gpa, source, "<test buf>", &vm.errors) catch |e| switch (e) {
+    const alloc = std.testing.allocator;
+    var vm = Vm.init(alloc, .{});
+    var mod = bog.compile(alloc, source, "<test buf>", &vm.errors) catch |e| switch (e) {
         else => return error.UnexpectedError,
         error.TokenizeError, error.ParseError, error.CompileError => {
             const result = vm.errors.list.items[0].msg;
             try std.testing.expectEqualStrings(expected, result.data);
+            vm.errors.deinit();
             return;
         },
     };
     defer {
         mod.debug_info.source = "";
-        mod.deinit(vm.gc.gpa);
+        mod.deinit(alloc);
     }
+    defer vm.deinit();
 
     var frame = bog.Vm.Frame{
         .mod = &mod,

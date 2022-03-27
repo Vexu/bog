@@ -1999,20 +1999,16 @@ fn genFn(c: *Compiler, node: Node.Index) Error!Value {
         }
     }
 
-    const has_captures = func.captures.items.len != 0;
-
     const extra = @intCast(u32, c.extra.items.len);
-    try c.extra.append(c.gpa, @intToEnum(Ref, params.len));
-    if (has_captures) {
-        try c.extra.ensureUnusedCapacity(c.gpa, 1 + func.captures.items.len);
-        c.extra.appendAssumeCapacity(@intToEnum(Ref, func.captures.items.len));
-        for (func.captures.items) |capture| {
-            c.extra.appendAssumeCapacity(capture.parent_ref);
-        }
+    try c.extra.ensureUnusedCapacity(c.gpa, 2 + func.captures.items.len + func.code.items.len);
+    c.extra.appendAssumeCapacity(@intToEnum(Ref, params.len));
+    c.extra.appendAssumeCapacity(@intToEnum(Ref, func.captures.items.len));
+    for (func.captures.items) |capture| {
+        c.extra.appendAssumeCapacity(capture.parent_ref);
     }
-    try c.extra.appendSlice(c.gpa, @bitCast([]const Ref, func.code.items));
+    c.extra.appendSliceAssumeCapacity(@bitCast([]const Ref, func.code.items));
 
-    const func_ref = try c.addInst(if (has_captures) .build_func_capture else .build_func, .{
+    const func_ref = try c.addInst(.build_func, .{
         .extra = .{
             .extra = extra,
             .len = @intCast(u32, c.extra.items.len - extra),

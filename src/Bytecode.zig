@@ -81,15 +81,12 @@ pub const Inst = struct {
         /// uses Data.str
         build_tagged_null,
         /// uses Data.extra with
-        /// extra[0] == args_len
-        /// extra[1..] == body
-        build_func,
         /// uses Data.extra with
         /// extra[0] == args_len
         /// extra[1] == captures_len
         /// extra[2..][0..captures_len] == captures
         /// extra[2 + captures_len..] == body
-        build_func_capture,
+        build_func,
         /// uses Data.bin
         build_range,
         /// uses Data.range
@@ -359,14 +356,6 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
                 std.debug.print("}}\n", .{});
             },
             .build_func => {
-                const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
-                const args = @enumToInt(extra[0]);
-                const fn_body = @bitCast([]const u32, extra[1..]);
-                std.debug.print("\n\nfn(args: {d}) {{\n", .{args});
-                b.dump(fn_body, args);
-                std.debug.print("}}\n\n", .{});
-            },
-            .build_func_capture => {
                 const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
                 const args = @enumToInt(extra[0]);
                 const captures_len = @enumToInt(extra[1]);

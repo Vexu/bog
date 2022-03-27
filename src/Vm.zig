@@ -390,21 +390,6 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .build_func => {
                 const res = try f.newVal(vm, ref);
                 const extra = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
-                const fn_body = extra[1..];
-
-                res.* = .{
-                    .func = .{
-                        .info_index = data[inst].extra.extra,
-                        .body = @ptrCast([*]const u32, fn_body.ptr),
-                        .body_len = @intCast(u32, fn_body.len),
-                        .module = mod,
-                        .captures_ptr = null,
-                    },
-                };
-            },
-            .build_func_capture => {
-                const res = try f.newVal(vm, ref);
-                const extra = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
                 const captures_len = @enumToInt(extra[1]);
                 const fn_captures = extra[2..][0..captures_len];
                 const fn_body = extra[captures_len + 2 ..];
@@ -416,11 +401,10 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
 
                 res.* = .{
                     .func = .{
-                        .info_index = data[inst].extra.extra,
-                        .body = @ptrCast([*]const u32, fn_body.ptr),
-                        .body_len = @intCast(u32, fn_body.len),
                         .module = mod,
                         .captures_ptr = captures.ptr,
+                        .extra_index = data[inst].extra.extra,
+                        .body_len = @intCast(u32, fn_body.len),
                     },
                 };
             },
@@ -1053,7 +1037,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
 
                     var new_frame = Frame{
                         .mod = callee.func.module,
-                        .body = callee.func.body[0..callee.func.body_len],
+                        .body = callee.func.body(),
                         .caller_frame = f,
                         .module_frame = f.module_frame,
                         .this = this,
