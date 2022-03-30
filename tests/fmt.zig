@@ -3,6 +3,7 @@ test "variadic functions" {
         \\let foo = fn() null
         \\let bar = fn(a...) a
         \\let baz = fn(a, b...) a
+        \\baz(1, ..."foo")
         \\
     );
 }

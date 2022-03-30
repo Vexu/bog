@@ -1,3 +1,34 @@
+test "spread" {
+    try expectOutput(
+        \\let foo = [1, 2, 3]
+        \\let bar = [...foo, 4, 5, 6]
+        \\return bar
+    , "[1, 2, 3, 4, 5, 6]");
+
+    try expectOutput(
+        \\let strs = ["foo", "bar"]
+        \\let join1 = "".join(...strs)
+        \\let join2 = "".join("foo", "bar")
+        \\return join1 == join2
+    , "true");
+
+    try expectOutput(
+        \\let foo = [1, 2, 3]
+        \\let bar = fn(a, b, c...) [a, b, ...c]
+        \\if bar(...foo) != [1, 2, 3] throw "bad"
+        \\if bar(4, ...foo) != [4, 1, 2, 3] throw "bad"
+        \\if bar(4, 5, ...foo) != [4, 5, 1, 2, 3] throw "bad"
+        \\if bar(4, 5, 6, ...foo) != [4, 5, 6, 1, 2, 3] throw "bad"
+        \\if bar(4, 5, 6, 7, ...foo) != [4, 5, 6, 7, 1, 2, 3] throw "bad"
+    , "null");
+
+    try expectOutput(
+        \\let foo = [1, 2, 3]
+        \\let str = "{} + {} = {}"
+        \\return str.format(...foo)
+    , "\"1 + 2 = 3\"");
+}
+
 test "variadic functions" {
     try expectOutput(
         \\let foo = fn(_, args...) args
@@ -151,7 +182,7 @@ test "try catch" {
 
 test "string join" {
     try expectOutput(
-        \\return ",".join([1 as str, "bar", [2] as str])
+        \\return ",".join(1 as str, "bar", [2] as str)
     ,
         \\"1,bar,[2]"
     );

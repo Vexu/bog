@@ -326,24 +326,55 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .build_tuple => {
                 const items = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
 
+                var len: usize = 0;
+                for (items) |item_ref| {
+                    switch (f.val(item_ref).*) {
+                        .spread => |spread| len += spread.len(),
+                        else => len += 1,
+                    }
+                }
                 const res = try f.newVal(vm, ref, .tuple);
-                res.* = .{ .tuple = try vm.gc.gpa.alloc(*Value, items.len) };
+                res.* = .{ .tuple = try vm.gc.gpa.alloc(*Value, len) };
 
-                for (items) |item_ref, tuple_i| {
-                    res.tuple[tuple_i] = f.val(item_ref);
+                var i: usize = 0;
+                for (items) |item_ref| {
+                    const val = f.val(item_ref);
+                    switch (val.*) {
+                        .spread => |spread| {
+                            const spread_items = spread.items();
+                            for (spread_items) |item| {
+                                res.tuple[i] = item;
+                                i += 1;
+                            }
+                        },
+                        else => {
+                            res.tuple[i] = val;
+                            i += 1;
+                        },
+                    }
                 }
             },
             .build_list => {
                 const items = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
 
+                var len: usize = 0;
+                for (items) |item_ref| {
+                    switch (f.val(item_ref).*) {
+                        .spread => |spread| len += spread.len(),
+                        else => len += 1,
+                    }
+                }
+
                 const res = try f.newVal(vm, ref, .list);
                 res.* = .{ .list = .{} };
+                try res.list.ensureUnusedCapacity(vm.gc.gpa, len);
 
-                try res.list.ensureUnusedCapacity(vm.gc.gpa, items.len);
-                res.list.items.len = items.len;
-
-                for (items) |item_ref, list_I| {
-                    res.list.items[list_I] = f.val(item_ref);
+                for (items) |item_ref| {
+                    const val = f.val(item_ref);
+                    switch (val.*) {
+                        .spread => |spread| res.list.appendSliceAssumeCapacity(spread.items()),
+                        else => res.list.appendAssumeCapacity(val),
+                    }
                 }
             },
             .build_map => {
@@ -774,6 +805,25 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const res = try f.newVal(vm, ref, .int);
                 res.* = .{ .int = ~operand };
             },
+            .spread => {
+                const iterable = f.val(data[inst].un);
+
+                switch (iterable.*) {
+                    .range, .str => {
+                        try f.throwFmt(vm, "TODO spread {}", .{iterable.ty()});
+                        continue;
+                    },
+                    .tuple, .list => {},
+                    .iterator => unreachable,
+                    else => {
+                        try f.throwFmt(vm, "cannot iterate {}", .{iterable.ty()});
+                        continue;
+                    },
+                }
+
+                const res = try f.newVal(vm, ref, .spread);
+                res.* = .{ .spread = .{ .iterable = iterable } };
+            },
             .unwrap_error => {
                 const arg = f.val(data[inst].un);
 
@@ -1001,26 +1051,63 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     },
                     else => unreachable,
                 }
+                switch (callee.*) {
+                    .native, .func => {},
+                    else => {
+                        try f.throwFmt(vm, "cannot call '{}'", .{callee.ty()});
+                        continue;
+                    },
+                }
+
+                var args_len: usize = 0;
+                for (args) |item_ref| {
+                    switch (f.val(item_ref).*) {
+                        .spread => |spread| args_len += spread.len(),
+                        else => args_len += 1,
+                    }
+                }
+
                 if (callee.* == .native) {
                     if (callee.native.variadic) {
-                        if (args.len < callee.native.arg_count) {
+                        if (args_len < callee.native.arg_count) {
                             try f.throwFmt(
                                 vm,
                                 "expected at least {} args, got {}",
-                                .{ callee.native.arg_count, args.len },
+                                .{ callee.native.arg_count, args_len },
                             );
                             continue;
                         }
-                    } else if (callee.native.arg_count != args.len) {
+                    } else if (callee.native.arg_count != args_len) {
                         try f.throwFmt(
                             vm,
                             "expected {} args, got {}",
-                            .{ callee.native.arg_count, args.len },
+                            .{ callee.native.arg_count, args_len },
                         );
                         continue;
                     }
 
-                    const res = callee.native.func(f.ctxThis(this, vm), args) catch |err| switch (err) {
+                    const args_tuple = try vm.gc.gpa.alloc(*Value, args_len);
+                    defer vm.gc.gpa.free(args_tuple);
+
+                    var i: u32 = 0;
+                    for (args) |arg_ref| {
+                        const arg = f.val(arg_ref);
+                        switch (arg.*) {
+                            .spread => |spread| {
+                                const spread_items = spread.items();
+                                for (spread_items) |item| {
+                                    args_tuple[i] = item;
+                                    i += 1;
+                                }
+                            },
+                            else => {
+                                args_tuple[i] = arg;
+                                i += 1;
+                            },
+                        }
+                    }
+
+                    const res = callee.native.func(f.ctxThis(this, vm), args_tuple) catch |err| switch (err) {
                         error.Throw => continue,
                         else => |e| return e,
                     };
@@ -1032,19 +1119,19 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     const callee_args = callee.func.args();
                     const variadic = callee.func.variadic();
                     if (variadic) {
-                        if (args.len < callee_args - 1) {
+                        if (args_len < callee_args - 1) {
                             try f.throwFmt(
                                 vm,
                                 "expected at least {} args, got {}",
-                                .{ callee_args, args.len },
+                                .{ callee_args, args_len },
                             );
                             continue;
                         }
-                    } else if (callee_args != args.len) {
+                    } else if (callee_args != args_len) {
                         try f.throwFmt(
                             vm,
                             "expected {} args, got {}",
-                            .{ callee_args, args.len },
+                            .{ callee_args, args_len },
                         );
                         continue;
                     }
@@ -1069,21 +1156,36 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
 
                     try new_frame.stack.ensureUnusedCapacity(vm.gc.gpa, callee_args);
 
-                    args: {
+                    {
                         const non_variadic_args = callee_args - @boolToInt(variadic);
-                        var i: u32 = 0;
-                        while (i < non_variadic_args) : (i += 1) {
-                            new_frame.stack.appendAssumeCapacity(f.val(args[i]));
+                        var var_args: *Value = undefined;
+                        if (variadic) {
+                            var_args = try vm.gc.alloc(.list);
+                            var_args.* = .{ .list = .{} };
+                            try var_args.list.ensureUnusedCapacity(vm.gc.gpa, args_len - non_variadic_args);
                         }
-                        if (!variadic) break :args;
-                        var var_args = try vm.gc.alloc(.list);
-                        var_args.* = .{ .list = .{} };
-                        new_frame.stack.appendAssumeCapacity(var_args);
-                        try var_args.list.ensureUnusedCapacity(vm.gc.gpa, args.len - non_variadic_args);
 
-                        while (i < args.len) : (i += 1) {
-                            var_args.list.appendAssumeCapacity(f.val(args[i]));
+                        var i: u32 = 0;
+                        var arg_list = &new_frame.stack;
+                        for (args) |arg_ref| {
+                            const arg = f.val(arg_ref);
+                            switch (arg.*) {
+                                .spread => |spread| {
+                                    const spread_items = spread.items();
+                                    for (spread_items) |item| {
+                                        if (i == non_variadic_args) arg_list = &var_args.list;
+                                        arg_list.appendAssumeCapacity(item);
+                                        i += 1;
+                                    }
+                                },
+                                else => {
+                                    if (i == non_variadic_args) arg_list = &var_args.list;
+                                    arg_list.appendAssumeCapacity(arg);
+                                    i += 1;
+                                },
+                            }
                         }
+                        if (variadic) new_frame.stack.appendAssumeCapacity(var_args);
                     }
 
                     var frame_val = try vm.gc.alloc(.frame);
@@ -1101,8 +1203,6 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     const res = try f.newRef(vm, ref);
                     res.* = returned;
                     try vm.storeFrame(&new_frame);
-                } else {
-                    try f.throwFmt(vm, "cannot call '{}'", .{callee.ty()});
                 }
             },
             .ret => return f.val(data[inst].un),

@@ -50,8 +50,10 @@ power_expr : primary_expr suffix_expr* ("**" power_expr)?
 
 suffix_expr
     : "[" expr "]"
-    | "(" (expr ",")* expr? ")"
+    | "(" (spread_expr ",")* spread_expr? ")"
     | "." IDENTIFIER
+
+spread_expr : "..."? expr
 
 primary_expr
     : "mut"? IDENTIFIER
@@ -77,9 +79,9 @@ format_string : FORMAT_START expr "="? (FORMAT expr "="?)* FORMAT_END
 
 initializer
     : "(" block_or_expr ")"
-    | "(" (expr ",")+ expr? ")"
+    | "(" (spread_expr ",")+ spread_expr? ")"
     | "{" (expr "=" expr ",")* (expr "=" expr)? "}"
-    | "[" (expr ",")* expr? "]"
+    | "[" (spread_expr ",")* spread_expr? "]"
 
 if : "if" ("let" primary_expr "=")? expr block_or_expr ("else" block_or_expr)?
 

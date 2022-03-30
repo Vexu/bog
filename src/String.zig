@@ -190,12 +190,12 @@ pub const methods = struct {
         return ret;
     }
 
-    pub fn join(str: Value.This([]const u8), ctx: Vm.Context, args: []const *Value) !*Value {
+    pub fn join(str: Value.This([]const u8), ctx: Vm.Context, args: Value.Variadic(*Value)) !*Value {
         var b = builder(ctx.vm.gc.gpa);
         errdefer b.cancel();
-        try b.inner.ensureTotalCapacity(args.len * str.t.len);
+        try b.inner.ensureTotalCapacity(args.t.len * str.t.len);
 
-        for (args) |arg, i| {
+        for (args.t) |arg, i| {
             if (i != 0) {
                 try b.append(str.t);
             }

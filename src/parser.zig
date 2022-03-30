@@ -562,7 +562,7 @@ pub const Parser = struct {
                 lhs = try p.addBin(.array_access_expr, tok, lhs, try p.expr(.skip_nl, level));
                 _ = try p.expectToken(.r_bracket, .keep_nl);
             } else if (p.eatToken(.l_paren, .skip_nl)) |tok| {
-                const args = try p.listParser(skip_nl, level, expr, .r_paren, lhs);
+                const args = try p.listParser(skip_nl, level, spreadExpr, .r_paren, lhs);
                 switch (args.len) {
                     0 => unreachable, // we pass lhs as first
                     1 => lhs = try p.addBin(.call_expr_one, tok, lhs, null_node),
@@ -576,6 +576,17 @@ pub const Parser = struct {
             } else {
                 return lhs;
             }
+        }
+    }
+
+    /// spread_expr : "..."? expr
+    fn spreadExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
+        const ellipsis = p.eatToken(.ellipsis, skip_nl);
+        const operand = try p.expr(skip_nl, level);
+        if (ellipsis) |some| {
+            return p.addUn(.spread_expr, some, operand);
+        } else {
+            return operand;
         }
     }
 
@@ -694,7 +705,7 @@ pub const Parser = struct {
                 else => return try p.addList(.map_expr, tok, elems),
             }
         } else if (p.eatToken(.l_bracket, .skip_nl)) |tok| {
-            const elems = try p.listParser(skip_nl, level, expr, .r_bracket, null);
+            const elems = try p.listParser(skip_nl, level, spreadExpr, .r_bracket, null);
             switch (elems.len) {
                 0 => return try p.addBin(.list_expr_two, tok, null_node, null_node),
                 1 => return try p.addBin(.list_expr_two, tok, elems[0], null_node),
@@ -708,13 +719,13 @@ pub const Parser = struct {
                 return try p.addUn(.paren_expr, tok, b);
             }
             p.skipNl();
-            const first = try p.expr(.skip_nl, level);
-            if (p.eatToken(.r_paren, skip_nl)) |_| {
+            const first = try p.spreadExpr(.skip_nl, level);
+            if (p.nodes.items(.id)[first] != .spread_expr and p.eatToken(.r_paren, skip_nl) != null) {
                 return try p.addUn(.paren_expr, tok, first);
             }
             _ = try p.expectToken(.comma, .skip_nl);
 
-            const elems = try p.listParser(skip_nl, level, expr, .r_paren, first);
+            const elems = try p.listParser(skip_nl, level, spreadExpr, .r_paren, first);
             switch (elems.len) {
                 0 => return try p.addBin(.tuple_expr_two, tok, null_node, null_node),
                 1 => return try p.addBin(.tuple_expr_two, tok, elems[0], null_node),

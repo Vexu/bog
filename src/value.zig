@@ -27,6 +27,9 @@ pub const Type = enum(u8) {
     /// native being separate from .func is an implementation detail
     native,
 
+    /// Result of ... operand, needs special handling in contexts where allowed.
+    spread,
+
     pub fn format(ty: Type, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
         comptime std.debug.assert(fmt.len == 0);
         try writer.writeAll(switch (ty) {
@@ -45,6 +48,7 @@ pub const Type = enum(u8) {
             => @tagName(ty),
             .frame => unreachable,
             .iterator => unreachable,
+            .spread => unreachable,
             .native => "func",
         });
     }
@@ -151,6 +155,29 @@ pub const Value = union(Type) {
             return true;
         }
     },
+    spread: struct {
+        iterable: *Value,
+
+        pub fn len(s: @This()) usize {
+            return switch (s.iterable.*) {
+                .range => @panic("TODO spread range"),
+                .str => @panic("TODO spread str"),
+                .tuple => |tuple| tuple.len,
+                .list => |list| list.items.len,
+                else => unreachable,
+            };
+        }
+
+        pub fn items(s: @This()) []*Value {
+            return switch (s.iterable.*) {
+                .range => @panic("TODO spread range"),
+                .str => @panic("TODO spread str"),
+                .tuple => |tuple| tuple,
+                .list => |list| list.items,
+                else => unreachable,
+            };
+        }
+    },
 
     /// always memoized
     bool: bool,
@@ -186,7 +213,7 @@ pub const Value = union(Type) {
     pub const Native = struct {
         arg_count: u8,
         variadic: bool,
-        func: fn (Vm.Context, []const bog.Bytecode.Ref) NativeError!*Value,
+        func: fn (Vm.Context, []*Value) NativeError!*Value,
     };
     pub const NativeError = Vm.Error || error{Throw};
 
@@ -244,7 +271,7 @@ pub const Value = union(Type) {
         switch (value.*) {
             .bool, .@"null" => return,
             .frame => {}, // frames are managed by the VM
-            .int, .num, .native, .tagged, .range, .iterator, .err => {},
+            .int, .num, .native, .tagged, .range, .iterator, .err, .spread => {},
             .tuple => |t| allocator.free(t),
             .map => |*m| m.deinit(allocator),
             .list => |*l| l.deinit(allocator),
@@ -260,7 +287,7 @@ pub const Value = union(Type) {
         var hasher = std.hash.Wyhash.init(0);
         autoHash(&hasher, @as(Type, key.*));
         switch (key.*) {
-            .iterator => unreachable,
+            .iterator, .spread => unreachable,
             .frame => autoHash(&hasher, key.frame),
             .@"null" => {},
             .int => |int| autoHash(&hasher, int),
@@ -316,7 +343,7 @@ pub const Value = union(Type) {
             else => if (a.* != @as(std.meta.Tag(@TypeOf(b.*)), b.*)) return false,
         }
         return switch (a.*) {
-            .iterator, .int, .num => unreachable,
+            .iterator, .spread, .int, .num => unreachable,
             .frame => a.frame == b.frame,
             .@"null" => true,
             .bool => |bool_val| bool_val == b.bool,
@@ -358,7 +385,7 @@ pub const Value = union(Type) {
     /// Prints string representation of value to writer
     pub fn dump(value: *const Value, writer: anytype, level: u32) @TypeOf(writer).Error!void {
         switch (value.*) {
-            .iterator => unreachable,
+            .iterator, .spread => unreachable,
             .int => |i| try writer.print("{}", .{i}),
             .num => |n| try writer.print("{d}", .{n}),
             .bool => |b| try writer.writeAll(if (b) "true" else "false"),
@@ -575,7 +602,7 @@ pub const Value = union(Type) {
                 .num => |num| num != 0,
                 .bool => unreachable,
                 .str => unreachable,
-                else => return vm.errorFmt("cannot cast {s} to bool", .{@tagName(val.*)}),
+                else => return vm.errorFmt("cannot cast {} to bool", .{val.ty()}),
             };
 
             return if (bool_res) Value.True else Value.False;
@@ -591,7 +618,7 @@ pub const Value = union(Type) {
                     .num => |num| std.math.lossyCast(i64, num),
                     .bool => |b| @boolToInt(b),
                     .str => unreachable,
-                    else => return vm.errorFmt("cannot cast {s} to int", .{@tagName(val.*)}),
+                    else => return vm.errorFmt("cannot cast {} to int", .{val.ty()}),
                 },
             },
             .num => .{
@@ -600,7 +627,7 @@ pub const Value = union(Type) {
                     .int => |int| @intToFloat(f64, int),
                     .bool => |b| @intToFloat(f64, @boolToInt(b)),
                     .str => unreachable,
-                    else => return vm.errorFmt("cannot cast {s} to num", .{@tagName(val.*)}),
+                    else => return vm.errorFmt("cannot cast {} to num", .{val.ty()}),
                 },
             },
             .str, .bool, .@"null" => unreachable,
@@ -654,7 +681,7 @@ pub const Value = union(Type) {
             .range => |r| start = r.start,
             .str, .tuple, .list, .map => {},
             .iterator => unreachable,
-            else => return ctx.throwFmt("cannot iterate {s}", .{@tagName(val.*)}),
+            else => return ctx.throwFmt("cannot iterate {}", .{val.ty()}),
         }
         const iter = try ctx.vm.gc.alloc(.iterator);
         iter.* = .{
@@ -916,7 +943,7 @@ pub const Value = union(Type) {
                 try val.dump(writer, 0);
                 try writer.writeByte('\"');
             },
-            .iterator => unreachable,
+            .iterator, .spread => unreachable,
         }
     }
 };
@@ -931,7 +958,7 @@ fn wrapZigFunc(func: anytype) Value.Native {
         // cannot directly use `func` so declare a pointer to it
         var _func: @TypeOf(func) = undefined;
 
-        fn native(ctx: Vm.Context, bog_args: []const bog.Bytecode.Ref) Value.NativeError!*Value {
+        fn native(ctx: Vm.Context, bog_args: []*Value) Value.NativeError!*Value {
             var args: std.meta.ArgsTuple(@TypeOf(_func)) = undefined;
 
             comptime var bog_arg_i: u8 = 0;
@@ -961,13 +988,11 @@ fn wrapZigFunc(func: anytype) Value.Native {
                     errdefer ctx.vm.gc.gpa.free(args_tuple);
                     args[i] = ArgT{ .t = args_tuple };
 
-                    for (bog_args[bog_arg_i..]) |bog_arg, tuple_i| {
-                        const val = ctx.frame.val(bog_arg);
+                    for (bog_args[bog_arg_i..]) |val, tuple_i| {
                         args_tuple[tuple_i] = try val.bogToZig(ArgT.__bog_Variadic_T, ctx);
                     }
                 } else {
-                    const val = ctx.frame.val(bog_args[bog_arg_i]);
-                    args[i] = try val.bogToZig(ArgT, ctx);
+                    args[i] = try bog_args[bog_arg_i].bogToZig(ArgT, ctx);
                     bog_arg_i += 1;
                 }
             }

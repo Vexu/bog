@@ -663,6 +663,18 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .map_expr_two,
         => return c.genMap(node, res),
         .map_item_expr => unreachable, // handled in genMap
+        .spread_expr => {
+            const data = c.tree.nodes.items(.data);
+            const operand = try c.genNode(data[node].un, .value);
+
+            if (!operand.isRt() and operand != .str) {
+                return c.reportErr("expected iterable value", data[node].un);
+            }
+
+            const operand_ref = try c.makeRuntime(operand);
+            const ref = try c.addUn(.spread, operand_ref, node);
+            return Value{ .ref = ref };
+        },
         .enum_expr => {
             const val = try c.genEnum(node);
             return c.wrapResult(node, val, res);

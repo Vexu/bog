@@ -152,6 +152,7 @@ pub const Inst = struct {
         negate,
         bool_not,
         bit_not,
+        spread,
 
         // uses Data.un, error(A) => A
         unwrap_error,
@@ -222,7 +223,7 @@ pub const Inst = struct {
                 .greater_than, .greater_than_equal, .mul, .pow, .add, .sub,
                 .l_shift, .r_shift, .bit_and, .bit_or, .bit_xor, .rem, .div,
                 .div_floor, .import, .build_range_step, .build_range,
-                .iter_init, .iter_next => true,
+                .iter_init, .iter_next, .spread => true,
                 // zig fmt: on
                 else => false,
             };
@@ -234,7 +235,7 @@ pub const Inst = struct {
                 .discard, .copy, .move, .append, .check_len,
                 .assert_len, .set, .push_err_handler, .pop_err_handler,
                 .jump, .jump_if_true, .jump_if_false, .jump_if_null, .ret,
-                .ret_null, .throw => false,
+                .ret_null, .throw, .spread => false,
                 // zig fmt: on
                 else => true,
             };
@@ -430,6 +431,7 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
             .negate,
             .bool_not,
             .bit_not,
+            .spread,
             .unwrap_error,
             .iter_init,
             .discard,

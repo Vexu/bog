@@ -201,6 +201,9 @@ fn markGray(gc: *Gc) void {
                     .iterator => |iter| {
                         gc.markVal(iter.value);
                     },
+                    .spread => |spread| {
+                        gc.markVal(spread.iterable);
+                    },
                     .tagged => |tag| {
                         gc.markVal(tag.value);
                     },
@@ -278,6 +281,7 @@ pub fn alloc(gc: *Gc, ty: Type) !*Value {
         .frame,
         .iterator,
         .tagged,
+        .spread,
         => return gc.allocExtra(&gc.aggregate_pages),
     }
 }

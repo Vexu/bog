@@ -64,7 +64,7 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
             try renderToken(tree, tokens[node], aiw, .space);
             try renderNode(tree, data[node].un, aiw, space);
         },
-        .bit_not_expr, .negate_expr => {
+        .bit_not_expr, .negate_expr, .spread_expr => {
             try renderToken(tree, tokens[node], aiw, .none);
             try renderNode(tree, data[node].un, aiw, space);
         },
