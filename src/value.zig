@@ -92,11 +92,11 @@ pub const Value = union(Type) {
                     iter.i.u += 1;
                 },
                 .list => |list| {
-                    if (iter.i.u == list.items.len) {
+                    if (iter.i.u == list.inner.items.len) {
                         return false;
                     }
 
-                    res.* = list.items[iter.i.u];
+                    res.* = list.inner.items[iter.i.u];
                     iter.i.u += 1;
                 },
                 .str => |str| {
@@ -163,7 +163,7 @@ pub const Value = union(Type) {
                 .range => @panic("TODO spread range"),
                 .str => @panic("TODO spread str"),
                 .tuple => |tuple| tuple.len,
-                .list => |list| list.items.len,
+                .list => |list| list.inner.items.len,
                 else => unreachable,
             };
         }
@@ -173,7 +173,7 @@ pub const Value = union(Type) {
                 .range => @panic("TODO spread range"),
                 .str => @panic("TODO spread str"),
                 .tuple => |tuple| tuple,
-                .list => |list| list.items,
+                .list => |list| list.inner.items,
                 else => unreachable,
             };
         }
@@ -209,7 +209,7 @@ pub const Value = union(Type) {
 
     pub const String = @import("String.zig");
     pub const Map = @import("Map.zig");
-    pub const List = std.ArrayListUnmanaged(*Value);
+    pub const List = @import("List.zig");
     pub const Native = struct {
         arg_count: u8,
         variadic: bool,
@@ -303,7 +303,7 @@ pub const Value = union(Type) {
                 // TODO more hashing?
             },
             .list => |list| {
-                autoHash(&hasher, list.items.len);
+                autoHash(&hasher, list.inner.items.len);
                 // TODO more hashing?
             },
             .err => |err| autoHash(&hasher, @as(Type, err.*)),
@@ -357,13 +357,7 @@ pub const Value = union(Type) {
                 return true;
             },
             .map => @panic("TODO eql for maps"),
-            .list => |l| {
-                if (l.items.len != b.list.items.len) return false;
-                for (l.items) |v, i| {
-                    if (!v.eql(b.list.items[i])) return false;
-                }
-                return true;
-            },
+            .list => |l| l.eql(b.list),
             .err => |e| e.eql(b.err),
             .range => |r| {
                 return r.start == b.range.start and
@@ -427,7 +421,7 @@ pub const Value = union(Type) {
                     try writer.writeAll("[...]");
                 } else {
                     try writer.writeByte('[');
-                    for (l.items) |v, i| {
+                    for (l.inner.items) |v, i| {
                         if (i != 0) try writer.writeAll(", ");
                         try v.dump(writer, level - 1);
                     }
@@ -491,36 +485,7 @@ pub const Value = union(Type) {
                 },
                 else => return ctx.throw("invalid index type"),
             },
-            .list => |list| switch (index.*) {
-                .int => {
-                    var i = index.int;
-                    if (i < 0)
-                        i += @intCast(i64, list.items.len);
-                    if (i < 0 or i >= list.items.len)
-                        return ctx.throw("index out of bounds");
-
-                    res.* = list.items[@intCast(u32, i)];
-                },
-                .range => return ctx.frame.fatal(ctx.vm, "TODO get with ranges"),
-                .str => |s| {
-                    if (res.* == null) {
-                        res.* = try ctx.vm.gc.alloc(.int);
-                    }
-
-                    if (mem.eql(u8, s.data, "len")) {
-                        res.*.?.* = .{ .int = @intCast(i64, list.items.len) };
-                    } else if (mem.eql(u8, s.data, "append")) {
-                        res.* = try zigToBog(ctx.vm, struct {
-                            fn append(_list: This(*List), _ctx: Vm.Context, val: *Value) !void {
-                                try _list.t.append(_ctx.vm.gc.gpa, val);
-                            }
-                        }.append);
-                    } else {
-                        return ctx.throw("no such property");
-                    }
-                },
-                else => return ctx.throw("invalid index type"),
-            },
+            .list => |list| return list.get(ctx, index, res),
             .map => |map| {
                 res.* = map.get(index) orelse
                     return ctx.throwFmt("no value associated with key: {}", .{index.*});
@@ -566,17 +531,7 @@ pub const Value = union(Type) {
             .map => |*map| {
                 _ = try map.put(ctx.vm.gc.gpa, try ctx.vm.gc.dupe(index), new_val);
             },
-            .list => |list| if (index.* == .int) {
-                var i = index.int;
-                if (i < 0)
-                    i += @intCast(i64, list.items.len);
-                if (i < 0 or i >= list.items.len)
-                    return ctx.throw("index out of bounds");
-
-                list.items[@intCast(u32, i)] = new_val;
-            } else {
-                return ctx.frame.fatal(ctx.vm, "TODO set with ranges");
-            },
+            .list => |*list| try list.set(ctx, index, new_val),
             .str => |*str| try str.set(ctx, index, new_val),
             .iterator => unreachable,
             else => return ctx.throw("invalid subscript type"),
@@ -594,6 +549,14 @@ pub const Value = union(Type) {
 
         if (val.* == .str) {
             return val.str.as(vm, type_id);
+        } else if (type_id == .str) {
+            return String.from(val, vm);
+        }
+
+        if (val.* == .list) {
+            return val.list.as(vm, type_id);
+        } else if (type_id == .list) {
+            return List.from(val, vm);
         }
 
         if (type_id == .bool) {
@@ -606,8 +569,6 @@ pub const Value = union(Type) {
             };
 
             return if (bool_res) Value.True else Value.False;
-        } else if (type_id == .str) {
-            return String.from(val, vm);
         }
 
         const new_val = try vm.gc.alloc(type_id);
@@ -630,10 +591,9 @@ pub const Value = union(Type) {
                     else => return vm.errorFmt("cannot cast {} to num", .{val.ty()}),
                 },
             },
-            .str, .bool, .@"null" => unreachable,
+            .str, .list, .bool, .@"null" => unreachable,
             .tuple,
             .map,
-            .list,
             => return vm.errorVal("TODO more casts"),
             else => unreachable,
         };
@@ -656,12 +616,7 @@ pub const Value = union(Type) {
                 }
                 return false;
             },
-            .list => |list| {
-                for (list.items) |v| {
-                    if (v.eql(val)) return true;
-                }
-                return false;
-            },
+            .list => |list| return list.in(val),
             .map => |map| return map.contains(val),
             .range => |r| {
                 if (val.* != .int) return false;
@@ -904,7 +859,7 @@ pub const Value = union(Type) {
             },
             .list => |*l| {
                 try writer.writeByte('[');
-                for (l.items) |e, i| {
+                for (l.inner.items) |e, i| {
                     if (i != 0) try writer.writeByte(',');
                     try e.jsonStringify(options, writer);
                 }

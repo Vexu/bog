@@ -165,7 +165,7 @@ fn markGray(gc: *Gc) void {
                 page.marked += 1;
                 switch (page.values[i]) {
                     .list => |list| {
-                        for (list.items) |val| {
+                        for (list.inner.items) |val| {
                             gc.markVal(val);
                         }
                     },
@@ -339,7 +339,7 @@ pub fn dupe(gc: *Gc, val: *const Value) !*Value {
     switch (val.*) {
         .list => |*l| {
             new.* = .{ .list = .{} };
-            try new.list.appendSlice(gc.gpa, l.items);
+            try new.list.inner.appendSlice(gc.gpa, l.inner.items);
         },
         .tuple => |t| {
             new.* = .{ .tuple = try gc.gpa.dupe(*Value, t) };

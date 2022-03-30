@@ -8,8 +8,8 @@ pub fn keys(ctx: Vm.Context, map: *const Value.Map) !*Value {
     const gc = &ctx.vm.gc;
     var ret = try gc.alloc(.list);
     ret.* = .{ .list = .{} };
-    try ret.list.resize(gc.gpa, map.count());
-    const items = ret.list.items;
+    try ret.list.inner.resize(gc.gpa, map.count());
+    const items = ret.list.inner.items;
 
     var i: usize = 0;
     var iter = map.iterator();
@@ -25,8 +25,8 @@ pub fn values(ctx: Vm.Context, map: *const Value.Map) !*Value {
     const gc = &ctx.vm.gc;
     var ret = try gc.alloc(.list);
     ret.* = .{ .list = .{} };
-    try ret.list.resize(gc.gpa, map.count());
-    const items = ret.list.items;
+    try ret.list.inner.resize(gc.gpa, map.count());
+    const items = ret.list.inner.items;
 
     var i: usize = 0;
     var iter = map.iterator();
@@ -42,8 +42,8 @@ pub fn entries(ctx: Vm.Context, map: *const Value.Map) !*Value {
     const gc = &ctx.vm.gc;
     var ret = try ctx.vm.gc.alloc(.list);
     ret.* = .{ .list = .{} };
-    try ret.list.resize(gc.gpa, map.count());
-    const items = ret.list.items;
+    try ret.list.inner.resize(gc.gpa, map.count());
+    const items = ret.list.inner.items;
 
     var i: usize = 0;
     var iter = map.iterator();

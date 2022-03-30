@@ -40,7 +40,7 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
                     .ArrayEnd => break,
                     else => {},
                 }
-                try res.list.append(vm.gc.gpa, try parseInternal(vm, tok, tokens));
+                try res.list.inner.append(vm.gc.gpa, try parseInternal(vm, tok, tokens));
             }
             return res;
         },

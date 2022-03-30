@@ -367,13 +367,13 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
 
                 const res = try f.newVal(vm, ref, .list);
                 res.* = .{ .list = .{} };
-                try res.list.ensureUnusedCapacity(vm.gc.gpa, len);
+                try res.list.inner.ensureUnusedCapacity(vm.gc.gpa, len);
 
                 for (items) |item_ref| {
                     const val = f.val(item_ref);
                     switch (val.*) {
-                        .spread => |spread| res.list.appendSliceAssumeCapacity(spread.items()),
-                        else => res.list.appendAssumeCapacity(val),
+                        .spread => |spread| res.list.inner.appendSliceAssumeCapacity(spread.items()),
+                        else => res.list.inner.appendAssumeCapacity(val),
                     }
                 }
             },
@@ -762,7 +762,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const container = f.val(data[inst].bin.lhs);
                 const operand = f.val(data[inst].bin.rhs);
 
-                try container.list.append(vm.gc.gpa, try vm.gc.dupe(operand));
+                try container.list.inner.append(vm.gc.gpa, try vm.gc.dupe(operand));
             },
             .as => {
                 const arg = f.val(data[inst].bin_ty.operand);
@@ -869,7 +869,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const len = @enumToInt(data[inst].bin.rhs);
 
                 const ok = switch (container.*) {
-                    .list => |list| list.items.len == len,
+                    .list => |list| list.inner.items.len == len,
                     .tuple => |tuple| tuple.len == len,
                     else => false,
                 };
@@ -885,7 +885,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const len = @enumToInt(data[inst].bin.rhs);
 
                 const actual_len = switch (container.*) {
-                    .list => |list| list.items.len,
+                    .list => |list| list.inner.items.len,
                     .tuple => |tuple| tuple.len,
                     else => {
                         try f.throwFmt(vm, "cannot destructure non list/tuple type {}", .{container.ty()});
@@ -1162,7 +1162,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         if (variadic) {
                             var_args = try vm.gc.alloc(.list);
                             var_args.* = .{ .list = .{} };
-                            try var_args.list.ensureUnusedCapacity(vm.gc.gpa, args_len - non_variadic_args);
+                            try var_args.list.inner.ensureUnusedCapacity(vm.gc.gpa, args_len - non_variadic_args);
                         }
 
                         var i: u32 = 0;
@@ -1173,13 +1173,13 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                                 .spread => |spread| {
                                     const spread_items = spread.items();
                                     for (spread_items) |item| {
-                                        if (i == non_variadic_args) arg_list = &var_args.list;
+                                        if (i == non_variadic_args) arg_list = &var_args.list.inner;
                                         arg_list.appendAssumeCapacity(item);
                                         i += 1;
                                     }
                                 },
                                 else => {
-                                    if (i == non_variadic_args) arg_list = &var_args.list;
+                                    if (i == non_variadic_args) arg_list = &var_args.list.inner;
                                     arg_list.appendAssumeCapacity(arg);
                                     i += 1;
                                 },

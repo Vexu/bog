@@ -68,12 +68,12 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
         fn argsToBog(ctx: bog.Vm.Context) bog.Vm.Error!*bog.Value {
             const ret = try ctx.vm.gc.alloc(.list);
             ret.* = .{ .list = .{} };
-            try ret.list.ensureTotalCapacity(ctx.vm.gc.gpa, _args.len);
+            try ret.list.inner.ensureTotalCapacity(ctx.vm.gc.gpa, _args.len);
 
             for (_args) |arg| {
                 const str = try ctx.vm.gc.alloc(.str);
                 str.* = bog.Value.string(arg);
-                ret.list.appendAssumeCapacity(str);
+                ret.list.inner.appendAssumeCapacity(str);
             }
             return ret;
         }

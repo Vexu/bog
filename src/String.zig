@@ -1,11 +1,12 @@
 const std = @import("std");
-const String = @This();
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const bog = @import("bog.zig");
 const Vm = bog.Vm;
 const Value = bog.Value;
 const Type = bog.Type;
+
+const String = @This();
 
 const default_dump_depth = 4;
 
@@ -102,12 +103,16 @@ pub fn get(str: *const String, ctx: Vm.Context, index: *const Value, res: *?*Val
 }
 
 pub const methods = struct {
-    pub fn append(str: Value.This(*String), ctx: Vm.Context, data: []const u8) !void {
+    pub fn append(str: Value.This(*String), ctx: Vm.Context, strs: Value.Variadic([]const u8)) !void {
         var b = builder(ctx.vm.gc.gpa);
         errdefer b.cancel();
 
-        try b.append(str.t.data);
-        try b.append(data);
+        var len = str.t.data.len;
+        for (strs.t) |new| len += new.len;
+        try b.inner.ensureUnusedCapacity(len);
+
+        b.inner.appendSliceAssumeCapacity(str.t.data);
+        for (strs.t) |new| b.inner.appendSliceAssumeCapacity(new);
 
         str.t.deinit(ctx.vm.gc.gpa);
         str.t.* = b.finish();
@@ -190,19 +195,24 @@ pub const methods = struct {
         return ret;
     }
 
-    pub fn join(str: Value.This([]const u8), ctx: Vm.Context, args: Value.Variadic(*Value)) !*Value {
+    pub fn join(str: Value.This([]const u8), ctx: Vm.Context, strs: Value.Variadic([]const u8)) !*Value {
+        if (strs.t.len == 0) {
+            const ret = try ctx.vm.gc.alloc(.str);
+            ret.* = Value.string("");
+            return ret;
+        }
         var b = builder(ctx.vm.gc.gpa);
         errdefer b.cancel();
-        try b.inner.ensureTotalCapacity(args.t.len * str.t.len);
 
-        for (args.t) |arg, i| {
+        var len = str.t.len * (strs.t.len - 1);
+        for (strs.t) |new| len += new.len;
+        try b.inner.ensureUnusedCapacity(len);
+
+        for (strs.t) |arg, i| {
             if (i != 0) {
-                try b.append(str.t);
+                b.inner.appendSliceAssumeCapacity(str.t);
             }
-            if (arg.* != .str) {
-                return ctx.throwFmt("join only accepts strings, got '{}'", .{arg.ty()});
-            }
-            try b.append(arg.str.data);
+            b.inner.appendSliceAssumeCapacity(arg);
         }
 
         const ret = try ctx.vm.gc.alloc(.str);
