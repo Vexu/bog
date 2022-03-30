@@ -66,16 +66,14 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
         var _args: [][]const u8 = undefined;
 
         fn argsToBog(ctx: bog.Vm.Context) bog.Vm.Error!*bog.Value {
-            const ret = try ctx.vm.gc.alloc();
+            const ret = try ctx.vm.gc.alloc(.list);
             ret.* = .{ .list = .{} };
-            var list = &ret.list;
-            errdefer list.deinit(ctx.vm.gc.gpa);
-            try list.ensureTotalCapacity(ctx.vm.gc.gpa, _args.len);
+            try ret.list.ensureTotalCapacity(ctx.vm.gc.gpa, _args.len);
 
             for (_args) |arg| {
-                const str = try ctx.vm.gc.alloc();
+                const str = try ctx.vm.gc.alloc(.str);
                 str.* = bog.Value.string(arg);
-                list.appendAssumeCapacity(str);
+                ret.list.appendAssumeCapacity(str);
             }
             return ret;
         }
@@ -110,7 +108,7 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
             process.exit(1);
         },
         .@"null" => {},
-        else => fatal("invalid return type '{s}'", .{@tagName(res.*)}),
+        else => fatal("invalid return type '{}'", .{res.ty()}),
     }
 }
 

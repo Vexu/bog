@@ -14,7 +14,7 @@ const Error = error{ UnexpectedToken, UnexpectedEndOfJson } || std.mem.Allocator
 fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) Error!*Value {
     switch (token) {
         .ObjectBegin => {
-            const res = try vm.gc.alloc();
+            const res = try vm.gc.alloc(.map);
             res.* = .{ .map = .{} };
 
             while (true) {
@@ -31,7 +31,7 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
             return res;
         },
         .ArrayBegin => {
-            const res = try vm.gc.alloc();
+            const res = try vm.gc.alloc(.list);
             res.* = .{ .list = .{} };
 
             while (true) {
@@ -47,7 +47,7 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
         .ObjectEnd, .ArrayEnd => return error.UnexpectedToken,
         .String => |info| {
             const source_slice = info.slice(tokens.slice, tokens.i - 1);
-            const val = try vm.gc.alloc();
+            const val = try vm.gc.alloc(.str);
             switch (info.escapes) {
                 .None => val.* = Value.string(try vm.gc.gpa.dupe(u8, source_slice)),
                 .Some => {
@@ -60,7 +60,7 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
             return val;
         },
         .Number => |info| {
-            const val = try vm.gc.alloc();
+            const val = try vm.gc.alloc(.int);
             if (info.is_integer) {
                 val.* = .{ .int = try std.fmt.parseInt(i64, info.slice(tokens.slice, tokens.i - 1), 10) };
             } else {

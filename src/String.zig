@@ -83,7 +83,7 @@ pub fn get(str: *const String, ctx: Vm.Context, index: *const Value, res: *?*Val
         .range => return ctx.frame.fatal(ctx.vm, "TODO str get with ranges"),
         .str => |*s| {
             if (res.* == null) {
-                res.* = try ctx.vm.gc.alloc();
+                res.* = try ctx.vm.gc.alloc(.int);
             }
 
             if (mem.eql(u8, s.data, "len")) {
@@ -162,7 +162,7 @@ pub const methods = struct {
                     switch (fmt_type) {
                         'x', 'X' => {
                             if (args[arg_i].* != .int) {
-                                return ctx.throwFmt("'x' takes an integer as an argument, got '{s}'", .{@tagName(args[arg_i].*)});
+                                return ctx.throwFmt("'x' takes an integer as an argument, got '{}'", .{args[arg_i].ty()});
                             }
                             try std.fmt.formatInt(args[arg_i].int, 16, @intToEnum(std.fmt.Case, @boolToInt(fmt[0] == 'X')), options, w);
                         },
@@ -185,7 +185,7 @@ pub const methods = struct {
             return ctx.throw("unused arguments");
         }
 
-        const ret = try ctx.vm.gc.alloc();
+        const ret = try ctx.vm.gc.alloc(.str);
         ret.* = Value{ .str = b.finish() };
         return ret;
     }
@@ -200,12 +200,12 @@ pub const methods = struct {
                 try b.append(str.t);
             }
             if (arg.* != .str) {
-                return ctx.throwFmt("join only accepts strings, got '{s}'", .{@tagName(arg.*)});
+                return ctx.throwFmt("join only accepts strings, got '{}'", .{arg.ty()});
             }
             try b.append(arg.str.data);
         }
 
-        const ret = try ctx.vm.gc.alloc();
+        const ret = try ctx.vm.gc.alloc(.str);
         ret.* = Value{ .str = b.finish() };
         return ret;
     }
@@ -230,7 +230,7 @@ pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {
             return vm.errorVal("cannot cast string to bool");
     }
 
-    const new_val = try vm.gc.alloc();
+    const new_val = try vm.gc.alloc(type_id);
     new_val.* = switch (type_id) {
         .int => .{
             .int = std.fmt.parseInt(i64, str.data, 0) catch |err|
@@ -252,15 +252,14 @@ pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {
 }
 
 pub fn from(val: *Value, vm: *Vm) Vm.Error!*Value {
-    const str = try vm.gc.alloc();
+    const str = try vm.gc.alloc(.str);
 
-    if (val.* == .@"null") {
+    if (val == Value.Null) {
         str.* = Value.string("null");
-    } else if (val.* == .bool) {
-        str.* = if (val.bool)
-            Value.string("true")
-        else
-            Value.string("false");
+    } else if (val == Value.True) {
+        str.* = Value.string("true");
+    } else if (val == Value.False) {
+        str.* = Value.string("false");
     } else {
         var b = builder(vm.gc.gpa);
         try val.dump(b.writer(), default_dump_depth);

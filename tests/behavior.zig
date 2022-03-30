@@ -814,7 +814,7 @@ fn expectCallOutput(source: []const u8, args: anytype, expected: []const u8) !vo
 
     vm.gc.stack_protect_start = @frameAddress();
 
-    var frame_val = try vm.gc.alloc();
+    var frame_val = try vm.gc.alloc(.frame);
     frame_val.* = .{ .frame = &frame };
 
     const res = vm.run(&frame) catch |e| switch (e) {
@@ -868,7 +868,7 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
 
     vm.gc.stack_protect_start = @frameAddress();
 
-    var frame_val = try vm.gc.alloc();
+    var frame_val = try vm.gc.alloc(.frame);
     frame_val.* = .{ .frame = &frame };
 
     const res = vm.run(&frame) catch |e| switch (e) {

@@ -12,7 +12,7 @@ pub fn run(gpa: Allocator, reader: anytype, writer: anytype) !void {
 
     repl.vm.gc.stack_protect_start = @frameAddress();
 
-    var frame_val = try repl.vm.gc.alloc();
+    var frame_val = try repl.vm.gc.alloc(.frame);
     frame_val.* = .{ .frame = &repl.frame };
     defer frame_val.* = .{ .int = 0 }; // clear frame
 
@@ -146,7 +146,7 @@ pub const Repl = struct {
 
         const res = try repl.vm.run(&repl.frame);
         repl.frame.stack.items[0] = res;
-        if (res.* == .@"null") return;
+        if (res == bog.Value.Null) return;
         try res.dump(writer, 2);
         try writer.writeByte('\n');
     }

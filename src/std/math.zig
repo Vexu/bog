@@ -38,16 +38,16 @@ pub fn ln(ctx: Vm.Context, val: *Value) !*Value {
     switch (val.*) {
         .int => |i| {
             if (i <= 0) return ctx.throw("ln is undefined for numbers less than zero");
-            const res = try ctx.vm.gc.alloc();
+            const res = try ctx.vm.gc.alloc(.int);
             res.* = Value{ .int = std.math.lossyCast(i64, std.math.floor(std.math.ln(@intToFloat(f64, i)))) };
             return res;
         },
         .num => |n| {
-            const res = try ctx.vm.gc.alloc();
+            const res = try ctx.vm.gc.alloc(.num);
             res.* = Value{ .num = std.math.ln(n) };
             return res;
         },
-        else => return ctx.throwFmt("ln expects a number, got '{s}'", .{@tagName(val.*)}),
+        else => return ctx.throwFmt("ln expects a number, got '{}'", .{val.ty()}),
     }
 }
 
@@ -55,16 +55,16 @@ pub fn sqrt(ctx: Vm.Context, val: *Value) !*Value {
     return switch (val.*) {
         .int => |i| {
             _ = i;
-            const res = try ctx.vm.gc.alloc();
+            const res = try ctx.vm.gc.alloc(.int);
             res.* = Value{ .int = std.math.sqrt(@intCast(u64, i)) };
             return res;
         },
         .num => |n| {
-            const res = try ctx.vm.gc.alloc();
+            const res = try ctx.vm.gc.alloc(.num);
             res.* = Value{ .num = std.math.sqrt(n) };
             return res;
         },
-        else => return ctx.throwFmt("sqrt expects a number, got '{s}'", .{@tagName(val.*)}),
+        else => return ctx.throwFmt("sqrt expects a number, got '{}'", .{val.ty()}),
     };
 }
 

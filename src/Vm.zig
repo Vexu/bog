@@ -4,6 +4,7 @@ const Allocator = mem.Allocator;
 const bog = @import("bog.zig");
 const Bytecode = bog.Bytecode;
 const Value = bog.Value;
+const Type = bog.Type;
 const Ref = Bytecode.Ref;
 const Gc = bog.Gc;
 const Errors = bog.Errors;
@@ -79,7 +80,7 @@ pub const Frame = struct {
         f.* = undefined;
     }
 
-    pub fn newVal(f: *Frame, vm: *Vm, ref: Ref) !*Value {
+    pub fn newVal(f: *Frame, vm: *Vm, ref: Ref, ty: Type) !*Value {
         const res = try f.newRef(vm, ref);
         if (res.*) |some| {
             // attempt to use old value for better performance in loops
@@ -87,12 +88,12 @@ pub const Frame = struct {
                 // simple values can be reused
                 .int, .num, .range, .native => return some,
                 // if string doesn't own it's contents it can be reused
-                .str => |s| if (s.capacity == 0) return some,
+                .str => if (some.str.capacity == 0) return some,
                 else => {},
             }
         }
         // allocate a new value if previous cannot be used or there isn't one
-        res.* = try vm.gc.alloc();
+        res.* = try vm.gc.alloc(ty);
         return res.*.?;
     }
 
@@ -278,7 +279,7 @@ pub fn compileAndRun(vm: *Vm, file_path: []const u8) !*Value {
 
     vm.gc.stack_protect_start = @frameAddress();
 
-    var frame_val = try vm.gc.alloc();
+    var frame_val = try vm.gc.alloc(.frame);
     frame_val.* = .{ .frame = &frame };
     defer frame_val.* = .{ .int = 0 }; // clear frame
 
@@ -307,17 +308,17 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 };
             },
             .int => {
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .int);
 
                 res.* = .{ .int = data[inst].int };
             },
             .num => {
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .num);
 
                 res.* = .{ .num = data[inst].num };
             },
             .str => {
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .str);
 
                 const str = mod.strings[data[inst].str.offset..][0..data[inst].str.len];
                 res.* = Value.string(str);
@@ -325,7 +326,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .build_tuple => {
                 const items = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
 
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .tuple);
                 res.* = .{ .tuple = try vm.gc.gpa.alloc(*Value, items.len) };
 
                 for (items) |item_ref, tuple_i| {
@@ -335,7 +336,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .build_list => {
                 const items = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
 
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .list);
                 res.* = .{ .list = .{} };
 
                 try res.list.ensureUnusedCapacity(vm.gc.gpa, items.len);
@@ -348,7 +349,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .build_map => {
                 const items = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
 
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .map);
                 res.* = .{ .map = .{} };
 
                 try res.map.ensureUnusedCapacity(vm.gc.gpa, @intCast(u32, items.len));
@@ -361,17 +362,17 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 }
             },
             .build_error => {
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .err);
                 const arg = f.val(data[inst].un);
 
                 res.* = .{ .err = try vm.gc.dupe(arg) };
             },
             .build_error_null => {
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .err);
                 res.* = .{ .err = Value.Null };
             },
             .build_tagged => {
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .tagged);
                 const arg = f.val(mod.extra[data[inst].extra.extra]);
                 const str_offset = @enumToInt(mod.extra[data[inst].extra.extra + 1]);
 
@@ -382,13 +383,13 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 } };
             },
             .build_tagged_null => {
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .tagged);
 
                 const name = mod.strings[data[inst].str.offset..][0..data[inst].str.len];
                 res.* = .{ .tagged = .{ .name = name, .value = Value.Null } };
             },
             .build_func => {
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .func);
                 const extra = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
                 const captures_len = @enumToInt(extra[1]);
                 const fn_captures = extra[2..][0..captures_len];
@@ -412,7 +413,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const start = (try f.int(vm, data[inst].bin.lhs)) orelse continue;
                 const end = (try f.int(vm, data[inst].bin.rhs)) orelse continue;
 
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .range);
                 res.* = .{
                     .range = .{
                         .start = start,
@@ -425,7 +426,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const end = (try f.int(vm, mod.extra[data[inst].range.extra])) orelse continue;
                 const step = (try f.int(vm, mod.extra[data[inst].range.extra + 1])) orelse continue;
 
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .range);
                 res.* = .{
                     .range = .{
                         .start = start,
@@ -501,7 +502,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         continue;
                     },
                 };
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .int);
                 res.* = copy;
             },
             .div => {
@@ -513,7 +514,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 }
 
                 const copy = Value{ .num = asNum(lhs) / asNum(rhs) };
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .num);
                 res.* = copy;
             },
             .rem => {
@@ -533,7 +534,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 } else .{
                     .int = @rem(lhs.int, rhs.int),
                 };
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .num);
                 res.* = copy;
             },
             .mul => {
@@ -548,7 +549,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         continue;
                     },
                 };
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .num);
                 res.* = copy;
             },
             .pow => {
@@ -563,7 +564,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         continue;
                     },
                 };
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .num);
                 res.* = copy;
             },
             .add => {
@@ -578,7 +579,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         continue;
                     },
                 };
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .num);
                 res.* = copy;
             },
             .sub => {
@@ -593,7 +594,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         continue;
                     },
                 };
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .num);
                 res.* = copy;
             },
             .l_shift => {
@@ -609,7 +610,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 else
                     lhs << @intCast(u6, rhs);
 
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .int);
                 res.* = .{ .int = val };
             },
             .r_shift => {
@@ -625,28 +626,28 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 else
                     lhs << @intCast(u6, rhs);
 
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .int);
                 res.* = .{ .int = val };
             },
             .bit_and => {
                 const lhs = (try f.int(vm, data[inst].bin.lhs)) orelse continue;
                 const rhs = (try f.int(vm, data[inst].bin.rhs)) orelse continue;
 
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .int);
                 res.* = .{ .int = lhs & rhs };
             },
             .bit_or => {
                 const lhs = (try f.int(vm, data[inst].bin.lhs)) orelse continue;
                 const rhs = (try f.int(vm, data[inst].bin.rhs)) orelse continue;
 
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .int);
                 res.* = .{ .int = lhs | rhs };
             },
             .bit_xor => {
                 const lhs = (try f.int(vm, data[inst].bin.lhs)) orelse continue;
                 const rhs = (try f.int(vm, data[inst].bin.rhs)) orelse continue;
 
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .int);
                 res.* = .{ .int = lhs ^ rhs };
             },
             .equal => {
@@ -718,7 +719,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 switch (rhs.*) {
                     .str, .tuple, .list, .map, .range => {},
                     else => {
-                        try f.throwFmt(vm, "'in' not allowed with type {s}", .{@tagName(rhs.*)});
+                        try f.throwFmt(vm, "'in' not allowed with type {}", .{rhs.ty()});
                         continue;
                     },
                 }
@@ -758,7 +759,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 } else .{
                     .int = -operand.int,
                 };
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .num);
                 res.* = copy;
             },
             .bool_not => {
@@ -770,7 +771,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .bit_not => {
                 const operand = (try f.int(vm, data[inst].un)) orelse continue;
 
-                const res = try f.newVal(vm, ref);
+                const res = try f.newVal(vm, ref, .int);
                 res.* = .{ .int = ~operand };
             },
             .unwrap_error => {
@@ -837,7 +838,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     .list => |list| list.items.len,
                     .tuple => |tuple| tuple.len,
                     else => {
-                        try f.throw(vm, "cannot destructure non list/tuple value");
+                        try f.throwFmt(vm, "cannot destructure non list/tuple type {}", .{container.ty()});
                         continue;
                     },
                 };
@@ -928,7 +929,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .jump_if_null => {
                 const arg = f.val(data[inst].jump_condition.operand);
 
-                if (arg.* == .@"null") {
+                if (arg == Value.Null) {
                     f.ip = data[inst].jump_condition.offset;
                 }
                 continue;
@@ -1053,7 +1054,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         new_frame.stack.appendAssumeCapacity(f.val(arg_ref));
                     }
 
-                    var frame_val = try vm.gc.alloc();
+                    var frame_val = try vm.gc.alloc(.frame);
                     frame_val.* = .{ .frame = &new_frame };
                     defer frame_val.* = .{ .int = 0 }; // clear frame
 
@@ -1069,7 +1070,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     res.* = returned;
                     try vm.storeFrame(&new_frame);
                 } else {
-                    try f.throwFmt(vm, "cannot call '{s}'", .{@tagName(callee.*)});
+                    try f.throwFmt(vm, "cannot call '{}'", .{callee.ty()});
                 }
             },
             .ret => return f.val(data[inst].un),
@@ -1082,7 +1083,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     f.ip = handler.offset;
                     continue;
                 }
-                const res = try vm.gc.alloc();
+                const res = try vm.gc.alloc(.err);
                 res.* = .{ .err = val };
                 return val;
             },
@@ -1261,7 +1262,7 @@ fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) !*Value {
     vm.getFrame(&frame);
     frame.module_frame = &frame;
 
-    var frame_val = try vm.gc.alloc();
+    var frame_val = try vm.gc.alloc(.frame);
     frame_val.* = .{ .frame = &frame };
     defer frame_val.* = .{ .int = 0 }; // clear frame
 
@@ -1271,19 +1272,19 @@ fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) !*Value {
 }
 
 pub fn errorFmt(vm: *Vm, comptime fmt: []const u8, args: anytype) Vm.Error!*Value {
-    const str = try vm.gc.alloc();
+    const str = try vm.gc.alloc(.str);
     str.* = .{ .str = try Value.String.init(vm.gc.gpa, fmt, args) };
 
-    const err = try vm.gc.alloc();
+    const err = try vm.gc.alloc(.err);
     err.* = .{ .err = str };
     return err;
 }
 
 pub fn errorVal(vm: *Vm, msg: []const u8) !*Value {
-    const str = try vm.gc.alloc();
+    const str = try vm.gc.alloc(.str);
     str.* = Value.string(msg);
 
-    const err = try vm.gc.alloc();
+    const err = try vm.gc.alloc(.err);
     err.* = .{ .err = str };
     return err;
 }
