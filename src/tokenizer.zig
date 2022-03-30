@@ -139,6 +139,7 @@ pub const Token = struct {
         l_bracket,
         r_bracket,
         period,
+        ellipsis,
         equal_rarr,
         caret,
         caret_equal,
@@ -300,6 +301,7 @@ pub const Token = struct {
             .l_bracket => "[",
             .r_bracket => "]",
             .period => ".",
+            .ellipsis => "...",
             .equal_rarr => "=>",
             .caret => "^",
             .caret_equal => "^=",
@@ -573,6 +575,8 @@ pub const Tokenizer = struct {
             r_arr,
             r_arr_arr,
             caret,
+            period,
+            period2,
             minus,
             slash,
             slash_slash,
@@ -687,10 +691,7 @@ pub const Tokenizer = struct {
                         res = .colon;
                         break;
                     },
-                    '.' => {
-                        res = .period;
-                        break;
-                    },
+                    '.' => state = .period,
                     '-' => state = .minus,
                     '/' => state = .slash,
                     '&' => state = .ampersand,
@@ -958,6 +959,25 @@ pub const Tokenizer = struct {
                     else => {
                         self.it.i = start_index + 1;
                         res = .caret;
+                        break;
+                    },
+                },
+                .period => switch (c) {
+                    '.' => state = .period2,
+                    else => {
+                        self.it.i = start_index + 1;
+                        res = .period;
+                        break;
+                    },
+                },
+                .period2 => switch (c) {
+                    '.' => {
+                        res = .ellipsis;
+                        break;
+                    },
+                    else => {
+                        self.it.i = start_index + 1;
+                        res = .period;
                         break;
                     },
                 },

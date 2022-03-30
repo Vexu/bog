@@ -1002,7 +1002,16 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     else => unreachable,
                 }
                 if (callee.* == .native) {
-                    if (callee.native.arg_count != args.len) {
+                    if (callee.native.variadic) {
+                        if (args.len < callee.native.arg_count) {
+                            try f.throwFmt(
+                                vm,
+                                "expected at least {} args, got {}",
+                                .{ callee.native.arg_count, args.len },
+                            );
+                            continue;
+                        }
+                    } else if (callee.native.arg_count != args.len) {
                         try f.throwFmt(
                             vm,
                             "expected {} args, got {}",
@@ -1021,7 +1030,17 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     returned.* = res;
                 } else if (callee.* == .func) {
                     const callee_args = callee.func.args();
-                    if (callee_args != args.len) {
+                    const variadic = callee.func.variadic();
+                    if (variadic) {
+                        if (args.len < callee_args - 1) {
+                            try f.throwFmt(
+                                vm,
+                                "expected at least {} args, got {}",
+                                .{ callee_args, args.len },
+                            );
+                            continue;
+                        }
+                    } else if (callee_args != args.len) {
                         try f.throwFmt(
                             vm,
                             "expected {} args, got {}",
@@ -1048,10 +1067,23 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     errdefer new_frame.deinit(vm);
                     vm.getFrame(&new_frame);
 
-                    try new_frame.stack.ensureUnusedCapacity(vm.gc.gpa, args.len);
+                    try new_frame.stack.ensureUnusedCapacity(vm.gc.gpa, callee_args);
 
-                    for (args) |arg_ref| {
-                        new_frame.stack.appendAssumeCapacity(f.val(arg_ref));
+                    args: {
+                        const non_variadic_args = callee_args - @boolToInt(variadic);
+                        var i: u32 = 0;
+                        while (i < non_variadic_args) : (i += 1) {
+                            new_frame.stack.appendAssumeCapacity(f.val(args[i]));
+                        }
+                        if (!variadic) break :args;
+                        var var_args = try vm.gc.alloc(.list);
+                        var_args.* = .{ .list = .{} };
+                        new_frame.stack.appendAssumeCapacity(var_args);
+                        try var_args.list.ensureUnusedCapacity(vm.gc.gpa, args.len - non_variadic_args);
+
+                        while (i < args.len) : (i += 1) {
+                            var_args.list.appendAssumeCapacity(f.val(args[i]));
+                        }
                     }
 
                     var frame_val = try vm.gc.alloc(.frame);

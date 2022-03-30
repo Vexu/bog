@@ -153,13 +153,24 @@ pub const Parser = struct {
 
         const node_buf_top = p.node_buf.items.len;
         defer p.node_buf.items.len = node_buf_top;
-        var params = try p.listParser(.keep_nl, level, primaryExpr, .r_paren, null);
-        p.node_buf.items.len += params.len;
 
+        var end = false;
+        while (true) {
+            if (p.eatToken(.r_paren, skip_nl)) |_| {
+                break;
+            } else if (end) {
+                _ = try p.expectToken(.r_paren, skip_nl);
+                break;
+            }
+            try p.node_buf.append(try primaryExpr(p, .skip_nl, level));
+            if (p.eatToken(.ellipsis, .skip_nl) != null or
+                p.eatToken(.comma, .skip_nl) == null)
+                end = true;
+        }
         const body = try p.blockOrExpr(skip_nl, level);
         try p.node_buf.append(body);
 
-        params = p.node_buf.items[node_buf_top..];
+        const params = p.node_buf.items[node_buf_top..];
         return switch (params.len) {
             0 => unreachable, // body is always added to the list
             1 => try p.addBin(.fn_expr_one, fn_tok, null_node, body),

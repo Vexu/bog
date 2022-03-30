@@ -164,7 +164,11 @@ pub const Value = union(Type) {
         extra_index: u32,
 
         pub fn args(f: Func) u32 {
-            return @enumToInt(f.module.extra[f.extra_index]);
+            return @enumToInt(f.module.extra[f.extra_index]) & std.math.maxInt(u31);
+        }
+
+        pub fn variadic(f: Func) bool {
+            return (@enumToInt(f.module.extra[f.extra_index]) >> 31) != 0;
         }
 
         pub fn captures(f: Func) []*Value {
@@ -181,6 +185,7 @@ pub const Value = union(Type) {
     pub const List = std.ArrayListUnmanaged(*Value);
     pub const Native = struct {
         arg_count: u8,
+        variadic: bool,
         func: fn (Vm.Context, []const bog.Bytecode.Ref) NativeError!*Value,
     };
     pub const NativeError = Vm.Error || error{Throw};
@@ -192,6 +197,16 @@ pub const Value = union(Type) {
             t: T,
 
             const __bog_This_T = T;
+        };
+    }
+
+    /// Makes a distinct type which can be used as the parameter of a native function
+    /// to make it variadic.
+    pub fn Variadic(comptime T: type) type {
+        return struct {
+            t: []T,
+
+            const __bog_Variadic_T = T;
         };
     }
 
@@ -922,8 +937,10 @@ fn wrapZigFunc(func: anytype) Value.Native {
             comptime var bog_arg_i: u8 = 0;
             comptime var vm_passed = false;
             comptime var this_passed = false;
+            comptime var variadic = false;
             inline for (Fn.args) |arg, i| {
                 const ArgT = arg.arg_type.?;
+                if (variadic) @compileError("Value.Variadic must be the last parameter");
                 if (ArgT == Vm.Context) {
                     if (vm_passed) @compileError("function takes more than one Vm.Context");
                     // if (i == 1 and !this_passed)
@@ -937,6 +954,17 @@ fn wrapZigFunc(func: anytype) Value.Native {
                     if (i != 0) @compileError("Value.This must be the first parameter");
                     args[i] = ArgT{ .t = try ctx.this.bogToZig(ArgT.__bog_This_T, ctx) };
                     this_passed = true;
+                } else if (@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_Variadic_T")) {
+                    variadic = true;
+                    const args_tuple_size = bog_args.len - bog_arg_i;
+                    const args_tuple = try ctx.vm.gc.gpa.alloc(ArgT.__bog_Variadic_T, args_tuple_size);
+                    errdefer ctx.vm.gc.gpa.free(args_tuple);
+                    args[i] = ArgT{ .t = args_tuple };
+
+                    for (bog_args[bog_arg_i..]) |bog_arg, tuple_i| {
+                        const val = ctx.frame.val(bog_arg);
+                        args_tuple[tuple_i] = try val.bogToZig(ArgT.__bog_Variadic_T, ctx);
+                    }
                 } else {
                     const val = ctx.frame.val(bog_args[bog_arg_i]);
                     args[i] = try val.bogToZig(ArgT, ctx);
@@ -944,6 +972,7 @@ fn wrapZigFunc(func: anytype) Value.Native {
                 }
             }
             const res = @call(.{}, _func, args);
+            if (variadic) ctx.vm.gc.gpa.free(args[args.len - 1].t);
             switch (@typeInfo(@TypeOf(res))) {
                 .ErrorSet => switch (@as(anyerror, res)) {
                     error.FatalError, error.Throw => |e| return e,
@@ -963,15 +992,19 @@ fn wrapZigFunc(func: anytype) Value.Native {
 
     // TODO can't use bog_arg_i due to a stage1 bug.
     comptime var bog_arg_count = 0;
+    comptime var variadic = false;
     comptime for (Fn.args) |arg| {
         const ArgT = arg.arg_type.?;
-        if (ArgT != Vm.Context and !(@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T"))) {
+        if (@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_Variadic_T")) {
+            variadic = true;
+        } else if (ArgT != Vm.Context and !(@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T"))) {
             bog_arg_count += 1;
         }
     };
 
     return .{
         .arg_count = bog_arg_count,
+        .variadic = variadic,
         .func = S.native,
     };
 }

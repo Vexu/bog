@@ -113,7 +113,7 @@ pub const methods = struct {
         str.t.* = b.finish();
     }
 
-    pub fn format(str: Value.This([]const u8), ctx: Vm.Context, args: []const *Value) !*Value {
+    pub fn format(str: Value.This([]const u8), ctx: Vm.Context, args: Value.Variadic(*Value)) !*Value {
         var b = builder(ctx.vm.gc.gpa);
         errdefer b.cancel();
 
@@ -141,7 +141,7 @@ pub const methods = struct {
                 .brace => if (c == '{') {
                     try w.writeByte(c);
                 } else {
-                    if (arg_i >= args.len) {
+                    if (arg_i >= args.t.len) {
                         return ctx.throw("not enough arguments to format string");
                     }
                     format_start = i;
@@ -161,15 +161,15 @@ pub const methods = struct {
 
                     switch (fmt_type) {
                         'x', 'X' => {
-                            if (args[arg_i].* != .int) {
-                                return ctx.throwFmt("'x' takes an integer as an argument, got '{}'", .{args[arg_i].ty()});
+                            if (args.t[arg_i].* != .int) {
+                                return ctx.throwFmt("'x' takes an integer as an argument, got '{}'", .{args.t[arg_i].ty()});
                             }
-                            try std.fmt.formatInt(args[arg_i].int, 16, @intToEnum(std.fmt.Case, @boolToInt(fmt[0] == 'X')), options, w);
+                            try std.fmt.formatInt(args.t[arg_i].int, 16, @intToEnum(std.fmt.Case, @boolToInt(fmt[0] == 'X')), options, w);
                         },
-                        0 => if (args[arg_i].* == .str) {
-                            try b.append(args[arg_i].str.data);
+                        0 => if (args.t[arg_i].* == .str) {
+                            try b.append(args.t[arg_i].str.data);
                         } else {
-                            try args[arg_i].dump(w, default_dump_depth);
+                            try args.t[arg_i].dump(w, default_dump_depth);
                         },
                         else => {
                             return ctx.throw("unknown format specifier");
@@ -181,7 +181,7 @@ pub const methods = struct {
                 },
             }
         }
-        if (arg_i != args.len) {
+        if (arg_i != args.t.len) {
             return ctx.throw("unused arguments");
         }
 

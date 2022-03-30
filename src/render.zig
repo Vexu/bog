@@ -298,11 +298,14 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
             const params = items[@boolToInt(items[0] == 0) .. items.len - 1];
             const body = items[items.len - 1];
             const r_paren = tree.prevToken(tree.firstToken(body));
+            const maybe_ellipsis = tree.prevToken(r_paren);
+            const ellipsis = if (tree.tokens.items(.id)[maybe_ellipsis] == .ellipsis) maybe_ellipsis else null;
 
             try renderToken(tree, tokens[node], aiw, .none);
             try renderToken(tree, tree.nextToken(tokens[node]), aiw, .none);
 
-            try renderCommaList(tree, params, r_paren, aiw, .none);
+            try renderCommaList(tree, params, ellipsis orelse r_paren, aiw, .none);
+            if (ellipsis) |some| try renderToken(tree, some, aiw, .none);
 
             try renderToken(tree, r_paren, aiw, getBlockIndent(tree, body, .space));
             return renderNode(tree, body, aiw, space);

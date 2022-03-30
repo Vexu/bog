@@ -1,3 +1,12 @@
+test "variadic functions" {
+    try testCanonical(
+        \\let foo = fn() null
+        \\let bar = fn(a...) a
+        \\let baz = fn(a, b...) a
+        \\
+    );
+}
+
 test "format string" {
     try testTransform(
         \\f"foo {{1:2}:32} bar { 2

@@ -1,3 +1,10 @@
+test "variadic functions" {
+    try expectOutput(
+        \\let foo = fn(_, args...) args
+        \\return foo(1, 2, 3, 4, 5)
+    , "[2, 3, 4, 5]");
+}
+
 test "capture" {
     try expectOutput(
         \\let foo = fn()
@@ -157,7 +164,7 @@ test "format string" {
         \\"fooFFbar"
     );
     try expectOutput(
-        \\return "foo{X}bar".format((255,))
+        \\return "foo{X}bar".format(255)
     ,
         \\"fooFFbar"
     );

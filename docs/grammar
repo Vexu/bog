@@ -19,7 +19,7 @@ expr
 
 jump_expr : "return" block_or_expr? | "break" | "continue" | "throw" block_or_expr
 
-fn : "fn" "(" (primary_expr ",")* primary_expr? ")" block_or_expr
+fn : "fn" "(" (primary_expr ",")* (primary_expr "..."?)? ")" block_or_expr
 
 bool_expr
     : "not" comparison_expr

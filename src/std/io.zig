@@ -3,14 +3,19 @@ const bog = @import("../bog.zig");
 const Value = bog.Value;
 const Vm = bog.Vm;
 
-pub fn print(val: *Value) !void {
-    const writer = std.io.getStdOut().writer();
-    if (val.* == .str) {
-        try writer.writeAll(val.str.data);
-    } else {
-        try val.dump(writer, 4);
+pub fn print(vals: Value.Variadic(*Value)) !void {
+    var buf_writer = std.io.bufferedWriter(std.io.getStdOut().writer());
+    const writer = buf_writer.writer();
+    for (vals.t) |val, i| {
+        if (i != 0) try writer.writeByte(' ');
+        if (val.* == .str) {
+            try writer.writeAll(val.str.data);
+        } else {
+            try val.dump(writer, 4);
+        }
     }
     try writer.writeByte('\n');
+    try buf_writer.flush();
 }
 
 pub fn input(ctx: Vm.Context, prompt: []const u8) ![]u8 {

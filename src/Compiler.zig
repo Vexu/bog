@@ -1999,9 +1999,12 @@ fn genFn(c: *Compiler, node: Node.Index) Error!Value {
         }
     }
 
+    const maybe_ellipsis = c.tree.prevToken(c.tree.prevToken(c.tree.firstToken(body)));
+    const variadic_bit: u32 = @boolToInt(c.tree.tokens.items(.id)[maybe_ellipsis] == .ellipsis);
+
     const extra = @intCast(u32, c.extra.items.len);
     try c.extra.ensureUnusedCapacity(c.gpa, 2 + func.captures.items.len + func.code.items.len);
-    c.extra.appendAssumeCapacity(@intToEnum(Ref, params.len));
+    c.extra.appendAssumeCapacity(@intToEnum(Ref, params.len | (variadic_bit << 31)));
     c.extra.appendAssumeCapacity(@intToEnum(Ref, func.captures.items.len));
     for (func.captures.items) |capture| {
         c.extra.appendAssumeCapacity(capture.parent_ref);
@@ -2153,24 +2156,24 @@ fn genFormatString(c: *Compiler, node: Node.Index) Error!Value {
     const list_buf_top = c.list_buf.items.len;
     defer c.list_buf.items.len = list_buf_top;
 
+    // `.this_call` expects the callee as the first argument
+    try c.list_buf.append(c.gpa, format_fn_ref);
+    // Pass `this` as first argument
+    try c.list_buf.append(c.gpa, string_ref);
+
     for (args) |arg| {
         const arg_val = try c.genNode(arg, .value);
-        const arg_ref = if (arg_val == .mut)
-            try c.addUn(.copy_un, arg_val.mut, null)
-        else
-            try c.makeRuntime(arg_val);
+        const arg_ref = try c.makeRuntime(arg_val);
 
         try c.list_buf.append(c.gpa, arg_ref);
     }
 
     const arg_refs = c.list_buf.items[list_buf_top..];
-    const args_tuple_ref = try c.addExtra(.build_tuple, arg_refs, null);
-
-    const res_ref = try c.addExtra(.this_call, &.{
-        format_fn_ref,
-        string_ref,
-        args_tuple_ref,
-    }, node);
+    const res_ref = switch (arg_refs.len) {
+        0, 1 => unreachable, // callee and this is always added
+        2 => try c.addBin(.this_call_zero, format_fn_ref, string_ref, node),
+        else => try c.addExtra(.this_call, arg_refs, node),
+    };
     return Value{ .ref = res_ref };
 }
 
