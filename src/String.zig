@@ -91,7 +91,7 @@ pub fn get(str: *const String, ctx: Vm.Context, index: *const Value, res: *?*Val
                 res.*.?.* = .{ .int = @intCast(i64, str.data.len) };
             } else inline for (@typeInfo(methods).Struct.decls) |method| {
                 if (mem.eql(u8, s.data, method.name)) {
-                    res.* = try Value.zigToBog(ctx.vm, @field(methods, method.name));
+                    res.* = try Value.zigFnToBog(ctx.vm, @field(methods, method.name));
                     return;
                 }
             } else {

@@ -718,7 +718,11 @@ pub const Value = union(Type) {
 
                         const key = try vm.gc.alloc(.str);
                         key.* = Value.string(decl.name);
-                        const value = try zigToBog(vm, @field(val, decl.name));
+
+                        const value = if (@typeInfo(@TypeOf(@field(val, decl.name))) == .Fn)
+                            try zigFnToBog(vm, @field(val, decl.name))
+                        else
+                            try zigToBog(vm, @field(val, decl.name));
                         res.map.putAssumeCapacityNoClobber(key, value);
                     }
 
@@ -735,13 +739,7 @@ pub const Value = union(Type) {
                     };
                     return int;
                 },
-                .Fn => {
-                    const native = try vm.gc.alloc(.native);
-                    native.* = .{
-                        .native = wrapZigFunc(val),
-                    };
-                    return native;
-                },
+                .Fn => @compileError("use zigFnToBog"),
                 .ComptimeInt, .Int => {
                     const int = try vm.gc.alloc(.int);
                     int.* = .{
@@ -786,6 +784,92 @@ pub const Value = union(Type) {
                 else => @compileError("unsupported type: " ++ @typeName(@TypeOf(val))),
             },
         }
+    }
+
+    pub fn zigFnToBog(vm: *Vm, comptime func: anytype) error{OutOfMemory}!*Value {
+        const Fn = @typeInfo(@TypeOf(func)).Fn;
+        if (Fn.is_generic) @compileError("cannot wrap a generic function");
+
+        @setEvalBranchQuota(Fn.args.len * 1000);
+
+        const S = struct {
+            fn native(ctx: Vm.Context, bog_args: []*Value) Value.NativeError!*Value {
+                var args: std.meta.ArgsTuple(@TypeOf(func)) = undefined;
+
+                comptime var bog_arg_i: u8 = 0;
+                comptime var vm_passed = false;
+                comptime var this_passed = false;
+                comptime var variadic = false;
+                inline for (Fn.args) |arg, i| {
+                    const ArgT = arg.arg_type.?;
+                    if (variadic) @compileError("Value.Variadic must be the last parameter");
+                    if (ArgT == Vm.Context) {
+                        if (vm_passed) @compileError("function takes more than one Vm.Context");
+                        // if (i == 1 and !this_passed)
+                        //     @compileError("Vm.Context must come after Value.This")
+                        // else if (i != 0)
+                        //     @compileError("Vm.Context must be first or second parameter");
+
+                        args[i] = ctx;
+                        vm_passed = true;
+                    } else if (@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T")) {
+                        if (i != 0) @compileError("Value.This must be the first parameter");
+                        args[i] = ArgT{ .t = try ctx.this.bogToZig(ArgT.__bog_This_T, ctx) };
+                        this_passed = true;
+                    } else if (@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_Variadic_T")) {
+                        variadic = true;
+                        const args_tuple_size = bog_args.len - bog_arg_i;
+                        const args_tuple = try ctx.vm.gc.gpa.alloc(ArgT.__bog_Variadic_T, args_tuple_size);
+                        errdefer ctx.vm.gc.gpa.free(args_tuple);
+                        args[i] = ArgT{ .t = args_tuple };
+
+                        for (bog_args[bog_arg_i..]) |val, tuple_i| {
+                            args_tuple[tuple_i] = try val.bogToZig(ArgT.__bog_Variadic_T, ctx);
+                        }
+                    } else {
+                        args[i] = try bog_args[bog_arg_i].bogToZig(ArgT, ctx);
+                        bog_arg_i += 1;
+                    }
+                }
+                const res = @call(.{}, func, args);
+                if (variadic) ctx.vm.gc.gpa.free(args[args.len - 1].t);
+                switch (@typeInfo(@TypeOf(res))) {
+                    .ErrorSet => switch (@as(anyerror, res)) {
+                        error.FatalError, error.Throw => |e| return e,
+                        else => return Value.zigToBog(ctx.vm, res),
+                    },
+                    .ErrorUnion => if (res) |val| {
+                        return Value.zigToBog(ctx.vm, val);
+                    } else |err| switch (@as(anyerror, err)) {
+                        error.FatalError, error.Throw => |e| return e,
+                        else => return Value.zigToBog(ctx.vm, res),
+                    },
+                    else => return Value.zigToBog(ctx.vm, res),
+                }
+            }
+        };
+
+        // TODO can't use bog_arg_i due to a stage1 bug.
+        comptime var bog_arg_count = 0;
+        comptime var variadic = false;
+        comptime for (Fn.args) |arg| {
+            const ArgT = arg.arg_type.?;
+            if (@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_Variadic_T")) {
+                variadic = true;
+            } else if (ArgT != Vm.Context and !(@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T"))) {
+                bog_arg_count += 1;
+            }
+        };
+
+        const native = try vm.gc.alloc(.native);
+        native.* = .{
+            .native = .{
+                .arg_count = bog_arg_count,
+                .variadic = variadic,
+                .func = S.native,
+            },
+        };
+        return native;
     }
 
     /// Converts Bog value to Zig value. Returned string is invalidated
@@ -926,92 +1010,6 @@ pub const Value = union(Type) {
         }
     }
 };
-
-fn wrapZigFunc(func: anytype) Value.Native {
-    const Fn = @typeInfo(@TypeOf(func)).Fn;
-    if (Fn.is_generic) @compileError("cannot wrap a generic function");
-
-    @setEvalBranchQuota(Fn.args.len * 1000);
-
-    const S = struct {
-        // cannot directly use `func` so declare a pointer to it
-        var _func: @TypeOf(func) = undefined;
-
-        fn native(ctx: Vm.Context, bog_args: []*Value) Value.NativeError!*Value {
-            var args: std.meta.ArgsTuple(@TypeOf(_func)) = undefined;
-
-            comptime var bog_arg_i: u8 = 0;
-            comptime var vm_passed = false;
-            comptime var this_passed = false;
-            comptime var variadic = false;
-            inline for (Fn.args) |arg, i| {
-                const ArgT = arg.arg_type.?;
-                if (variadic) @compileError("Value.Variadic must be the last parameter");
-                if (ArgT == Vm.Context) {
-                    if (vm_passed) @compileError("function takes more than one Vm.Context");
-                    // if (i == 1 and !this_passed)
-                    //     @compileError("Vm.Context must come after Value.This")
-                    // else if (i != 0)
-                    //     @compileError("Vm.Context must be first or second parameter");
-
-                    args[i] = ctx;
-                    vm_passed = true;
-                } else if (@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T")) {
-                    if (i != 0) @compileError("Value.This must be the first parameter");
-                    args[i] = ArgT{ .t = try ctx.this.bogToZig(ArgT.__bog_This_T, ctx) };
-                    this_passed = true;
-                } else if (@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_Variadic_T")) {
-                    variadic = true;
-                    const args_tuple_size = bog_args.len - bog_arg_i;
-                    const args_tuple = try ctx.vm.gc.gpa.alloc(ArgT.__bog_Variadic_T, args_tuple_size);
-                    errdefer ctx.vm.gc.gpa.free(args_tuple);
-                    args[i] = ArgT{ .t = args_tuple };
-
-                    for (bog_args[bog_arg_i..]) |val, tuple_i| {
-                        args_tuple[tuple_i] = try val.bogToZig(ArgT.__bog_Variadic_T, ctx);
-                    }
-                } else {
-                    args[i] = try bog_args[bog_arg_i].bogToZig(ArgT, ctx);
-                    bog_arg_i += 1;
-                }
-            }
-            const res = @call(.{}, _func, args);
-            if (variadic) ctx.vm.gc.gpa.free(args[args.len - 1].t);
-            switch (@typeInfo(@TypeOf(res))) {
-                .ErrorSet => switch (@as(anyerror, res)) {
-                    error.FatalError, error.Throw => |e| return e,
-                    else => return Value.zigToBog(ctx.vm, res),
-                },
-                .ErrorUnion => if (res) |val| {
-                    return Value.zigToBog(ctx.vm, val);
-                } else |err| switch (@as(anyerror, err)) {
-                    error.FatalError, error.Throw => |e| return e,
-                    else => return Value.zigToBog(ctx.vm, res),
-                },
-                else => return Value.zigToBog(ctx.vm, res),
-            }
-        }
-    };
-    S._func = func;
-
-    // TODO can't use bog_arg_i due to a stage1 bug.
-    comptime var bog_arg_count = 0;
-    comptime var variadic = false;
-    comptime for (Fn.args) |arg| {
-        const ArgT = arg.arg_type.?;
-        if (@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_Variadic_T")) {
-            variadic = true;
-        } else if (ArgT != Vm.Context and !(@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T"))) {
-            bog_arg_count += 1;
-        }
-    };
-
-    return .{
-        .arg_count = bog_arg_count,
-        .variadic = variadic,
-        .func = S.native,
-    };
-}
 
 var buffer: [1024]u8 = undefined;
 
