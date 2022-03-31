@@ -2763,7 +2763,29 @@ fn parseStrExtra(c: *Compiler, tok: TokenIndex, slice: []const u8, buf: []u8) !u
                     't' => '\t',
                     '\'' => '\'',
                     '"' => '"',
-                    'x', 'u' => return c.reportErr("TODO: more escape sequences", tok),
+                    'x' => {
+                        // validated by tokenizer
+                        buf[i] = std.fmt.parseInt(u8, slice[slice_i + 1 ..][0..2], 16) catch unreachable;
+                        i += 1;
+                        slice_i += 3;
+                        continue;
+                    },
+                    'u' => {
+                        // validated by tokenizer
+                        const unicode_slice = std.mem.sliceTo(slice[slice_i + 2 ..], '}');
+                        slice_i += 3 + @intCast(u32, unicode_slice.len);
+                        const unicode_code_point = std.fmt.parseInt(u21, unicode_slice, 16) catch {
+                            const starts = c.tree.tokens.items(.start);
+                            try c.errors.add(.{ .data = "unicode codepoint too large" }, c.tree.source, c.tree.path, starts[tok], .err);
+                            return error.CompileError;
+                        };
+                        i += std.unicode.utf8Encode(unicode_code_point, buf[i..]) catch {
+                            const starts = c.tree.tokens.items(.start);
+                            try c.errors.add(.{ .data = "unicode escape sequence has surrogate half" }, c.tree.source, c.tree.path, starts[tok], .err);
+                            return error.CompileError;
+                        };
+                        continue;
+                    },
                     else => unreachable,
                 };
             },
