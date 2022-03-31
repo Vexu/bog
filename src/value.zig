@@ -495,7 +495,20 @@ pub const Value = union(Type) {
 
                     res.* = tuple[@intCast(u32, i)];
                 },
-                .range => return ctx.frame.fatal(ctx.vm, "TODO get with ranges"),
+                .range => |r| {
+                    if (r.start < 0 or r.end > tuple.len)
+                        return ctx.throw("index out of bounds");
+
+                    res.* = try ctx.vm.gc.alloc(.list);
+                    res.*.?.* = .{ .list = .{} };
+                    const res_list = &res.*.?.*.list;
+                    try res_list.inner.ensureUnusedCapacity(ctx.vm.gc.gpa, r.count());
+
+                    var it = r.iterator();
+                    while (it.next()) |some| {
+                        res_list.inner.appendAssumeCapacity(tuple[@intCast(u32, some)]);
+                    }
+                },
                 .str => |s| {
                     if (res.* == null) {
                         res.* = try ctx.vm.gc.alloc(.int);
@@ -541,16 +554,26 @@ pub const Value = union(Type) {
     /// Sets index of container to value. Does a shallow copy if value stored.
     pub fn set(container: *Value, ctx: Vm.Context, index: *const Value, new_val: *Value) NativeError!void {
         switch (container.*) {
-            .tuple => |tuple| if (index.* == .int) {
-                var i = index.int;
-                if (i < 0)
-                    i += @intCast(i64, tuple.len);
-                if (i < 0 or i >= tuple.len)
-                    return ctx.throw("index out of bounds");
+            .tuple => |tuple| switch (index.*) {
+                .int => {
+                    var i = index.int;
+                    if (i < 0)
+                        i += @intCast(i64, tuple.len);
+                    if (i < 0 or i >= tuple.len)
+                        return ctx.throw("index out of bounds");
 
-                tuple[@intCast(u32, i)] = new_val;
-            } else {
-                return ctx.frame.fatal(ctx.vm, "TODO set with ranges");
+                    tuple[@intCast(u32, i)] = new_val;
+                },
+                .range => |r| {
+                    if (r.start < 0 or r.end > tuple.len)
+                        return ctx.throw("index out of bounds");
+
+                    var it = r.iterator();
+                    while (it.next()) |some| {
+                        tuple[@intCast(u32, some)] = new_val;
+                    }
+                },
+                else => return ctx.throw("invalid index type"),
             },
             .map => |*map| {
                 _ = try map.put(ctx.vm.gc.gpa, try ctx.vm.gc.dupe(index), new_val);
@@ -563,7 +586,7 @@ pub const Value = union(Type) {
     }
 
     /// `type_id` must be valid and cannot be .err, .range, .func or .native
-    pub fn as(val: *Value, vm: *Vm, type_id: Type) NativeError!*Value {
+    pub fn as(val: *Value, ctx: Vm.Context, type_id: Type) NativeError!*Value {
         if (type_id == .@"null") {
             return Value.Null;
         }
@@ -572,15 +595,15 @@ pub const Value = union(Type) {
         }
 
         if (val.* == .str) {
-            return val.str.as(vm, type_id);
+            return val.str.as(ctx, type_id);
         } else if (type_id == .str) {
-            return String.from(val, vm);
+            return String.from(val, ctx.vm);
         }
 
         if (val.* == .list) {
-            return val.list.as(vm, type_id);
+            return val.list.as(ctx, type_id);
         } else if (type_id == .list) {
-            return List.from(val, vm);
+            return List.from(val, ctx);
         }
 
         if (type_id == .bool) {
@@ -589,13 +612,13 @@ pub const Value = union(Type) {
                 .num => |num| num != 0,
                 .bool => unreachable,
                 .str => unreachable,
-                else => return vm.errorFmt("cannot cast {} to bool", .{val.ty()}),
+                else => return ctx.throwFmt("cannot cast {} to bool", .{val.ty()}),
             };
 
             return if (bool_res) Value.True else Value.False;
         }
 
-        const new_val = try vm.gc.alloc(type_id);
+        const new_val = try ctx.vm.gc.alloc(type_id);
         new_val.* = switch (type_id) {
             .int => .{
                 .int = switch (val.*) {
@@ -603,7 +626,7 @@ pub const Value = union(Type) {
                     .num => |num| std.math.lossyCast(i64, num),
                     .bool => |b| @boolToInt(b),
                     .str => unreachable,
-                    else => return vm.errorFmt("cannot cast {} to int", .{val.ty()}),
+                    else => return ctx.throwFmt("cannot cast {} to int", .{val.ty()}),
                 },
             },
             .num => .{
@@ -612,13 +635,11 @@ pub const Value = union(Type) {
                     .int => |int| @intToFloat(f64, int),
                     .bool => |b| @intToFloat(f64, @boolToInt(b)),
                     .str => unreachable,
-                    else => return vm.errorFmt("cannot cast {} to num", .{val.ty()}),
+                    else => return ctx.throwFmt("cannot cast {} to num", .{val.ty()}),
                 },
             },
             .str, .list, .bool, .@"null" => unreachable,
-            .tuple,
-            .map,
-            => return vm.errorVal("TODO more casts"),
+            .tuple, .map => return ctx.frame.fatal(ctx.vm, "TODO cast to tuple/map"),
             else => unreachable,
         };
         return new_val;

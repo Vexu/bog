@@ -221,14 +221,14 @@ pub const methods = struct {
     }
 };
 
-pub fn set(str: *String, ctx: Vm.Context, index: *const Value, new_val: *const Value) Vm.Error!void {
+pub fn set(str: *String, ctx: Vm.Context, index: *const Value, new_val: *const Value) Value.NativeError!void {
     _ = str;
     _ = index;
     _ = new_val;
     return ctx.frame.fatal(ctx.vm, "TODO set string");
 }
 
-pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {
+pub fn as(str: *String, ctx: Vm.Context, type_id: Type) Value.NativeError!*Value {
     if (type_id == .@"null") {
         return Value.Null;
     } else if (type_id == .bool) {
@@ -237,25 +237,25 @@ pub fn as(str: *String, vm: *Vm, type_id: Type) Vm.Error!*Value {
         else if (mem.eql(u8, str.data, "false"))
             return Value.False
         else
-            return vm.errorVal("cannot cast string to bool");
+            return ctx.throw("cannot cast string to bool");
     }
 
-    const new_val = try vm.gc.alloc(type_id);
+    const new_val = try ctx.vm.gc.alloc(type_id);
     new_val.* = switch (type_id) {
         .int => .{
             .int = std.fmt.parseInt(i64, str.data, 0) catch |err|
-                return vm.errorFmt("cannot cast string to int: {s}", .{@errorName(err)}),
+                return ctx.throwFmt("cannot cast string to int: {s}", .{@errorName(err)}),
         },
         .num => .{
             .num = std.fmt.parseFloat(f64, str.data) catch |err|
-                return vm.errorFmt("cannot cast string to num: {s}", .{@errorName(err)}),
+                return ctx.throwFmt("cannot cast string to num: {s}", .{@errorName(err)}),
         },
         .bool => unreachable,
         .str => unreachable, // already string
         .tuple,
         .map,
         .list,
-        => return vm.errorVal("TODO more casts from string"),
+        => return ctx.frame.fatal(ctx.vm, "TODO more casts from string"),
         else => unreachable,
     };
     return new_val;

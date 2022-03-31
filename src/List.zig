@@ -34,7 +34,20 @@ pub fn get(list: *const List, ctx: Vm.Context, index: *const Value, res: *?*Valu
 
             res.* = list.inner.items[@intCast(u32, i)];
         },
-        .range => return ctx.frame.fatal(ctx.vm, "TODO get with ranges"),
+        .range => |r| {
+            if (r.start < 0 or r.end > list.inner.items.len)
+                return ctx.throw("index out of bounds");
+
+            res.* = try ctx.vm.gc.alloc(.list);
+            res.*.?.* = .{ .list = .{} };
+            const res_list = &res.*.?.*.list;
+            try res_list.inner.ensureUnusedCapacity(ctx.vm.gc.gpa, r.count());
+
+            var it = r.iterator();
+            while (it.next()) |some| {
+                res_list.inner.appendAssumeCapacity(list.inner.items[@intCast(u32, some)]);
+            }
+        },
         .str => |s| {
             if (res.* == null) {
                 res.* = try ctx.vm.gc.alloc(.int);
@@ -62,30 +75,38 @@ pub const methods = struct {
 };
 
 pub fn set(list: *List, ctx: Vm.Context, index: *const Value, new_val: *Value) Value.NativeError!void {
-    if (index.* == .int) {
-        var i = index.int;
-        if (i < 0)
-            i += @intCast(i64, list.inner.items.len);
-        if (i < 0 or i >= list.inner.items.len)
-            return ctx.throw("index out of bounds");
+    switch (index.*) {
+        .int => {
+            var i = index.int;
+            if (i < 0)
+                i += @intCast(i64, list.inner.items.len);
+            if (i < 0 or i >= list.inner.items.len)
+                return ctx.throw("index out of bounds");
 
-        list.inner.items[@intCast(u32, i)] = new_val;
-    } else {
-        return ctx.frame.fatal(ctx.vm, "TODO set list with ranges");
+            list.inner.items[@intCast(u32, i)] = new_val;
+        },
+        .range => |r| {
+            if (r.start < 0 or r.end > list.inner.items.len)
+                return ctx.throw("index out of bounds");
+
+            var it = r.iterator();
+            while (it.next()) |some| {
+                list.inner.items[@intCast(u32, some)] = new_val;
+            }
+        },
+        else => return ctx.throw("invalid index type"),
     }
 }
 
-pub fn as(list: *List, vm: *Vm, type_id: Type) Vm.Error!*Value {
+pub fn as(list: *List, ctx: Vm.Context, type_id: Type) Vm.Error!*Value {
     _ = list;
-    _ = vm;
     _ = type_id;
-    return vm.errorVal("TODO cast from list");
+    return ctx.frame.fatal(ctx.vm, "TODO cast to list");
 }
 
-pub fn from(val: *Value, vm: *Vm) Vm.Error!*Value {
+pub fn from(val: *Value, ctx: Vm.Context) Vm.Error!*Value {
     _ = val;
-    _ = vm;
-    return vm.errorVal("TODO cast to list");
+    return ctx.frame.fatal(ctx.vm, "TODO cast from list");
 }
 
 pub fn in(list: *const List, val: *const Value) bool {

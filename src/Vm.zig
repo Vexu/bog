@@ -768,7 +768,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const arg = f.val(data[inst].bin_ty.operand);
 
                 // type is validated by the compiler
-                const casted = arg.as(vm, data[inst].bin_ty.ty) catch |err| switch (err) {
+                const casted = arg.as(f.ctx(vm), data[inst].bin_ty.ty) catch |err| switch (err) {
                     error.Throw => continue,
                     else => |e| return e,
                 };
@@ -810,8 +810,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
 
                 switch (iterable.*) {
                     .str => {
-                        try f.throw(vm, "TODO spread str");
-                        continue;
+                        return f.fatal(vm, "TODO spread str");
                     },
                     .range => |r| {
                         const res = try f.newVal(vm, ref, .list);
@@ -926,7 +925,6 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const items = switch (container.*) {
                     .list => |list| list.inner.items,
                     .tuple => |tuple| tuple,
-                    // TODO str, range?
                     else => {
                         try f.throwFmt(vm, "cannot destructure non list/tuple type {}", .{container.ty()});
                         continue;
@@ -1446,7 +1444,7 @@ fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) !*Value {
     return res;
 }
 
-pub fn errorFmt(vm: *Vm, comptime fmt: []const u8, args: anytype) Vm.Error!*Value {
+fn errorFmt(vm: *Vm, comptime fmt: []const u8, args: anytype) Vm.Error!*Value {
     const str = try vm.gc.alloc(.str);
     str.* = .{ .str = try Value.String.init(vm.gc.gpa, fmt, args) };
 
@@ -1455,7 +1453,7 @@ pub fn errorFmt(vm: *Vm, comptime fmt: []const u8, args: anytype) Vm.Error!*Valu
     return err;
 }
 
-pub fn errorVal(vm: *Vm, msg: []const u8) !*Value {
+fn errorVal(vm: *Vm, msg: []const u8) !*Value {
     const str = try vm.gc.alloc(.str);
     str.* = Value.string(msg);
 
