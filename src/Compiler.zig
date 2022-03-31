@@ -1751,8 +1751,8 @@ fn genAugAssign(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         else => unreachable,
     };
 
-    var lhs_ref: Ref = undefined;
-    try c.genLval(lhs, .{ .aug_assign = &lhs_ref });
+    var aug_assign: Lval.AugAssign = .{};
+    try c.genLval(lhs, .{ .aug_assign = &aug_assign });
     if (!rhs_val.isRt()) switch (op) {
         // zig fmt: off
         .add, .sub, .mul, .pow, .div, .div_floor, .rem,
@@ -1764,8 +1764,20 @@ fn genAugAssign(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     };
 
     const rhs_ref = try c.makeRuntime(rhs_val);
-    const res_ref = try c.addBin(op, lhs_ref, rhs_ref, node);
-    _ = try c.addBin(.move, lhs_ref, res_ref, null);
+    const res_ref = try c.addBin(op, aug_assign.val, rhs_ref, node);
+    if (aug_assign.container) |some| {
+        const extra = @intCast(u32, c.extra.items.len);
+        try c.extra.append(c.gpa, aug_assign.index);
+        try c.extra.append(c.gpa, res_ref);
+        _ = try c.addInst(.set, .{
+            .range = .{
+                .start = some,
+                .extra = extra,
+            },
+        }, node);
+    } else {
+        _ = try c.addBin(.move, aug_assign.val, res_ref, null);
+    }
     return Value.empty;
 }
 
@@ -2192,7 +2204,13 @@ fn genFormatString(c: *Compiler, node: Node.Index) Error!Value {
 const Lval = union(enum) {
     let: *const Value,
     assign: *const Value,
-    aug_assign: *Ref,
+    aug_assign: *AugAssign,
+
+    const AugAssign = struct {
+        val: Ref = undefined,
+        container: ?Ref = null,
+        index: Ref = undefined,
+    };
 };
 
 fn genLval(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
@@ -2267,12 +2285,12 @@ fn genLvalIdent(c: *Compiler, node: Node.Index, lval: Lval, mutable: bool) Error
                 _ = try c.addBin(.move, sym.ref, val_ref, null);
             }
         },
-        .aug_assign => |val| {
+        .aug_assign => |aug| {
             const sym = try c.findSymbol(tokens[node]);
             if (!sym.mut) {
                 return c.reportErr("assignment to constant", node);
             }
-            val.* = sym.ref;
+            aug.val = sym.ref;
         },
     }
 }
@@ -2496,8 +2514,10 @@ fn genLvalMemberAccess(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
     var name_ref = try c.makeRuntime(name_val);
 
     switch (lval) {
-        .aug_assign => {
-            return c.reportErr("TODO augmented assign member access", node);
+        .aug_assign => |aug| {
+            aug.val = try c.addBin(.get, operand_ref, name_ref, node);
+            aug.container = operand_ref;
+            aug.index = name_ref;
         },
         .assign => |val| {
             const val_ref = if (val.* == .mut)
@@ -2537,8 +2557,10 @@ fn genLvalArrayAccess(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
     var rhs_ref = try c.makeRuntime(rhs_val);
 
     switch (lval) {
-        .aug_assign => {
-            return c.reportErr("TODO augmented assign member access", node);
+        .aug_assign => |aug| {
+            aug.val = try c.addBin(.get, lhs_ref, rhs_ref, node);
+            aug.container = lhs_ref;
+            aug.index = rhs_ref;
         },
         .assign => |val| {
             const val_ref = if (val.* == .mut)
