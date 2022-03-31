@@ -806,12 +806,25 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 res.* = .{ .int = ~operand };
             },
             .spread => {
-                const iterable = f.val(data[inst].un);
+                var iterable = f.val(data[inst].un);
 
                 switch (iterable.*) {
-                    .range, .str => {
-                        try f.throwFmt(vm, "TODO spread {}", .{iterable.ty()});
+                    .str => {
+                        try f.throw(vm, "TODO spread str");
                         continue;
+                    },
+                    .range => |r| {
+                        const res = try f.newVal(vm, ref, .list);
+                        res.* = .{ .list = .{} };
+                        try res.list.inner.ensureUnusedCapacity(vm.gc.gpa, r.count());
+
+                        var it = r.iterator();
+                        while (it.next()) |some| {
+                            const int = try vm.gc.alloc(.int);
+                            int.* = .{ .int = some };
+                            res.list.inner.appendAssumeCapacity(int);
+                        }
+                        iterable = res;
                     },
                     .tuple, .list => {},
                     .iterator => unreachable,

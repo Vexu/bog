@@ -61,11 +61,7 @@ pub const Value = union(Type) {
     err: *Value,
     int: i64,
     num: f64,
-    range: struct {
-        start: i64 = 0,
-        end: i64 = std.math.maxInt(i64),
-        step: i64 = 1,
-    },
+    range: Range,
     str: String,
     func: Func,
     frame: *Vm.Frame,
@@ -160,8 +156,8 @@ pub const Value = union(Type) {
 
         pub fn len(s: @This()) usize {
             return switch (s.iterable.*) {
-                .range => @panic("TODO spread range"),
-                .str => @panic("TODO spread str"),
+                .range => unreachable, // Handled in Vm
+                .str => unreachable, // Handled in Vm
                 .tuple => |tuple| tuple.len,
                 .list => |list| list.inner.items.len,
                 else => unreachable,
@@ -170,8 +166,8 @@ pub const Value = union(Type) {
 
         pub fn items(s: @This()) []*Value {
             return switch (s.iterable.*) {
-                .range => @panic("TODO spread range"),
-                .str => @panic("TODO spread str"),
+                .range => unreachable, // Handled in Vm
+                .str => unreachable, // Handled in Vm
                 .tuple => |tuple| tuple,
                 .list => |list| list.inner.items,
                 else => unreachable,
@@ -205,6 +201,34 @@ pub const Value = union(Type) {
         pub fn body(f: Func) []const u32 {
             return @bitCast([]const u32, f.module.extra[f.extra_index + 2 + @enumToInt(f.module.extra[f.extra_index + 1]) ..][0..f.body_len]);
         }
+    };
+
+    pub const Range = struct {
+        start: i64 = 0,
+        end: i64 = std.math.maxInt(i64),
+        step: i64 = 1,
+
+        pub fn count(r: Range) u64 {
+            return @intCast(u64, @divFloor(r.end - r.start - 1, r.step));
+        }
+
+        pub fn iterator(r: Range) Iterator {
+            return .{ .r = r, .i = r.start };
+        }
+
+        pub const Iterator = struct {
+            r: Range,
+            i: i64,
+
+            pub fn next(iter: *Iterator) ?i64 {
+                if (iter.i >= iter.r.end) {
+                    return null;
+                }
+
+                defer iter.i += iter.r.step;
+                return iter.i;
+            }
+        };
     };
 
     pub const String = @import("String.zig");
