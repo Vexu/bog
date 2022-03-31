@@ -27,6 +27,12 @@ test "spread" {
         \\let str = "{} + {} = {}"
         \\return str.format(...foo)
     , "\"1 + 2 = 3\"");
+
+    try expectOutput(
+        \\let a = [1, 2, 3, 4, 5]
+        \\let [b, c, ...rest] = a
+        \\return rest
+    , "[3, 4, 5]");
 }
 
 test "variadic functions" {

@@ -2380,12 +2380,36 @@ fn genLvalTupleList(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
     const items = c.tree.nodeItems(node, &buf);
     const ids = c.tree.nodes.items(.id);
 
-    _ = try c.addBin(.assert_len, container_ref, @intToEnum(Ref, items.len), node);
+    var spread = false;
+    for (items) |item, i| {
+        if (spread) {
+            return c.reportErr("additional elements after spread destructuring", item);
+        }
+        const last_node = c.getLastNode(item);
+        if (ids[last_node] == .spread_expr) {
+            spread = true;
+
+            const data = c.tree.nodes.items(.data);
+            const res_ref = try c.addBin(.spread_dest, container_ref, @intToEnum(Ref, i), node);
+            const res_val = Value{ .ref = res_ref };
+            try c.genLval(data[item].un, switch (lval) {
+                .let => .{ .let = &res_val },
+                .assign => .{ .assign = &res_val },
+                else => unreachable,
+            });
+        }
+    }
+
+    if (!spread) {
+        _ = try c.addBin(.assert_len, container_ref, @intToEnum(Ref, items.len), node);
+    }
 
     for (items) |item, i| {
         const last_node = c.getLastNode(item);
         if (ids[last_node] == .discard_expr) {
             continue;
+        } else if (ids[last_node] == .spread_expr) {
+            break;
         }
 
         const index_ref = try c.makeRuntime(Value{ .int = @intCast(u32, i) });

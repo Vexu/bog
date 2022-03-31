@@ -906,6 +906,36 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     );
                 }
             },
+            .spread_dest => {
+                const container = f.val(data[inst].bin.lhs);
+                const len = @enumToInt(data[inst].bin.rhs);
+
+                const items = switch (container.*) {
+                    .list => |list| list.inner.items,
+                    .tuple => |tuple| tuple,
+                    // TODO str, range?
+                    else => {
+                        try f.throwFmt(vm, "cannot destructure non list/tuple type {}", .{container.ty()});
+                        continue;
+                    },
+                };
+                if (items.len < len) {
+                    try f.throwFmt(
+                        vm,
+                        "not enough values to destructure (expected at least {d} args, got {d})",
+                        .{ len, items.len },
+                    );
+                    continue;
+                }
+
+                const res = try f.newVal(vm, ref, .list);
+                res.* = .{ .list = .{} };
+                try res.list.inner.ensureUnusedCapacity(vm.gc.gpa, items.len - len);
+
+                for (items[len..]) |item| {
+                    res.list.inner.appendAssumeCapacity(item);
+                }
+            },
             .get => {
                 const res = try f.newRef(vm, ref);
                 const container = f.val(data[inst].bin.lhs);

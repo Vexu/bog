@@ -62,7 +62,7 @@ pub const Inst = struct {
         int,
         /// number literal
         num,
-        // string literal
+        /// string literal
         str,
 
         // aggregate construction
@@ -92,23 +92,23 @@ pub const Inst = struct {
         /// uses Data.range
         build_range_step,
 
-        // import, uses Data.str
+        /// import, uses Data.str
         import,
 
-        // discards Data.un, complains if it's an error
+        /// discards Data.un, complains if it's an error
         discard,
 
-        // res = copy(operand)
+        /// res = copy(operand)
         copy_un,
-        // lhs = copy(rhs)
+        /// lhs = copy(rhs)
         copy,
-        // lhs = rhs
+        /// lhs = rhs
         move,
-        // res = GLOBAL(operand)
+        /// res = GLOBAL(operand)
         load_global,
-        // res = CAPTURE(operand)
+        /// res = CAPTURE(operand)
         load_capture,
-        // res = THIS
+        /// res = THIS
         load_this,
 
         // binary operators
@@ -143,9 +143,9 @@ pub const Inst = struct {
         /// container(lhs).append(rhs)
         append,
 
-        // simple cast
+        /// simple cast
         as,
-        // simple type check
+        /// simple type check
         is,
 
         // unary operations
@@ -154,26 +154,30 @@ pub const Inst = struct {
         bit_not,
         spread,
 
-        // uses Data.un, error(A) => A
+        /// uses Data.un, error(A) => A
         unwrap_error,
-        // uses Data.str, @tag(A) => A
+        /// uses Data.str, @tag(A) => A
         unwrap_tagged,
+        /// same as `unwrap_tagged` but returns null if unable
         unwrap_tagged_or_null,
 
-        // uses Data.bin
-        // returns null if lhs is not tuple/list or if its len is not equal to @enumToInt(rhs)
+        /// uses Data.bin
+        /// returns null if lhs is not tuple/list or if its len is not equal to @enumToInt(rhs)
         check_len,
-        // same as above but return error on false
+        /// same as `check_len` but return error on false
         assert_len,
+        /// uses Data.bin with the rhs being how many elements the tuple/list
+        /// must have at least.
+        spread_dest,
 
-        // use Data.bin
+        /// use Data.bin
         get,
-        // returns null if no
+        /// returns null if no
         get_or_null,
-        // uses Data.range with
-        // start == container
-        // extra[0] == index
-        // extra[1] == value
+        /// uses Data.range with
+        /// start == container
+        /// extra[0] == index
+        /// extra[1] == value
         set,
 
         /// uses Data.jump_condition
@@ -182,7 +186,7 @@ pub const Inst = struct {
         push_err_handler,
         pop_err_handler,
 
-        // uses Data.jump
+        /// uses Data.jump
         jump,
         // use Data.jump_condition
         jump_if_true,
@@ -223,7 +227,7 @@ pub const Inst = struct {
                 .greater_than, .greater_than_equal, .mul, .pow, .add, .sub,
                 .l_shift, .r_shift, .bit_and, .bit_or, .bit_xor, .rem, .div,
                 .div_floor, .import, .build_range_step, .build_range,
-                .iter_init, .iter_next, .spread => true,
+                .iter_init, .iter_next, .spread, .spread_dest => true,
                 // zig fmt: on
                 else => false,
             };
@@ -235,7 +239,7 @@ pub const Inst = struct {
                 .discard, .copy, .move, .append, .check_len,
                 .assert_len, .set, .push_err_handler, .pop_err_handler,
                 .jump, .jump_if_true, .jump_if_false, .jump_if_null, .ret,
-                .ret_null, .throw, .spread => false,
+                .ret_null, .throw, .spread, .spread_dest => false,
                 // zig fmt: on
                 else => true,
             };
@@ -393,6 +397,7 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
             },
             .check_len,
             .assert_len,
+            .spread_dest,
             => {
                 const operand = data[i].bin.lhs;
                 const len = @enumToInt(data[i].bin.rhs);
