@@ -138,6 +138,7 @@ fn markVal(gc: *Gc, maybe_value: ?*const Value) void {
         const index = page.indexOf(value) orelse continue;
         if (page.meta[index] == .white) {
             page.meta[index] = .gray;
+            page.marked += 1;
         }
         return;
     }
@@ -162,7 +163,6 @@ fn markGray(gc: *Gc) void {
                 if (s.* != .gray) continue;
 
                 s.* = .black;
-                page.marked += 1;
                 switch (page.values[i]) {
                     .list => |list| {
                         for (list.inner.items) |val| {
