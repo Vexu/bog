@@ -125,67 +125,40 @@ pub const methods = struct {
         try b.inner.ensureTotalCapacity(str.t.len);
 
         const w = b.writer();
-        var state: enum {
-            start,
-            brace,
-            format,
-        } = .start;
-        var arg_i: usize = 0;
-        var format_start: usize = 0;
+        var arg_i: u32 = 0;
         var options = std.fmt.FormatOptions{};
+        var it = FormatStringIterator{ .str = str.t };
+        while (it.next()) |some| switch (some) {
+            .str => |s| try w.writeAll(s),
+            .format => |fmt| {
+                var fmt_type: u8 = 0;
 
-        var i: usize = 0;
-        while (i < str.t.len) : (i += 1) {
-            const c = str.t[i];
-            switch (state) {
-                .start => if (c == '{') {
-                    state = .brace;
+                if (fmt.len == 1) {
+                    fmt_type = fmt[0];
                 } else {
-                    try w.writeByte(c);
-                },
-                .brace => if (c == '{') {
-                    try w.writeByte(c);
-                } else {
-                    if (arg_i >= args.t.len) {
-                        return ctx.throw("not enough arguments to format string");
-                    }
-                    format_start = i;
-                    state = .format;
-                    options = .{};
-                    i -= 1;
-                },
-                .format => if (c == '}') {
-                    const fmt = str.t[format_start..i];
-                    var fmt_type: u8 = 0;
+                    // TODO properly parse format options
+                }
 
-                    if (fmt.len == 1) {
-                        fmt_type = fmt[0];
+                switch (fmt_type) {
+                    'x', 'X' => {
+                        if (args.t[arg_i].* != .int) {
+                            return ctx.throwFmt("'x' takes an integer as an argument, got '{}'", .{args.t[arg_i].ty()});
+                        }
+                        try std.fmt.formatInt(args.t[arg_i].int, 16, @intToEnum(std.fmt.Case, @boolToInt(fmt[0] == 'X')), options, w);
+                    },
+                    0 => if (args.t[arg_i].* == .str) {
+                        try b.append(args.t[arg_i].str.data);
                     } else {
-                        // TODO properly parse format options
-                    }
-
-                    switch (fmt_type) {
-                        'x', 'X' => {
-                            if (args.t[arg_i].* != .int) {
-                                return ctx.throwFmt("'x' takes an integer as an argument, got '{}'", .{args.t[arg_i].ty()});
-                            }
-                            try std.fmt.formatInt(args.t[arg_i].int, 16, @intToEnum(std.fmt.Case, @boolToInt(fmt[0] == 'X')), options, w);
-                        },
-                        0 => if (args.t[arg_i].* == .str) {
-                            try b.append(args.t[arg_i].str.data);
-                        } else {
-                            try args.t[arg_i].dump(w, default_dump_depth);
-                        },
-                        else => {
-                            return ctx.throw("unknown format specifier");
-                        },
-                    }
-
-                    state = .start;
-                    arg_i += 1;
-                },
-            }
-        }
+                        try args.t[arg_i].dump(w, default_dump_depth);
+                    },
+                    else => {
+                        return ctx.throw("unknown format specifier");
+                    },
+                }
+                options = .{};
+                arg_i += 1;
+            },
+        };
         if (arg_i != args.t.len) {
             return ctx.throw("unused arguments");
         }
@@ -193,6 +166,49 @@ pub const methods = struct {
         const ret = try ctx.vm.gc.alloc(.str);
         ret.* = Value{ .str = b.finish() };
         return ret;
+    }
+
+    pub fn parse(str: Value.This([]const u8), ctx: Vm.Context, arg: []const u8) !*Value {
+        var arg_i: u32 = 0;
+        var last_format: ?Type = null;
+        var it = FormatStringIterator{ .str = str.t };
+        while (it.next()) |some| switch (some) {
+            .str => |s| if (last_format) |type_id| {
+                const end_index = std.mem.indexOf(u8, arg[arg_i..], s) orelse {
+                    return ctx.throwFmt("expected to find {s}", .{s});
+                };
+                arg_i += end_index + s.len;
+                
+                _ = type_id;
+                // const ty_str = arg[arg_i..][0..end_index];
+                // const new_val = try ctx.vm.gc.alloc(type_id);
+                // new_val.* = switch (type_id) {
+                //     .int => .{
+                //         .int = std.fmt.parseInt(i64, ty_str, 0) catch |err|
+                //             return ctx.throwFmt("cannot cast string to int: {s}", .{@errorName(err)}),
+                //     },
+                //     .num => .{
+                //         .num = std.fmt.parseFloat(f64, ty_str) catch |err|
+                //             return ctx.throwFmt("cannot cast string to num: {s}", .{@errorName(err)}),
+                //     },
+                //     ,
+                //     .str => Value.string(ty_str),
+                //     .tuple,
+                //     .map,
+                //     .list,
+                //     => return ctx.frame.fatal(ctx.vm, "TODO more casts from string"),
+                //     else => unreachable,
+                // };
+            } else {
+                if (!std.mem.startsWith(u8, arg[arg_i..], s)) {
+                    return ctx.throwFmt("expected to find {s}", .{s});
+                }
+                arg_i += s.len;
+            },
+            .format => |fmt| {
+                _ = fmt;
+            },
+        };
     }
 
     pub fn join(str: Value.This([]const u8), ctx: Vm.Context, strs: Value.Variadic([]const u8)) !*Value {
@@ -218,6 +234,45 @@ pub const methods = struct {
         const ret = try ctx.vm.gc.alloc(.str);
         ret.* = Value{ .str = b.finish() };
         return ret;
+    }
+};
+
+const FormatStringIterator = struct {
+    str: []const u8,
+    state: enum { start, brace, format } = .start,
+    i: u32 = 0,
+
+    const Result = union(enum) {
+        str: []const u8,
+        format: []const u8,
+    };
+
+    fn next(it: *FormatStringIterator) ?Result {
+        if (it.i >= it.str.len) return null;
+
+        const start_index = it.i;
+        while (it.i < it.str.len) {
+            const c = it.str[it.i];
+            it.i += 1;
+            switch (it.state) {
+                .start => if (c == '{') {
+                    it.state = .brace;
+                },
+                .brace => if (c == '{') {
+                    it.state = .start;
+                    return Result{ .str = it.str[start_index .. it.i - 1] };
+                } else {
+                    it.i -= 1;
+                    it.state = .format;
+                    return Result{ .str = it.str[start_index .. it.i - 1] };
+                },
+                .format => if (c == '}') {
+                    it.state = .start;
+                    return Result{ .format = it.str[start_index .. it.i - 1] };
+                },
+            }
+        }
+        return Result{ .str = it.str[start_index..] };
     }
 };
 

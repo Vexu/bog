@@ -2139,42 +2139,9 @@ fn genArrayAccess(c: *Compiler, node: Node.Index) Error!Value {
 }
 
 fn genFormatString(c: *Compiler, node: Node.Index) Error!Value {
-    // transform f"foo {x=:X}bar" into "foo x={X}bar".format((255,))
-    var buf = std.ArrayList(u8).init(c.gpa);
-    defer buf.deinit();
-
     const data = c.tree.nodes.items(.data);
-    const strings = data[node].format.str(c.tree.extra);
     const args = data[node].format.exprs(c.tree.extra);
-    const token_ids = c.tree.tokens.items(.id);
-    const starts = c.tree.tokens.items(.start);
-    const ends = c.tree.tokens.items(.end);
-
-    for (strings) |str, i| {
-        if (i != 0 and token_ids[c.tree.prevToken(str)] == .equal) {
-            assert(buf.pop() == '{');
-            const first_token = c.tree.firstToken(args[i - 1]);
-            const last_token = c.tree.lastToken(args[i - 1]);
-
-            const slice = c.tree.source[starts[first_token]..ends[last_token]];
-            try buf.appendSlice(slice);
-            try buf.appendSlice("={");
-        }
-        var slice = c.tree.tokenSlice(str);
-        if (token_ids[str] == .format_start) {
-            slice = slice[2..]; // strip f"
-        } else if (slice[0] == ':') {
-            slice = slice[1..]; // strip : from :X}
-        }
-        if (token_ids[str] == .format_end) {
-            slice = slice[0 .. slice.len - 1]; // strip final "
-        }
-
-        try buf.ensureUnusedCapacity(slice.len);
-        const unused_slice = buf.items.ptr[buf.items.len..buf.capacity];
-        buf.items.len += try c.parseStrExtra(str, slice, unused_slice);
-    }
-    const string_val = Value{ .str = try c.arena.dupe(u8, buf.items) };
+    const string_val = try c.parseFormatString(node, .format);
     const string_ref = try c.makeRuntime(string_val);
 
     var format_val = Value{ .str = "format" };
@@ -2246,6 +2213,7 @@ fn genLval(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
         => return c.genLvalMap(node, lval),
         .member_access_expr => return c.genLvalMemberAccess(node, lval),
         .array_access_expr => return c.genLvalArrayAccess(node, lval),
+        .format_expr => return c.genLvalFormatString(node, lval),
         else => switch (lval) {
             .let => return c.reportErr("invalid left-hand side to declaration", node),
             .assign, .aug_assign => return c.reportErr("invalid left-hand side to assignment", node),
@@ -2586,6 +2554,49 @@ fn genLvalArrayAccess(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
     }
 }
 
+fn genLvalFormatString(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
+    const res = switch (lval) {
+        .let, .assign => |val| val,
+        .aug_assign => return c.reportErr("invalid left hand side to augmented assignment", node),
+    };
+    if (res.* != .str and !res.isRt()) {
+        return c.reportErr("format string parsing expects a string as the right hand side value", node);
+    }
+    const res_ref = try c.makeRuntime(res.*);
+
+    const data = c.tree.nodes.items(.data);
+    const args = data[node].format.exprs(c.tree.extra);
+    const ids = c.tree.nodes.items(.id);
+
+    const string_val = try c.parseFormatString(node, .parse);
+    const string_ref = try c.makeRuntime(string_val);
+
+    var format_val = Value{ .str = "parse" };
+    var format_ref = try c.makeRuntime(format_val);
+
+    const format_fn_ref = try c.addBin(.get, string_ref, format_ref, node);
+    const call_res = try c.addExtra(.this_call, &.{
+        format_fn_ref,
+        string_ref,
+        res_ref,
+    }, node);
+
+    for (args) |arg, i| {
+        const last_node = c.getLastNode(arg);
+        if (ids[last_node] == .discard_expr) {
+            continue;
+        }
+
+        const arg_ref = try c.addBin(.get_int, call_res, @intToEnum(Ref, i), node);
+        const arg_val = Value{ .ref = arg_ref };
+        try c.genLval(arg, switch (lval) {
+            .let => .{ .let = &arg_val },
+            .assign => .{ .assign = &arg_val },
+            else => unreachable,
+        });
+    }
+}
+
 fn genTryUnwrap(c: *Compiler, node: Node.Index, val: *const Value) Error!void {
     const ids = c.tree.nodes.items(.id);
     switch (ids[node]) {
@@ -2772,6 +2783,52 @@ fn parseStr(c: *Compiler, tok: TokenIndex) ![]u8 {
     slice = slice[start .. slice.len - 1];
     var buf = try c.arena.alloc(u8, slice.len);
     return buf[0..try c.parseStrExtra(tok, slice, buf)];
+}
+
+fn parseFormatString(
+    c: *Compiler,
+    node: Node.Index,
+    mode: enum { format, parse },
+) Error!Value {
+    // transform f"foo {x=:X}bar" into "foo x={X}bar".format((255,))
+    var buf = std.ArrayList(u8).init(c.gpa);
+    defer buf.deinit();
+
+    const data = c.tree.nodes.items(.data);
+    const strings = data[node].format.str(c.tree.extra);
+    const args = data[node].format.exprs(c.tree.extra);
+    const token_ids = c.tree.tokens.items(.id);
+    const starts = c.tree.tokens.items(.start);
+    const ends = c.tree.tokens.items(.end);
+
+    for (strings) |str, i| {
+        if (i != 0 and token_ids[c.tree.prevToken(str)] == .equal) {
+            if (mode == .parse) {
+                return c.reportErr("'{arg=}' syntax is not allowed in format string parsing", node);
+            }
+            assert(buf.pop() == '{');
+            const first_token = c.tree.firstToken(args[i - 1]);
+            const last_token = c.tree.lastToken(args[i - 1]);
+
+            const slice = c.tree.source[starts[first_token]..ends[last_token]];
+            try buf.appendSlice(slice);
+            try buf.appendSlice("={");
+        }
+        var slice = c.tree.tokenSlice(str);
+        if (token_ids[str] == .format_start) {
+            slice = slice[2..]; // strip f"
+        } else if (slice[0] == ':') {
+            slice = slice[1..]; // strip : from :X}
+        }
+        if (token_ids[str] == .format_end) {
+            slice = slice[0 .. slice.len - 1]; // strip final "
+        }
+
+        try buf.ensureUnusedCapacity(slice.len);
+        const unused_slice = buf.items.ptr[buf.items.len..buf.capacity];
+        buf.items.len += try c.parseStrExtra(str, slice, unused_slice);
+    }
+    return Value{ .str = try c.arena.dupe(u8, buf.items) };
 }
 
 fn parseStrExtra(c: *Compiler, tok: TokenIndex, slice: []const u8, buf: []u8) !usize {
