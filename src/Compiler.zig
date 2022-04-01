@@ -2127,6 +2127,11 @@ fn genArrayAccess(c: *Compiler, node: Node.Index) Error!Value {
     const lhs_ref = try c.makeRuntime(lhs_val);
 
     var rhs_val = try c.genNode(rhs, .value);
+    if (rhs_val == .int and rhs_val.int >= 0 and rhs_val.int <= std.math.maxInt(u32)) {
+        const res_ref = try c.addBin(.get_int, lhs_ref, @intToEnum(Ref, rhs_val.int), node);
+        return Value{ .ref = res_ref };
+    }
+
     var rhs_ref = try c.makeRuntime(rhs_val);
 
     const res_ref = try c.addBin(.get, lhs_ref, rhs_ref, node);
@@ -2430,8 +2435,7 @@ fn genLvalTupleList(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
             break;
         }
 
-        const index_ref = try c.makeRuntime(Value{ .int = @intCast(u32, i) });
-        const res_ref = try c.addBin(.get, container_ref, index_ref, item);
+        const res_ref = try c.addBin(.get_int, container_ref, @intToEnum(Ref, i), node);
         const res_val = Value{ .ref = res_ref };
         try c.genLval(item, switch (lval) {
             .let => .{ .let = &res_val },

@@ -174,6 +174,12 @@ pub const Inst = struct {
         get,
         /// returns null if no
         get_or_null,
+        /// Optimized version of `get` which turns the:
+        /// %1 = int 0
+        /// %2 = get %0 %1
+        /// pattern into:
+        /// %1 = get_int %0 0
+        get_int,
         /// uses Data.range with
         /// start == container
         /// extra[0] == index
@@ -227,7 +233,7 @@ pub const Inst = struct {
                 .greater_than, .greater_than_equal, .mul, .pow, .add, .sub,
                 .l_shift, .r_shift, .bit_and, .bit_or, .bit_xor, .rem, .div,
                 .div_floor, .import, .build_range_step, .build_range,
-                .iter_init, .iter_next, .spread, .spread_dest => true,
+                .iter_init, .iter_next, .spread, .spread_dest, .get_int => true,
                 // zig fmt: on
                 else => false,
             };
@@ -239,7 +245,7 @@ pub const Inst = struct {
                 .discard, .copy, .move, .append, .check_len,
                 .assert_len, .set, .push_err_handler, .pop_err_handler,
                 .jump, .jump_if_true, .jump_if_false, .jump_if_null, .ret,
-                .ret_null, .throw, .spread, .spread_dest => false,
+                .ret_null, .throw, .spread, .spread_dest, .get_int => false,
                 // zig fmt: on
                 else => true,
             };
@@ -429,6 +435,7 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
             .greater_than_equal,
             .in,
             => std.debug.print("{} {}\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
+            .get_int => std.debug.print("{} {}\n", .{ data[i].bin.lhs, @enumToInt(data[i].bin.rhs) }),
             .append => std.debug.print("{}.append({})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
             .as, .is => std.debug.print("{} {s}\n", .{ data[i].bin_ty.operand, @tagName(data[i].bin_ty.ty) }),
             .ret,

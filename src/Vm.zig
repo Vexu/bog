@@ -957,6 +957,16 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     else => |e| return e,
                 };
             },
+            .get_int => {
+                const res = try f.newRef(vm, ref);
+                const container = f.val(data[inst].bin.lhs);
+                const index = Value{ .int = @enumToInt(data[inst].bin.rhs) };
+
+                container.get(f.ctx(vm), &index, res) catch |err| switch (err) {
+                    error.Throw => continue,
+                    else => |e| return e,
+                };
+            },
             .get_or_null => {
                 const res = try f.newRef(vm, ref);
                 const container = f.val(data[inst].bin.lhs);
