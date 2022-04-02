@@ -1,3 +1,14 @@
+test "simple values are duped before being added to an aggregate value" {
+    try expectOutput(
+        \\let b = []
+        \\for 0:2
+        \\    let mut a = 1
+        \\    b.append(a)
+        \\    a += 1
+        \\return b
+    , "[1, 1]");
+}
+
 test "cur_fn == null doesn't imply that identifier should be made global" {
     try expectOutput(
         \\let x = for let v in "oo" v
@@ -108,7 +119,7 @@ test "std.gc" {
         \\for 0:5 makeGarbage()
         \\return collect()
     ,
-        \\38
+        \\53
     );
 }
 
