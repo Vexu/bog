@@ -1,3 +1,13 @@
+test "cur_fn == null doesn't imply that identifier should be made global" {
+    try expectOutput(
+        \\let x = for let v in "oo" v
+        \\let b = fn()
+        \\    let v = 1
+        \\    return v
+        \\return b()
+    , "1");
+}
+
 test "spread" {
     try expectOutput(
         \\let foo = [1, 2, 3]
