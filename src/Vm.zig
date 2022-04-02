@@ -88,7 +88,7 @@ pub const Frame = struct {
                 // simple values can be reused
                 .int, .num, .range, .native => return some,
                 // if string doesn't own it's contents it can be reused
-                .str => if (some.str.capacity == 0) return some,
+                .str => |s| if (s.capacity == 0) return some,
                 else => {},
             }
         }
@@ -118,6 +118,17 @@ pub const Frame = struct {
 
     pub inline fn val(f: *Frame, ref: Ref) *Value {
         return f.stack.items[@enumToInt(ref)];
+    }
+
+    pub inline fn valDupeSimple(f: *Frame, vm: *Vm, ref: Ref) !*Value {
+        const old = f.val(ref);
+        // do the opposite of newVal in case the value is added to an aggregate
+        switch (old.*) {
+            .int, .num, .range, .native => {},
+            .str => |s| if (s.capacity != 0) return old,
+            else => return old,
+        }
+        return vm.gc.dupe(old);
     }
 
     pub fn int(f: *Frame, vm: *Vm, ref: Ref) !?i64 {
@@ -338,7 +349,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
 
                 var i: usize = 0;
                 for (items) |item_ref| {
-                    const val = f.val(item_ref);
+                    const val = try f.valDupeSimple(vm, item_ref);
                     switch (val.*) {
                         .spread => |spread| {
                             const spread_items = spread.items();
@@ -370,7 +381,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 try res.list.inner.ensureUnusedCapacity(vm.gc.gpa, len);
 
                 for (items) |item_ref| {
-                    const val = f.val(item_ref);
+                    const val = try f.valDupeSimple(vm, item_ref);
                     switch (val.*) {
                         .spread => |spread| res.list.inner.appendSliceAssumeCapacity(spread.items()),
                         else => res.list.inner.appendAssumeCapacity(val),
@@ -387,14 +398,14 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
 
                 var map_i: u32 = 0;
                 while (map_i < items.len) : (map_i += 2) {
-                    const key = f.val(items[map_i]);
-                    const val = f.val(items[map_i + 1]);
+                    const key = try f.valDupeSimple(vm, items[map_i]);
+                    const val = try f.valDupeSimple(vm, items[map_i + 1]);
                     res.map.putAssumeCapacity(key, val);
                 }
             },
             .build_error => {
                 const res = try f.newVal(vm, ref, .err);
-                const arg = f.val(data[inst].un);
+                const arg = try f.valDupeSimple(vm, data[inst].un);
 
                 res.* = .{ .err = try vm.gc.dupe(arg) };
             },
@@ -404,7 +415,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             },
             .build_tagged => {
                 const res = try f.newVal(vm, ref, .tagged);
-                const arg = f.val(mod.extra[data[inst].extra.extra]);
+                const arg = try f.valDupeSimple(vm, mod.extra[data[inst].extra.extra]);
                 const str_offset = @enumToInt(mod.extra[data[inst].extra.extra + 1]);
 
                 const name = mod.strings[str_offset..][0..data[inst].extra.len];
@@ -428,6 +439,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
 
                 const captures = try vm.gc.gpa.alloc(*Value, captures_len);
                 for (fn_captures) |capture_ref, i| {
+                    // TODO should this use valDupeSimple
                     captures[i] = f.val(capture_ref);
                 }
 
@@ -480,12 +492,10 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 }
             },
             .copy_un => {
-                const val = f.val(data[inst].un);
-
-                const duped = try vm.gc.dupe(val);
+                const val = try f.valDupeSimple(vm, data[inst].un);
 
                 const res = try f.newRef(vm, ref);
-                res.* = duped;
+                res.* = val;
             },
             .copy => {
                 const val = f.val(data[inst].bin.rhs);
@@ -981,7 +991,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .set => {
                 const container = f.val(data[inst].range.start);
                 const index = f.val(mod.extra[data[inst].range.extra]);
-                const val = f.val(mod.extra[data[inst].range.extra + 1]);
+                const val = try f.valDupeSimple(vm, mod.extra[data[inst].range.extra + 1]);
 
                 container.set(f.ctx(vm), index, val) catch |err| switch (err) {
                     error.Throw => continue,
@@ -1142,7 +1152,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
 
                     var i: u32 = 0;
                     for (args) |arg_ref| {
-                        const arg = f.val(arg_ref);
+                        const arg = try f.valDupeSimple(vm, arg_ref);
                         switch (arg.*) {
                             .spread => |spread| {
                                 const spread_items = spread.items();
