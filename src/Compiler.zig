@@ -33,6 +33,7 @@ list_buf: std.ArrayListUnmanaged(Ref) = .{},
 unwrap_jump_buf: JumpList = .{},
 cur_loop: ?*Loop = null,
 cur_fn: ?*Fn = null,
+make_ident_global: bool = false,
 params: u32 = 0,
 
 code: *Code,
@@ -60,7 +61,11 @@ pub fn compile(gpa: Allocator, source: []const u8, path: []const u8, errors: *Er
     defer compiler.deinit();
     errdefer compiler.lines.deinit(gpa);
 
+    const ids = tree.nodes.items(.id);
     for (tree.root_nodes) |node| {
+        if (ids[node] == .decl) compiler.make_ident_global = true;
+        defer compiler.make_ident_global = false;
+
         _ = try compiler.genNode(node, .discard);
     }
     {
@@ -90,7 +95,13 @@ pub fn compileRepl(repl: *@import("repl.zig").Repl, node: Node.Index) Compiler.E
         repl.frame.ip -= 1;
     }
 
-    const res_val = try repl.compiler.genNode(node, .value);
+    const res_val = res_val: {
+        const ids = repl.compiler.tree.nodes.items(.id);
+        if (ids[node] == .decl) repl.compiler.make_ident_global = true;
+        defer repl.compiler.make_ident_global = false;
+
+        break :res_val try repl.compiler.genNode(node, .value);
+    };
     const res_ref = try repl.compiler.makeRuntime(res_val);
 
     // add return
@@ -744,7 +755,13 @@ fn genIdent(c: *Compiler, node: Node.Index) Error!Value {
 
 fn genDecl(c: *Compiler, node: Node.Index) !void {
     const data = c.tree.nodes.items(.data);
-    const init_val = try c.genNode(data[node].bin.rhs, .value);
+    const init_val = init_val: {
+        const old_make_global = c.make_ident_global;
+        defer c.make_ident_global = old_make_global;
+        c.make_ident_global = false;
+
+        break :init_val try c.genNode(data[node].bin.rhs, .value);
+    };
     const destructuring = data[node].bin.lhs;
     const ids = c.tree.nodes.items(.id);
 
@@ -2313,7 +2330,7 @@ fn genLvalIdent(c: *Compiler, node: Node.Index, lval: Lval, mutable: bool) Error
                 .val = val.*,
             };
             try c.scopes.append(c.gpa, .{ .symbol = sym });
-            if (c.cur_fn == null) {
+            if (c.make_ident_global) {
                 try c.globals.append(c.gpa, sym);
             }
         },
@@ -2512,6 +2529,10 @@ fn genLvalMap(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
                     .offset = try c.putString(str),
                 } }, null);
             } else {
+                const old_make_global = c.make_ident_global;
+                defer c.make_ident_global = old_make_global;
+                c.make_ident_global = false;
+
                 var key_val = try c.genNode(data[item].bin.lhs, .value);
                 key = try c.makeRuntime(key_val);
             }
