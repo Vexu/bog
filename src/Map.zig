@@ -25,20 +25,20 @@ index_header: ?*IndexHeader = null,
 /// Entry pointers become invalid whenever this ArrayHashMap is modified,
 /// unless `ensureTotalCapacity`/`ensureUnusedCapacity` was previously used.
 pub const Entry = struct {
-    key_ptr: **const Value,
+    key_ptr: **Value,
     value_ptr: **Value,
 };
 
 /// A KV pair which has been copied out of the backing store
 pub const KV = struct {
-    key: *const Value,
+    key: *Value,
     value: *Value,
 };
 
 /// The Data type used for the MultiArrayList backing this map
 pub const Data = struct {
     hash: Hash,
-    key: *const Value,
+    key: *Value,
     value: *Value,
 };
 
@@ -56,7 +56,7 @@ pub const Hash = u32;
 /// Entry pointers become invalid whenever this ArrayHashMap is modified,
 /// unless `ensureTotalCapacity`/`ensureUnusedCapacity` was previously used.
 pub const GetOrPutResult = struct {
-    key_ptr: **const Value,
+    key_ptr: **Value,
     value_ptr: **Value,
     found_existing: bool,
     index: u32,
@@ -89,7 +89,7 @@ pub fn count(self: Map) u32 {
 
 /// Returns the backing array of keys in this map.
 /// Modifying the map may invalidate this array.
-pub fn keys(self: Map) []*const Value {
+pub fn keys(self: Map) []*Value {
     return self.entries.items(.key);
 }
 /// Returns the backing array of values in this map.
@@ -109,7 +109,7 @@ pub fn iterator(self: Map) Iterator {
     };
 }
 pub const Iterator = struct {
-    keys: [*]*const Value,
+    keys: [*]*Value,
     values: [*]*Value,
     len: u32,
     index: u32 = 0,
@@ -136,14 +136,14 @@ pub const Iterator = struct {
 /// Otherwise, puts a new item with undefined value, and
 /// the `Entry` pointer points to it. Caller should then initialize
 /// the value (but not the key).
-pub fn getOrPut(self: *Map, allocator: Allocator, key: *const Value) !GetOrPutResult {
+pub fn getOrPut(self: *Map, allocator: Allocator, key: *Value) !GetOrPutResult {
     const gop = try self.getOrPutContextAdapted(allocator, key);
     if (!gop.found_existing) {
         gop.key_ptr.* = key;
     }
     return gop;
 }
-fn getOrPutContextAdapted(self: *Map, allocator: Allocator, key: *const Value) !GetOrPutResult {
+fn getOrPutContextAdapted(self: *Map, allocator: Allocator, key: *Value) !GetOrPutResult {
     self.ensureTotalCapacity(allocator, self.entries.len + 1) catch |err| {
         // "If key exists this function cannot fail."
         const index = self.getIndex(key) orelse return err;
@@ -165,7 +165,7 @@ fn getOrPutContextAdapted(self: *Map, allocator: Allocator, key: *const Value) !
 /// the value (but not the key).
 /// If a new entry needs to be stored, this function asserts there
 /// is enough capacity to store it.
-pub fn getOrPutAssumeCapacity(self: *Map, key: *const Value) GetOrPutResult {
+pub fn getOrPutAssumeCapacity(self: *Map, key: *Value) GetOrPutResult {
     const gop = self.getOrPutAssumeCapacityAdapted(key);
     if (!gop.found_existing) {
         gop.key_ptr.* = key;
@@ -179,7 +179,7 @@ pub fn getOrPutAssumeCapacity(self: *Map, key: *const Value) GetOrPutResult {
 /// both the key and the value.
 /// If a new entry needs to be stored, this function asserts there
 /// is enough capacity to store it.
-fn getOrPutAssumeCapacityAdapted(self: *Map, key: *const Value) GetOrPutResult {
+fn getOrPutAssumeCapacityAdapted(self: *Map, key: *Value) GetOrPutResult {
     const header = self.index_header orelse {
         // Linear scan.
         const h = key.hash();
@@ -253,14 +253,14 @@ pub fn ensureUnusedCapacity(
 
 /// Clobbers any existing data. To detect if a put would clobber
 /// existing data, see `getOrPut`.
-pub fn put(self: *Map, allocator: Allocator, key: *const Value, value: *Value) !void {
+pub fn put(self: *Map, allocator: Allocator, key: *Value, value: *Value) !void {
     const result = try self.getOrPut(allocator, key);
     result.value_ptr.* = value;
 }
 
 /// Inserts a key-value pair into the hash map, asserting that no previous
 /// entry with the same key is already present
-pub fn putNoClobber(self: *Map, allocator: Allocator, key: *const Value, value: *Value) !void {
+pub fn putNoClobber(self: *Map, allocator: Allocator, key: *Value, value: *Value) !void {
     const result = try self.getOrPut(allocator, key);
     assert(!result.found_existing);
     result.value_ptr.* = value;
@@ -269,7 +269,7 @@ pub fn putNoClobber(self: *Map, allocator: Allocator, key: *const Value, value: 
 /// Asserts there is enough capacity to store the new key-value pair.
 /// Clobbers any existing data. To detect if a put would clobber
 /// existing data, see `getOrPutAssumeCapacity`.
-pub fn putAssumeCapacity(self: *Map, key: *const Value, value: *Value) void {
+pub fn putAssumeCapacity(self: *Map, key: *Value, value: *Value) void {
     const result = self.getOrPutAssumeCapacity(key);
     result.value_ptr.* = value;
 }
@@ -277,7 +277,7 @@ pub fn putAssumeCapacity(self: *Map, key: *const Value, value: *Value) void {
 /// Asserts there is enough capacity to store the new key-value pair.
 /// Asserts that it does not clobber any existing data.
 /// To detect if a put would clobber existing data, see `getOrPutAssumeCapacity`.
-pub fn putAssumeCapacityNoClobber(self: *Map, key: *const Value, value: *Value) void {
+pub fn putAssumeCapacityNoClobber(self: *Map, key: *Value, value: *Value) void {
     const result = self.getOrPutAssumeCapacity(key);
     assert(!result.found_existing);
     result.value_ptr.* = value;
@@ -339,7 +339,7 @@ pub fn clone(self: Map, allocator: Allocator) !Map {
 // // ------------------ No pub fns below this point ------------------
 
 /// Must `ensureTotalCapacity`/`ensureUnusedCapacity` before calling this.
-fn getOrPutInternal(self: *Map, key: *const Value, header: *IndexHeader, comptime I: type) GetOrPutResult {
+fn getOrPutInternal(self: *Map, key: *Value, header: *IndexHeader, comptime I: type) GetOrPutResult {
     const slice = self.entries.slice();
     const hashes_array = slice.items(.hash);
     const keys_array = slice.items(.key);

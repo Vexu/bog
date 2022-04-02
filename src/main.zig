@@ -66,14 +66,14 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
         var _args: [][]const u8 = undefined;
 
         fn argsToBog(ctx: bog.Vm.Context) bog.Vm.Error!*bog.Value {
-            const ret = try ctx.vm.gc.alloc(.list);
-            ret.* = .{ .list = .{} };
-            try ret.list.inner.ensureTotalCapacity(ctx.vm.gc.gpa, _args.len);
+            const ret = try ctx.vm.gc.alloc();
+            ret.* = bog.Value.list();
+            try ret.v.list.inner.ensureTotalCapacity(ctx.vm.gc.gpa, _args.len);
 
             for (_args) |arg| {
-                const str = try ctx.vm.gc.alloc(.str);
+                const str = try ctx.vm.gc.alloc();
                 str.* = bog.Value.string(arg);
-                ret.list.inner.appendAssumeCapacity(str);
+                ret.v.list.inner.appendAssumeCapacity(str);
             }
             return ret;
         }
@@ -92,15 +92,17 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
         },
     };
 
-    switch (res.*) {
-        .int => |int| {
+    switch (res.ty) {
+        .int => {
+            const int = res.v.int;
             if (int >= 0 and int < std.math.maxInt(u8)) {
                 process.exit(@intCast(u8, int));
             } else {
                 fatal("invalid exit code: {}", .{int});
             }
         },
-        .err => |err| {
+        .err => {
+            const err = res.v.err;
             const stderr = std.io.getStdErr().writer();
             try stderr.writeAll("script exited with error: ");
             try err.dump(stderr, 4);
@@ -108,7 +110,7 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
             process.exit(1);
         },
         .@"null" => {},
-        else => fatal("invalid return type '{}'", .{res.ty()}),
+        else => fatal("invalid return type '{s}'", .{res.typeName()}),
     }
 }
 

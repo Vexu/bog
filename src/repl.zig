@@ -12,9 +12,9 @@ pub fn run(gpa: Allocator, reader: anytype, writer: anytype) !void {
 
     repl.vm.gc.stack_protect_start = @frameAddress();
 
-    var frame_val = try repl.vm.gc.alloc(.frame);
-    frame_val.* = .{ .frame = &repl.frame };
-    defer frame_val.* = .{ .int = 0 }; // clear frame
+    var frame_val = try repl.vm.gc.alloc();
+    frame_val.* = bog.Value.frame(&repl.frame);
+    defer frame_val.* = bog.Value.int(0); // clear frame
 
     while (true) {
         defer {

@@ -18,29 +18,16 @@ const Page = struct {
         // 2^20, 1 MiB
         assert(@sizeOf(Page) == max_size);
     }
-    const val_count = @divFloor(max_size - @sizeOf(u32) * 2, (@sizeOf(Value) + @sizeOf(State)));
-    const pad_size = max_size - @sizeOf(u32) * 2 - (@sizeOf(Value) + @sizeOf(State)) * val_count;
-
-    const State = enum {
-        empty,
-        white,
-        gray,
-        black,
-    };
+    const val_count = @divFloor(max_size - @sizeOf(u32), @sizeOf(Value));
+    const pad_size = max_size - @sizeOf(u32) - @sizeOf(Value) * val_count;
 
     const List = std.ArrayListUnmanaged(*Page);
 
-    /// States of all values.
-    meta: [val_count]State,
     /// Padding to ensure size is 1 MiB.
     __padding: [pad_size]u8 = @compileError("do not initiate directly"),
 
     /// Index to the first free slot.
     free: u32,
-
-    /// used during the collection phase to detect whether the Gc should keep
-    /// checking values in this page.
-    marked: u32,
 
     /// Actual values, all pointers will stay valid as long as they are
     /// referenced from a root.
@@ -53,9 +40,9 @@ const Page = struct {
     }
 
     fn destroy(page: *Page, gc: *Gc) void {
-        for (page.meta) |s, i| {
-            if (s == .empty) continue;
-            page.values[i].deinit(gc.gpa);
+        for (page.values) |*val| {
+            if (val.state == .empty) continue;
+            val.deinit(gc.gpa);
         }
         std.heap.page_allocator.destroy(page);
     }
@@ -64,9 +51,11 @@ const Page = struct {
         while (page.free < page.values.len) {
             defer page.free += 1;
 
-            if (page.meta[page.free] == .empty) {
-                page.meta[page.free] = .white;
-                return &page.values[page.free];
+            const val = &page.values[page.free];
+            if (val.state == .empty) {
+                // initialize to a harmless value
+                val.* = Value.int(0);
+                return val;
             }
         }
         return null;
@@ -77,15 +66,16 @@ const Page = struct {
         var i: u32 = val_count;
         while (i > 0) {
             i -= 1;
-            switch (page.meta[i]) {
+            const val = &page.values[i];
+            switch (val.state) {
                 .black, .gray => {
                     // value lives to see another day
-                    page.meta[i] = .white;
+                    val.state = .white;
                 },
                 .white => {
                     freed += 1;
-                    page.meta[i] = .empty;
-                    page.values[i].deinit(gc.gpa);
+                    val.deinit(gc.gpa);
+                    val.state = .empty;
                     page.free = i;
                 },
                 .empty => {},
@@ -94,147 +84,124 @@ const Page = struct {
         return freed;
     }
 
-    fn indexOf(page: *Page, value: *const Value) ?u32 {
-        // is the value before this page
-        if (@ptrToInt(value) < @ptrToInt(&page.values[0])) return null;
-        // is the value after this page
-        if (@ptrToInt(value) > @ptrToInt(&page.values[page.values.len - 1])) return null;
-
-        // value is in this page
-        return @intCast(u32, (@ptrToInt(value) - @ptrToInt(&page.values[0])) / @sizeOf(Value));
+    fn has(page: *Page, value: *Value) bool {
+        return @ptrToInt(value) >= @ptrToInt(&page.values[0]) and
+            @ptrToInt(value) <= @ptrToInt(&page.values[page.values.len - 1]);
     }
 };
 
 const Gc = @This();
 
-simple_pages: Page.List = .{},
-aggregate_pages: Page.List = .{},
+values: Page.List = .{},
+gray_stack: std.ArrayListUnmanaged(*Value) = .{},
 gpa: Allocator,
 page_limit: u32,
 stack_protect_start: usize = 0,
 allocated: u32 = 0,
 
-const PageAndIndex = struct {
-    page: *Page,
-    index: usize,
-};
-
-fn markVal(gc: *Gc, maybe_value: ?*const Value) void {
-    const value = maybe_value orelse return;
-    // These will never be allocated
-    if (value == Value.Null or
-        value == Value.True or
-        value == Value.False) return;
-
-    for (gc.simple_pages.items) |page| {
-        const index = page.indexOf(value) orelse continue;
-        if (page.meta[index] == .white) {
-            page.meta[index] = .black;
-        }
-        return;
+fn markVal(gc: *Gc, maybe_val: ?*Value) !void {
+    const val = maybe_val orelse return;
+    if (val.state != .white) return;
+    switch (val.ty) {
+        .list,
+        .tuple,
+        .map,
+        .err,
+        .func,
+        .frame,
+        .iterator,
+        .spread,
+        .tagged,
+        => {
+            val.state = .gray;
+            try gc.gray_stack.append(gc.gpa, val);
+        },
+        // These values contain no references to other values;
+        // directly mark them black.
+        .native,
+        .str,
+        .int,
+        .num,
+        .range,
+        => val.state = .black,
+        .@"null", .bool => {},
     }
-
-    for (gc.aggregate_pages.items) |page| {
-        const index = page.indexOf(value) orelse continue;
-        if (page.meta[index] == .white) {
-            page.meta[index] = .gray;
-            page.marked += 1;
-        }
-        return;
-    }
-
-    // Value was not allocated by gc.
 }
 
-fn markGray(gc: *Gc) void {
-    // mark all pages as dirty
-    for (gc.aggregate_pages.items) |page| {
-        page.marked = Page.val_count;
-    }
-
-    // mark all white values reachable from gray values as gray
-    var marked_any = true;
-    while (marked_any) {
-        marked_any = false;
-        for (gc.aggregate_pages.items) |page| {
-            if (page.marked == 0) continue;
-            page.marked = 0;
-            for (page.meta) |*s, i| {
-                if (s.* != .gray) continue;
-
-                s.* = .black;
-                switch (page.values[i]) {
-                    .list => |list| {
-                        for (list.inner.items) |val| {
-                            gc.markVal(val);
-                        }
-                    },
-                    .tuple => |tuple| {
-                        for (tuple) |val| {
-                            gc.markVal(val);
-                        }
-                    },
-                    .map => |map| {
-                        var iter = map.iterator();
-                        while (iter.next()) |entry| {
-                            gc.markVal(entry.key_ptr.*);
-                            gc.markVal(entry.value_ptr.*);
-                        }
-                    },
-                    .err => |err| {
-                        gc.markVal(err);
-                    },
-                    .func => |func| {
-                        for (func.captures()) |val| {
-                            gc.markVal(val);
-                        }
-                    },
-                    .frame => |frame| {
-                        for (frame.stack.items) |val| {
-                            gc.markVal(val);
-                        }
-                        for (frame.captures) |val| {
-                            gc.markVal(val);
-                        }
-                        gc.markVal(frame.this);
-                    },
-                    .iterator => |iter| {
-                        gc.markVal(iter.value);
-                    },
-                    .spread => |spread| {
-                        gc.markVal(spread.iterable);
-                    },
-                    .tagged => |tag| {
-                        gc.markVal(tag.value);
-                    },
-                    // These values cannot be allocated in aggregate_pages
-                    .native, .str, .int, .num, .range, .@"null", .bool => {},
+fn markGray(gc: *Gc) !void {
+    while (gc.gray_stack.popOrNull()) |val| {
+        val.state = .black;
+        switch (val.ty) {
+            .list => {
+                for (val.v.list.inner.items) |elem| {
+                    try gc.markVal(elem);
                 }
-            }
-            if (page.marked != 0) marked_any = true;
+            },
+            .tuple => {
+                for (val.v.tuple) |elem| {
+                    try gc.markVal(elem);
+                }
+            },
+            .map => {
+                var iter = val.v.map.iterator();
+                while (iter.next()) |entry| {
+                    try gc.markVal(entry.key_ptr.*);
+                    try gc.markVal(entry.value_ptr.*);
+                }
+            },
+            .err => {
+                try gc.markVal(val.v.err);
+            },
+            .func => {
+                for (val.v.func.captures()) |elem| {
+                    try gc.markVal(elem);
+                }
+            },
+            .frame => {
+                for (val.v.frame.stack.items) |item| {
+                    try gc.markVal(item);
+                }
+                for (val.v.frame.captures) |capture| {
+                    try gc.markVal(capture);
+                }
+                try gc.markVal(val.v.frame.this);
+            },
+            .iterator => {
+                try gc.markVal(val.v.iterator.value);
+            },
+            .spread => {
+                try gc.markVal(val.v.spread.iterable);
+            },
+            .tagged => {
+                try gc.markVal(val.v.tagged.value);
+            },
+            // These values do not contain references to other values
+            .native, .str, .int, .num, .range, .@"null", .bool => {},
         }
     }
 }
 
 /// Collect all unreachable values.
-pub fn collect(gc: *Gc) usize {
+pub fn collect(gc: *Gc) !usize {
     // mark roots as reachable
     if (gc.stack_protect_start != 0) {
         var i = @intToPtr([*]*Value, gc.stack_protect_start);
-        while (@ptrToInt(i) > @frameAddress()) : (i -= 1) {
-            gc.markVal(i[0]);
+        outer: while (@ptrToInt(i) > @frameAddress()) : (i -= 1) {
+            for (gc.values.items) |page| {
+                if (page.has(i[0])) {
+                    try gc.markVal(i[0]);
+                    continue :outer;
+                }
+            }
         }
     }
 
     // mark values referenced from root values as reachable
-    gc.markGray();
+    try gc.markGray();
 
     // free all unreachable values
     var freed: u32 = 0;
-    for (gc.simple_pages.items) |page| {
-        freed += page.clear(gc);
-    }
-    for (gc.aggregate_pages.items) |page| {
+    for (gc.values.items) |page| {
         freed += page.clear(gc);
     }
     log.info("collected {d} out of {d} objects ({d:.2}%)", .{
@@ -256,72 +223,48 @@ pub fn init(allocator: Allocator, page_limit: u32) Gc {
 
 /// Frees all values and their allocations.
 pub fn deinit(gc: *Gc) void {
-    for (gc.aggregate_pages.items) |page| page.destroy(gc);
-    gc.aggregate_pages.deinit(gc.gpa);
-    for (gc.simple_pages.items) |page| page.destroy(gc);
-    gc.simple_pages.deinit(gc.gpa);
+    for (gc.values.items) |page| page.destroy(gc);
+    gc.values.deinit(gc.gpa);
+    gc.gray_stack.deinit(gc.gpa);
 }
 
 /// Allocate a new Value on the heap.
-pub fn alloc(gc: *Gc, ty: Type) !*Value {
-    switch (ty) {
-        .@"null" => unreachable,
-        .bool => unreachable,
-        .native,
-        .str,
-        .int,
-        .num,
-        .range,
-        => return gc.allocExtra(&gc.simple_pages),
-        .list,
-        .tuple,
-        .map,
-        .err,
-        .func,
-        .frame,
-        .iterator,
-        .tagged,
-        .spread,
-        => return gc.allocExtra(&gc.aggregate_pages),
-    }
-}
-
-fn allocExtra(gc: *Gc, pages: *Page.List) !*Value {
-    if (pages.items.len == 0) {
+pub fn alloc(gc: *Gc) !*Value {
+    if (gc.values.items.len == 0) {
         const page = try Page.create();
         errdefer page.destroy(gc);
-        try pages.append(gc.gpa, page);
+        try gc.values.append(gc.gpa, page);
 
         // we just created this page so it is empty.
         gc.allocated += 1;
         return page.alloc() orelse unreachable;
     }
 
-    for (pages.items) |page| {
+    for (gc.values.items) |page| {
         if (page.alloc()) |some| {
             gc.allocated += 1;
             return some;
         }
     }
 
-    const freed = gc.collect();
+    const freed = try gc.collect();
 
     const threshold = 0.75;
     const new_capacity = @intToFloat(f32, freed) / @intToFloat(f32, gc.allocated);
 
-    if (new_capacity < threshold and pages.items.len != gc.page_limit) {
+    if (new_capacity < threshold and gc.values.items.len != gc.page_limit) {
         log.info("collected {d}, allocating a new page", .{freed});
 
         const page = try Page.create();
         errdefer page.destroy(gc);
-        try pages.append(gc.gpa, page);
+        try gc.values.append(gc.gpa, page);
 
         // we just created this page so it is empty.
         gc.allocated += 1;
         return page.alloc() orelse unreachable;
     } else if (freed != 0) {
         // we just freed a whole bunch of values, allocation cannot fail
-        return gc.allocExtra(pages) catch unreachable;
+        return gc.alloc() catch unreachable;
     }
 
     // no values could be collected and page_limit has been reached
@@ -335,21 +278,22 @@ pub fn dupe(gc: *Gc, val: *const Value) !*Value {
     if (val == Value.True) return Value.True;
     if (val == Value.False) return Value.False;
 
-    const new = try gc.alloc(val.*);
-    switch (val.*) {
-        .list => |*l| {
-            new.* = .{ .list = .{} };
-            try new.list.inner.appendSlice(gc.gpa, l.inner.items);
+    const new = try gc.alloc();
+    switch (val.ty) {
+        .list => {
+            new.* = Value.list();
+            try new.v.list.inner.appendSlice(gc.gpa, val.v.list.inner.items);
         },
-        .tuple => |t| {
-            new.* = .{ .tuple = try gc.gpa.dupe(*Value, t) };
+        .tuple => {
+            new.* = Value.tuple(try gc.gpa.dupe(*Value, val.v.tuple));
         },
-        .map => |*m| {
-            new.* = .{ .map = try m.clone(gc.gpa) };
+        .map => {
+            new.* = Value.map();
+            new.v.map = try val.v.map.clone(gc.gpa);
         },
-        .str => |*s| {
-            if (s.capacity != 0) {
-                new.* = Value.string(try gc.gpa.dupe(u8, s.data));
+        .str => {
+            if (val.v.str.capacity != 0) {
+                new.* = Value.string(try gc.gpa.dupe(u8, val.v.str.data));
             } else {
                 new.* = val.*;
             }
@@ -369,8 +313,8 @@ test "stack protect" {
 
     gc.stack_protect_start = @frameAddress();
 
-    _ = try gc.alloc(.int);
-    _ = try gc.alloc(.int);
+    _ = try gc.alloc();
+    _ = try gc.alloc();
 
     try expect(gc.collect() == 0);
 

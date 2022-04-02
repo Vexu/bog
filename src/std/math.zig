@@ -35,36 +35,35 @@ pub const sqrt2 = math.sqrt2;
 pub const sqrt1_2 = math.sqrt1_2;
 
 pub fn ln(ctx: Vm.Context, val: *Value) !*Value {
-    switch (val.*) {
-        .int => |i| {
-            if (i <= 0) return ctx.throw("ln is undefined for numbers less than zero");
-            const res = try ctx.vm.gc.alloc(.int);
-            res.* = Value{ .int = std.math.lossyCast(i64, std.math.floor(std.math.ln(@intToFloat(f64, i)))) };
+    switch (val.ty) {
+        .int => {
+            if (val.v.int <= 0) return ctx.throw("ln is undefined for numbers less than zero");
+            const res = try ctx.vm.gc.alloc();
+            res.* = Value.int(std.math.lossyCast(i64, std.math.floor(std.math.ln(@intToFloat(f64, val.v.int)))));
             return res;
         },
-        .num => |n| {
-            const res = try ctx.vm.gc.alloc(.num);
-            res.* = Value{ .num = std.math.ln(n) };
+        .num => {
+            const res = try ctx.vm.gc.alloc();
+            res.* = Value.num(std.math.ln(val.v.num));
             return res;
         },
-        else => return ctx.throwFmt("ln expects a number, got '{}'", .{val.ty()}),
+        else => return ctx.throwFmt("ln expects a number, got '{s}'", .{val.typeName()}),
     }
 }
 
 pub fn sqrt(ctx: Vm.Context, val: *Value) !*Value {
-    return switch (val.*) {
-        .int => |i| {
-            _ = i;
-            const res = try ctx.vm.gc.alloc(.int);
-            res.* = Value{ .int = std.math.sqrt(@intCast(u64, i)) };
+    return switch (val.ty) {
+        .int => {
+            const res = try ctx.vm.gc.alloc();
+            res.* = Value.int(std.math.sqrt(@intCast(u64, val.v.int)));
             return res;
         },
-        .num => |n| {
-            const res = try ctx.vm.gc.alloc(.num);
-            res.* = Value{ .num = std.math.sqrt(n) };
+        .num => {
+            const res = try ctx.vm.gc.alloc();
+            res.* = Value.num(std.math.sqrt(val.v.num));
             return res;
         },
-        else => return ctx.throwFmt("sqrt expects a number, got '{}'", .{val.ty()}),
+        else => return ctx.throwFmt("sqrt expects a number, got '{s}'", .{val.typeName()}),
     };
 }
 

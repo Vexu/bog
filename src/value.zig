@@ -29,53 +29,39 @@ pub const Type = enum(u8) {
 
     /// Result of ... operand, needs special handling in contexts where allowed.
     spread,
-
-    pub fn format(ty: Type, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        comptime std.debug.assert(fmt.len == 0);
-        try writer.writeAll(switch (ty) {
-            .@"null",
-            .int,
-            .num,
-            .bool,
-            .str,
-            .tuple,
-            .map,
-            .list,
-            .err,
-            .range,
-            .func,
-            .tagged,
-            => @tagName(ty),
-            .frame => unreachable,
-            .iterator => unreachable,
-            .spread => unreachable,
-            .native => "func",
-        });
-    }
 };
 
-pub const Value =union(Type) {
-    tuple: []*Value,
-    map: Map,
-    list: List,
-    err: *Value,
-    int: i64,
-    num: f64,
-    range: Range,
-    str: String,
-    func: Func,
-    frame: *Vm.Frame,
-    native: Native,
-    tagged: struct {
-        name: []const u8,
-        value: *Value,
-    },
-    iterator: Iterator,
-    spread: Spread,
+pub const Value = struct {
+    v: union {
+        tuple: []*Value,
+        map: Map,
+        list: List,
+        err: *Value,
+        int: i64,
+        num: f64,
+        range: Range,
+        str: String,
+        func: Func,
+        frame: *Vm.Frame,
+        native: Native,
+        tagged: struct {
+            name: []const u8,
+            value: *Value,
+        },
+        iterator: Iterator,
+        spread: Spread,
 
-    /// always memoized
-    bool: bool,
-    @"null",
+        /// always memoized
+        bool: bool,
+        @"null": void,
+    },
+    ty: Type,
+    state: enum {
+        empty,
+        white,
+        gray,
+        black,
+    } = .white,
 
     pub const Iterator = struct {
         value: *Value,
@@ -85,72 +71,71 @@ pub const Value =union(Type) {
         } = .{ .u = 0 },
 
         pub fn next(iter: *Iterator, ctx: Vm.Context, res: *?*Value) !bool {
-            switch (iter.value.*) {
-                .tuple => |tuple| {
-                    if (iter.i.u == tuple.len) {
+            switch (iter.value.ty) {
+                .tuple => {
+                    const t = iter.value.v.tuple;
+                    if (iter.i.u == t.len) {
                         return false;
                     }
 
-                    res.* = tuple[iter.i.u];
+                    res.* = t[iter.i.u];
                     iter.i.u += 1;
                 },
-                .list => |list| {
-                    if (iter.i.u == list.inner.items.len) {
+                .list => {
+                    const l = iter.value.v.list.inner.items;
+                    if (iter.i.u == l.len) {
                         return false;
                     }
 
-                    res.* = list.inner.items[iter.i.u];
+                    res.* = l[iter.i.u];
                     iter.i.u += 1;
                 },
-                .str => |str| {
-                    if (iter.i.u == str.data.len) {
+                .str => {
+                    const str = iter.value.v.str.data;
+                    if (iter.i.u == str.len) {
                         return false;
                     }
                     if (res.* == null) {
-                        res.* = try ctx.vm.gc.alloc(.str);
+                        res.* = try ctx.vm.gc.alloc();
                     }
 
-                    const cp_len = std.unicode.utf8ByteSequenceLength(str.data[iter.i.u]) catch
+                    const cp_len = std.unicode.utf8ByteSequenceLength(str[iter.i.u]) catch
                         return ctx.throw("invalid utf-8 sequence");
                     iter.i.u += cp_len;
 
-                    res.*.?.* = .{
-                        .str = .{
-                            .data = str.data[iter.i.u - cp_len .. iter.i.u],
-                        },
-                    };
+                    res.*.?.* = Value.string(str[iter.i.u - cp_len .. iter.i.u]);
                 },
-                .map => |map| {
-                    if (iter.i.u == map.count()) {
+                .map => {
+                    const m = iter.value.v.map;
+                    if (iter.i.u == m.count()) {
                         return false;
                     }
 
                     if (res.* == null) {
-                        res.* = try ctx.vm.gc.alloc(.tuple);
+                        res.* = try ctx.vm.gc.alloc();
                     }
                     if (iter.i.u == 0) {
-                        res.*.?.* = .{ .tuple = try ctx.vm.gc.gpa.alloc(*Value, 2) };
+                        res.*.?.* = Value.tuple(try ctx.vm.gc.gpa.alloc(*Value, 2));
                     }
                     // const e = &map.entries.items[iter.i.u];
-                    const e_key = &map.keys()[iter.i.u].*;
-                    const e_value = &map.values()[iter.i.u].*;
-                    const t = res.*.?.tuple;
+                    const e_key = &m.keys()[iter.i.u].*;
+                    const e_value = &m.values()[iter.i.u].*;
+                    const t = res.*.?.v.tuple;
                     // removing `const` on `Map` causes dependency loop??
                     t[0] = @intToPtr(*Value, @ptrToInt(e_key));
                     t[1] = e_value;
                     iter.i.u += 1;
                 },
-                .range => |r| {
+                .range => {
+                    const r = iter.value.v.range;
                     if (iter.i.i >= r.end) {
                         return false;
                     }
                     if (res.* == null) {
-                        res.* = try ctx.vm.gc.alloc(.int);
+                        res.* = try ctx.vm.gc.alloc();
                     }
 
-                    res.*.?.* = .{
-                        .int = iter.i.i,
-                    };
+                    res.*.?.* = Value.int(iter.i.i);
                     iter.i.i += r.step;
                 },
                 else => unreachable,
@@ -162,22 +147,22 @@ pub const Value =union(Type) {
     pub const Spread = struct {
         iterable: *Value,
 
-        pub fn len(s: @This()) usize {
-            return switch (s.iterable.*) {
+        pub fn len(s: Spread) usize {
+            return switch (s.iterable.ty) {
                 .range => unreachable, // Handled in Vm
                 .str => unreachable, // Handled in Vm
-                .tuple => |tuple| tuple.len,
-                .list => |list| list.inner.items.len,
+                .tuple => s.iterable.v.tuple.len,
+                .list => s.iterable.v.list.inner.items.len,
                 else => unreachable,
             };
         }
 
-        pub fn items(s: @This()) []*Value {
-            return switch (s.iterable.*) {
+        pub fn items(s: Spread) []*Value {
+            return switch (s.iterable.ty) {
                 .range => unreachable, // Handled in Vm
                 .str => unreachable, // Handled in Vm
-                .tuple => |tuple| tuple,
-                .list => |list| list.inner.items,
+                .tuple => s.iterable.v.tuple,
+                .list => s.iterable.v.list.inner.items,
                 else => unreachable,
             };
         }
@@ -265,175 +250,220 @@ pub const Value =union(Type) {
         };
     }
 
-    var null_base = Value{ .@"null" = {} };
-    var true_base = Value{ .bool = true };
-    var false_base = Value{ .bool = false };
+    var null_base = Value{ .v = .{ .@"null" = {} }, .ty = .@"null" };
+    var true_base = Value{ .v = .{ .bool = true }, .ty = .bool };
+    var false_base = Value{ .v = .{ .bool = false }, .ty = .bool };
 
     pub const Null = &null_base;
     pub const True = &true_base;
     pub const False = &false_base;
 
-    pub fn string(data: anytype) Value {
-        return switch (@TypeOf(data)) {
-            []u8 => .{
-                .str = .{
-                    .data = data,
-                    .capacity = data.len,
-                },
-            },
-            else => .{
-                .str = .{
-                    .data = data,
-                },
-            },
+    pub fn string(s: anytype) Value {
+        return .{ .ty = .str, .v = .{ .str = .{
+            .data = s,
+            .capacity = if (std.meta.trait.isConstPtr(@TypeOf(s))) 0 else s.len,
+        } } };
+    }
+
+    pub fn map() Value {
+        return .{ .ty = .map, .v = .{ .map = .{} } };
+    }
+
+    pub fn list() Value {
+        return .{ .ty = .list, .v = .{ .list = .{} } };
+    }
+
+    pub fn tuple(t: []*Value) Value {
+        return .{ .ty = .tuple, .v = .{ .tuple = t } };
+    }
+
+    pub fn int(i: i64) Value {
+        return .{ .ty = .int, .v = .{ .int = i } };
+    }
+
+    pub fn num(n: f64) Value {
+        return .{ .ty = .num, .v = .{ .num = n } };
+    }
+
+    pub fn frame(f: *Vm.Frame) Value {
+        return .{ .ty = .frame, .v = .{ .frame = f } };
+    }
+
+    pub fn err(e: *Value) Value {
+        return .{ .ty = .err, .v = .{ .err = e } };
+    }
+
+    pub fn tagged(name: []const u8, v: *Value) Value {
+        return .{
+            .ty = .tagged,
+            .v = .{ .tagged = .{ .name = name, .value = v } },
         };
     }
 
-    pub inline fn ty(val: Value) Type {
-        return val;
+    pub inline fn typeName(val: Value) []const u8 {
+        return switch (val.ty) {
+            // zig fmt: off
+            .@"null", .int, .num, .bool, .str, .tuple,
+            .map, .list, .err, .range, .func, .tagged,
+            // zig fmt: on
+            => @tagName(val.ty),
+            .frame => unreachable,
+            .iterator => unreachable,
+            .spread => unreachable,
+            .native => "func",
+        };
     }
 
     /// Frees any extra memory allocated by value.
     /// Does not free values recursively.
-    pub fn deinit(value: *Value, allocator: Allocator) void {
-        switch (value.*) {
+    pub fn deinit(val: *Value, allocator: Allocator) void {
+        switch (val.ty) {
             .bool, .@"null" => return,
             .frame => {}, // frames are managed by the VM
             .int, .num, .native, .tagged, .range, .iterator, .err, .spread => {},
-            .tuple => |t| allocator.free(t),
-            .map => |*m| m.deinit(allocator),
-            .list => |*l| l.deinit(allocator),
-            .str => |*s| s.deinit(allocator),
-            .func => |f| allocator.free(f.captures()),
+            .tuple => allocator.free(val.v.tuple),
+            .map => val.v.map.deinit(allocator),
+            .list => val.v.list.deinit(allocator),
+            .str => val.v.str.deinit(allocator),
+            .func => allocator.free(val.v.func.captures()),
         }
-        value.* = undefined;
+        val.* = undefined;
     }
 
     pub fn hash(key: *const Value) u32 {
         const autoHash = std.hash.autoHash;
 
         var hasher = std.hash.Wyhash.init(0);
-        autoHash(&hasher, @as(Type, key.*));
-        switch (key.*) {
+        autoHash(&hasher, key.ty);
+        switch (key.ty) {
             .iterator, .spread => unreachable,
-            .frame => autoHash(&hasher, key.frame),
+            .frame => autoHash(&hasher, key.v.frame),
             .@"null" => {},
-            .int => |int| autoHash(&hasher, int),
+            .int => autoHash(&hasher, key.v.int),
             .num => {},
-            .bool => |b| autoHash(&hasher, b),
-            .str => |str| hasher.update(str.data),
-            .tuple => |tuple| {
-                autoHash(&hasher, tuple.len);
+            .bool => autoHash(&hasher, key.v.bool),
+            .str => hasher.update(key.v.str.data),
+            .tuple => {
+                autoHash(&hasher, key.v.tuple.len);
                 // TODO more hashing?
             },
-            .map => |map| {
-                autoHash(&hasher, map.count());
+            .map => {
+                autoHash(&hasher, key.v.map.count());
                 // TODO more hashing?
             },
-            .list => |list| {
-                autoHash(&hasher, list.inner.items.len);
+            .list => {
+                autoHash(&hasher, key.v.list.inner.items.len);
                 // TODO more hashing?
             },
-            .err => |err| autoHash(&hasher, @as(Type, err.*)),
-            .range => |range| {
+            .err => autoHash(&hasher, key.v.err.ty),
+            .range => {
+                const range = key.v.range;
                 autoHash(&hasher, range.start);
                 autoHash(&hasher, range.end);
                 autoHash(&hasher, range.step);
             },
-            .func => |func| {
-                autoHash(&hasher, func.extra_index);
-                autoHash(&hasher, func.module);
+            .func => {
+                const f = key.v.func;
+                autoHash(&hasher, f.extra_index);
+                autoHash(&hasher, f.module);
             },
-            .native => |func| {
-                autoHash(&hasher, func.arg_count);
-                autoHash(&hasher, func.func);
+            .native => {
+                const n = key.v.native;
+                autoHash(&hasher, n.arg_count);
+                autoHash(&hasher, n.func);
             },
-            .tagged => |tagged| {
-                hasher.update(tagged.name);
-                autoHash(&hasher, tagged.value);
+            .tagged => {
+                const t = key.v.tagged;
+                hasher.update(t.name);
+                autoHash(&hasher, t.value);
             },
         }
         return @truncate(u32, hasher.final());
     }
 
     pub fn eql(a: *const Value, b: *const Value) bool {
-        switch (a.*) {
-            .int => |i| return switch (b.*) {
-                .int => |b_val| i == b_val,
-                .num => |b_val| @intToFloat(f64, i) == b_val,
+        switch (a.ty) {
+            .int => return switch (b.ty) {
+                .int => a.v.int == b.v.int,
+                .num => @intToFloat(f64, a.v.int) == b.v.num,
                 else => false,
             },
-            .num => |n| return switch (b.*) {
-                .int => |b_val| n == @intToFloat(f64, b_val),
-                .num => |b_val| n == b_val,
+            .num => return switch (b.ty) {
+                .int => a.v.num == @intToFloat(f64, b.v.int),
+                .num => a.v.num == b.v.num,
                 else => false,
             },
-            else => if (a.* != @as(std.meta.Tag(@TypeOf(b.*)), b.*)) return false,
+            else => if (a.ty != b.ty) return false,
         }
-        return switch (a.*) {
+        return switch (a.ty) {
             .iterator, .spread, .int, .num => unreachable,
-            .frame => a.frame == b.frame,
+            .frame => a.v.frame == b.v.frame,
             .@"null" => true,
-            .bool => |bool_val| bool_val == b.bool,
-            .str => |s| s.eql(b.str),
-            .tuple => |t| {
-                const b_val = b.tuple;
-                if (t.len != b_val.len) return false;
-                for (t) |v, i| {
-                    if (!v.eql(b_val[i])) return false;
+            .bool => a.v.bool == b.v.bool,
+            .str => a.v.str.eql(b.v.str),
+            .tuple => {
+                const a_t = a.v.tuple;
+                const b_t = b.v.tuple;
+                if (a_t.len != b_t.len) return false;
+                for (a_t) |v, i| {
+                    if (!v.eql(b_t[i])) return false;
                 }
                 return true;
             },
             .map => @panic("TODO eql for maps"),
-            .list => |l| l.eql(b.list),
-            .err => |e| e.eql(b.err),
-            .range => |r| {
-                return r.start == b.range.start and
-                    r.end == b.range.end and
-                    r.step == b.range.step;
+            .list => a.v.list.eql(b.v.list),
+            .err => a.v.err.eql(b.v.err),
+            .range => {
+                const a_r = a.v.range;
+                const b_r = a.v.range;
+                return a_r.start == b_r.start and
+                    a_r.end == b_r.end and
+                    a_r.step == b_r.step;
             },
-            .func => |f| {
-                const b_f = b.func;
-                return f.module == b_f.module and f.extra_index == b_f.extra_index;
+            .func => {
+                const a_f = a.v.func;
+                const b_f = b.v.func;
+                return a_f.module == b_f.module and a_f.extra_index == b_f.extra_index;
             },
-            .native => |n| n.func == b.native.func,
-            .tagged => |t| {
-                if (!mem.eql(u8, t.name, b.tagged.name)) return false;
-                return t.value.eql(b.tagged.value);
+            .native => a.v.native.func == b.v.native.func,
+            .tagged => {
+                if (!mem.eql(u8, a.v.tagged.name, b.v.tagged.name)) return false;
+                return a.v.tagged.value.eql(b.v.tagged.value);
             },
         };
     }
 
     /// Prints string representation of value to writer
-    pub fn dump(value: *const Value, writer: anytype, level: u32) @TypeOf(writer).Error!void {
-        switch (value.*) {
+    pub fn dump(val: *const Value, writer: anytype, level: u32) @TypeOf(writer).Error!void {
+        switch (val.ty) {
             .iterator, .spread => unreachable,
-            .int => |i| try writer.print("{}", .{i}),
-            .num => |n| try writer.print("{d}", .{n}),
-            .bool => |b| try writer.writeAll(if (b) "true" else "false"),
+            .int => try writer.print("{}", .{val.v.int}),
+            .num => try writer.print("{d}", .{val.v.num}),
+            .bool => try writer.writeAll(if (val.v.bool) "true" else "false"),
             .@"null" => try writer.writeAll("null"),
-            .range => |r| {
+            .range => {
+                const r = val.v.range;
                 try writer.print("{}:{}:{}", .{ r.start, r.end, r.step });
             },
-            .tuple => |t| {
+            .tuple => {
                 if (level == 0) {
                     try writer.writeAll("(...)");
                 } else {
                     try writer.writeByte('(');
-                    for (t) |v, i| {
+                    for (val.v.tuple) |v, i| {
                         if (i != 0) try writer.writeAll(", ");
                         try v.dump(writer, level - 1);
                     }
                     try writer.writeByte(')');
                 }
             },
-            .map => |m| {
+            .map => {
                 if (level == 0) {
                     try writer.writeAll("{...}");
                 } else {
                     try writer.writeByte('{');
                     var i: usize = 0;
-                    var iter = m.iterator();
+                    var iter = val.v.map.iterator();
                     while (iter.next()) |entry| : (i += 1) {
                         if (i != 0)
                             try writer.writeAll(", ");
@@ -444,43 +474,45 @@ pub const Value =union(Type) {
                     try writer.writeByte('}');
                 }
             },
-            .list => |l| {
+            .list => {
                 if (level == 0) {
                     try writer.writeAll("[...]");
                 } else {
                     try writer.writeByte('[');
-                    for (l.inner.items) |v, i| {
+                    for (val.v.list.inner.items) |v, i| {
                         if (i != 0) try writer.writeAll(", ");
                         try v.dump(writer, level - 1);
                     }
                     try writer.writeByte(']');
                 }
             },
-            .err => |e| {
+            .err => {
                 if (level == 0) {
                     try writer.writeAll("error(...)");
                 } else {
                     try writer.writeAll("error(");
-                    try e.dump(writer, level - 1);
+                    try val.v.err.dump(writer, level - 1);
                     try writer.writeByte(')');
                 }
             },
-            .str => |s| try s.dump(writer),
-            .func => |f| {
+            .str => try val.v.str.dump(writer),
+            .func => {
+                const f = val.v.func;
                 try writer.print("fn({})@0x{X}[{}]", .{ f.args(), f.body()[0], f.captures().len });
             },
-            .frame => |f| {
-                try writer.print("frame@x{X}", .{f.body[0]});
+            .frame => {
+                try writer.print("frame@x{X}", .{val.v.frame.body[0]});
             },
-            .native => |n| {
+            .native => {
+                const n = val.v.native;
                 try writer.print("native({})@0x{}", .{ n.arg_count, @ptrToInt(n.func) });
             },
-            .tagged => |t| {
-                try writer.print("@{s}", .{t.name});
+            .tagged => {
+                try writer.print("@{s}", .{val.v.tagged.name});
                 if (level == 0) {
                     try writer.writeAll("(...)");
                 } else {
-                    try t.value.dump(writer, level - 1);
+                    try val.v.tagged.value.dump(writer, level - 1);
                 }
             },
         }
@@ -488,63 +520,66 @@ pub const Value =union(Type) {
 
     /// Returns value in `container` at `index`.
     pub fn get(container: *const Value, ctx: Vm.Context, index: *const Value, res: *?*Value) NativeError!void {
-        switch (container.*) {
-            .tuple => |tuple| switch (index.*) {
+        switch (container.ty) {
+            .tuple => switch (index.ty) {
                 .int => {
-                    var i = index.int;
+                    var i = index.v.int;
                     if (i < 0)
-                        i += @intCast(i64, tuple.len);
-                    if (i < 0 or i >= tuple.len)
+                        i += @intCast(i64, container.v.tuple.len);
+                    if (i < 0 or i >= container.v.tuple.len)
                         return ctx.throw("index out of bounds");
 
-                    res.* = tuple[@intCast(u32, i)];
+                    res.* = container.v.tuple[@intCast(u32, i)];
                 },
-                .range => |r| {
-                    if (r.start < 0 or r.end > tuple.len)
+                .range => {
+                    const r = container.v.range;
+                    if (r.start < 0 or r.end > container.v.tuple.len)
                         return ctx.throw("index out of bounds");
 
-                    res.* = try ctx.vm.gc.alloc(.list);
-                    res.*.?.* = .{ .list = .{} };
-                    const res_list = &res.*.?.*.list;
+                    res.* = try ctx.vm.gc.alloc();
+                    res.*.?.* = Value.list();
+                    const res_list = &res.*.?.*.v.list;
                     try res_list.inner.ensureUnusedCapacity(ctx.vm.gc.gpa, r.count());
 
                     var it = r.iterator();
                     while (it.next()) |some| {
-                        res_list.inner.appendAssumeCapacity(tuple[@intCast(u32, some)]);
+                        res_list.inner.appendAssumeCapacity(container.v.tuple[@intCast(u32, some)]);
                     }
                 },
-                .str => |s| {
+                .str => {
                     if (res.* == null) {
-                        res.* = try ctx.vm.gc.alloc(.int);
+                        res.* = try ctx.vm.gc.alloc();
                     }
 
-                    if (mem.eql(u8, s.data, "len")) {
-                        res.*.?.* = .{ .int = @intCast(i64, tuple.len) };
+                    if (mem.eql(u8, index.v.str.data, "len")) {
+                        res.*.?.* = Value.int(@intCast(i64, container.v.tuple.len));
                     } else {
                         return ctx.throw("no such property");
                     }
                 },
                 else => return ctx.throw("invalid index type"),
             },
-            .list => |list| return list.get(ctx, index, res),
-            .map => |map| {
-                res.* = map.get(index) orelse
+            .list => return container.v.list.get(ctx, index, res),
+            .map => {
+                res.* = container.v.map.get(index) orelse
                     return ctx.throwFmt("no value associated with key: {}", .{index.*});
             },
-            .str => |str| return str.get(ctx, index, res),
+            .str => return container.v.str.get(ctx, index, res),
             .iterator => unreachable,
-            .range => |r| switch (index.*) {
-                .str => |s| {
+            .range => switch (index.ty) {
+                .str => {
+                    const r = container.v.range;
+                    const s = index.v.str.data;
                     if (res.* == null) {
-                        res.* = try ctx.vm.gc.alloc(.int);
+                        res.* = try ctx.vm.gc.alloc();
                     }
 
-                    if (mem.eql(u8, s.data, "start")) {
-                        res.*.?.* = .{ .int = r.start };
-                    } else if (mem.eql(u8, s.data, "end")) {
-                        res.*.?.* = .{ .int = r.end };
-                    } else if (mem.eql(u8, s.data, "step")) {
-                        res.*.?.* = .{ .int = r.step };
+                    if (mem.eql(u8, s, "start")) {
+                        res.*.?.* = Value.int(r.start);
+                    } else if (mem.eql(u8, s, "end")) {
+                        res.*.?.* = Value.int(r.end);
+                    } else if (mem.eql(u8, s, "step")) {
+                        res.*.?.* = Value.int(r.step);
                     } else {
                         return ctx.throw("no such property");
                     }
@@ -557,33 +592,34 @@ pub const Value =union(Type) {
 
     /// Sets index of container to value. Does a shallow copy if value stored.
     pub fn set(container: *Value, ctx: Vm.Context, index: *const Value, new_val: *Value) NativeError!void {
-        switch (container.*) {
-            .tuple => |tuple| switch (index.*) {
+        switch (container.ty) {
+            .tuple => switch (index.ty) {
                 .int => {
-                    var i = index.int;
+                    var i = index.v.int;
                     if (i < 0)
-                        i += @intCast(i64, tuple.len);
-                    if (i < 0 or i >= tuple.len)
+                        i += @intCast(i64, container.v.tuple.len);
+                    if (i < 0 or i >= container.v.tuple.len)
                         return ctx.throw("index out of bounds");
 
-                    tuple[@intCast(u32, i)] = new_val;
+                    container.v.tuple[@intCast(u32, i)] = new_val;
                 },
-                .range => |r| {
-                    if (r.start < 0 or r.end > tuple.len)
+                .range => {
+                    const r = index.v.range;
+                    if (r.start < 0 or r.end > container.v.tuple.len)
                         return ctx.throw("index out of bounds");
 
                     var it = r.iterator();
                     while (it.next()) |some| {
-                        tuple[@intCast(u32, some)] = new_val;
+                        container.v.tuple[@intCast(u32, some)] = new_val;
                     }
                 },
                 else => return ctx.throw("invalid index type"),
             },
-            .map => |*map| {
-                _ = try map.put(ctx.vm.gc.gpa, try ctx.vm.gc.dupe(index), new_val);
+            .map => {
+                _ = try container.v.map.put(ctx.vm.gc.gpa, try ctx.vm.gc.dupe(index), new_val);
             },
-            .list => |*list| try list.set(ctx, index, new_val),
-            .str => |*str| try str.set(ctx, index, new_val),
+            .list => try container.v.list.set(ctx, index, new_val),
+            .str => try container.v.str.set(ctx, index, new_val),
             .iterator => unreachable,
             else => return ctx.throw("invalid subscript type"),
         }
@@ -594,54 +630,50 @@ pub const Value =union(Type) {
         if (type_id == .@"null") {
             return Value.Null;
         }
-        if (val.* == type_id) {
+        if (val.ty == type_id) {
             return val;
         }
 
-        if (val.* == .str) {
-            return val.str.as(ctx, type_id);
+        if (val.ty == .str) {
+            return val.v.str.as(ctx, type_id);
         } else if (type_id == .str) {
             return String.from(val, ctx.vm);
         }
 
-        if (val.* == .list) {
-            return val.list.as(ctx, type_id);
+        if (val.ty == .list) {
+            return val.v.list.as(ctx, type_id);
         } else if (type_id == .list) {
             return List.from(val, ctx);
         }
 
         if (type_id == .bool) {
-            const bool_res = switch (val.*) {
-                .int => |int| int != 0,
-                .num => |num| num != 0,
+            const bool_res = switch (val.ty) {
+                .int => val.v.int != 0,
+                .num => val.v.num != 0,
                 .bool => unreachable,
                 .str => unreachable,
-                else => return ctx.throwFmt("cannot cast {} to bool", .{val.ty()}),
+                else => return ctx.throwFmt("cannot cast {s} to bool", .{val.typeName()}),
             };
 
             return if (bool_res) Value.True else Value.False;
         }
 
-        const new_val = try ctx.vm.gc.alloc(type_id);
+        const new_val = try ctx.vm.gc.alloc();
         new_val.* = switch (type_id) {
-            .int => .{
-                .int = switch (val.*) {
-                    .int => unreachable,
-                    .num => |num| std.math.lossyCast(i64, num),
-                    .bool => |b| @boolToInt(b),
-                    .str => unreachable,
-                    else => return ctx.throwFmt("cannot cast {} to int", .{val.ty()}),
-                },
-            },
-            .num => .{
-                .num = switch (val.*) {
-                    .num => unreachable,
-                    .int => |int| @intToFloat(f64, int),
-                    .bool => |b| @intToFloat(f64, @boolToInt(b)),
-                    .str => unreachable,
-                    else => return ctx.throwFmt("cannot cast {} to num", .{val.ty()}),
-                },
-            },
+            .int => Value.int(switch (val.ty) {
+                .int => unreachable,
+                .num => std.math.lossyCast(i64, val.v.num),
+                .bool => @boolToInt(val.v.bool),
+                .str => unreachable,
+                else => return ctx.throwFmt("cannot cast {s} to int", .{val.typeName()}),
+            }),
+            .num => Value.num(switch (val.ty) {
+                .num => unreachable,
+                .int => @intToFloat(f64, val.v.int),
+                .bool => @intToFloat(f64, @boolToInt(val.v.bool)),
+                .str => unreachable,
+                else => return ctx.throwFmt("cannot cast {s} to num", .{val.typeName()}),
+            }),
             .str, .list, .bool, .@"null" => unreachable,
             .tuple, .map => return ctx.frame.fatal(ctx.vm, "TODO cast to tuple/map"),
             else => unreachable,
@@ -650,28 +682,29 @@ pub const Value =union(Type) {
     }
 
     pub fn is(val: *const Value, type_id: Type) bool {
-        if (val.* == type_id) return true;
-        if (type_id == .func and val.* == .native) return true;
+        if (val.ty == type_id) return true;
+        if (type_id == .func and val.ty == .native) return true;
         return false;
     }
 
     /// Returns whether `container` has `val` in it.
     pub fn in(val: *const Value, container: *const Value) bool {
-        switch (container.*) {
-            .str => |str| return str.in(val),
-            .tuple => |tuple| {
-                for (tuple) |v| {
+        switch (container.ty) {
+            .str => return val.v.str.in(val),
+            .tuple => {
+                for (val.v.tuple) |v| {
                     if (v.eql(val)) return true;
                 }
                 return false;
             },
-            .list => |list| return list.in(val),
-            .map => |map| return map.contains(val),
-            .range => |r| {
-                if (val.* != .int) return false;
-                const int = val.int;
-                if (int < r.start or int > r.end) return false;
-                if (@rem(int - r.start, r.step) != 0) return false;
+            .list => return val.v.list.in(val),
+            .map => return val.v.map.contains(val),
+            .range => {
+                const r = val.v.range;
+                if (val.ty != .int) return false;
+                const i = val.v.int;
+                if (i < r.start or i > r.end) return false;
+                if (@rem(i - r.start, r.step) != 0) return false;
                 return true;
             },
             .iterator => unreachable,
@@ -681,19 +714,19 @@ pub const Value =union(Type) {
 
     pub fn iterator(val: *const Value, ctx: Vm.Context) NativeError!*Value {
         var start: ?i64 = null;
-        switch (val.*) {
-            .range => |r| start = r.start,
+        switch (val.ty) {
+            .range => start = val.v.range.start,
             .str, .tuple, .list, .map => {},
             .iterator => unreachable,
-            else => return ctx.throwFmt("cannot iterate {}", .{val.ty()}),
+            else => return ctx.throwFmt("cannot iterate {s}", .{val.typeName()}),
         }
-        const iter = try ctx.vm.gc.alloc(.iterator);
-        iter.* = .{
+        const iter = try ctx.vm.gc.alloc();
+        iter.* = .{ .ty = .iterator, .v = .{
             .iterator = .{
                 .value = try ctx.vm.gc.dupe(val),
             },
-        };
-        if (start) |some| iter.iterator.i.i = some;
+        } };
+        if (start) |some| iter.v.iterator.i.i = some;
         return iter;
     }
 
@@ -708,19 +741,14 @@ pub const Value =union(Type) {
             bool => return if (val) Value.True else Value.False,
             *Value => return val,
             Value => {
-                const ret = try vm.gc.alloc(val);
+                const ret = try vm.gc.alloc();
                 ret.* = val;
                 return ret;
             },
             []const u8, []u8 => {
                 // assume val was allocated with vm.gc
-                const str = try vm.gc.alloc(.str);
+                const str = try vm.gc.alloc();
                 str.* = Value.string(val);
-                return str;
-            },
-            String => {
-                const str = try vm.gc.alloc(.str);
-                str.* = Value{ .str = val };
                 return str;
             },
             type => switch (@typeInfo(val)) {
@@ -730,9 +758,9 @@ pub const Value =union(Type) {
                         if (decl.is_pub) pub_decls += 1;
                     }
 
-                    const res = try vm.gc.alloc(.map);
-                    res.* = .{ .map = .{} };
-                    try res.map.ensureTotalCapacity(vm.gc.gpa, pub_decls);
+                    const res = try vm.gc.alloc();
+                    res.* = Value.map();
+                    try res.v.map.ensureTotalCapacity(vm.gc.gpa, pub_decls);
 
                     inline for (info.decls) |decl| {
                         if (!decl.is_pub) continue;
@@ -741,14 +769,14 @@ pub const Value =union(Type) {
                         if (comptime std.mem.eql(u8, decl.name, "fromBog")) continue;
                         if (comptime std.mem.eql(u8, decl.name, "format")) continue;
 
-                        const key = try vm.gc.alloc(.str);
+                        const key = try vm.gc.alloc();
                         key.* = Value.string(decl.name);
 
                         const value = if (@typeInfo(@TypeOf(@field(val, decl.name))) == .Fn)
                             try zigFnToBog(vm, @field(val, decl.name))
                         else
                             try zigToBog(vm, @field(val, decl.name));
-                        res.map.putAssumeCapacityNoClobber(key, value);
+                        res.v.map.putAssumeCapacityNoClobber(key, value);
                     }
 
                     return res;
@@ -756,49 +784,32 @@ pub const Value =union(Type) {
                 else => @compileError("unsupported type: " ++ @typeName(val)),
             },
             else => switch (@typeInfo(@TypeOf(val))) {
-                .Pointer => |info| {
-                    if (info.size == .Slice) @compileError("unsupported type: " ++ @typeName(val));
-                    const int = try vm.gc.alloc(.int);
-                    int.* = .{
-                        .int = @bitCast(isize, @ptrToInt(val)),
-                    };
-                    return int;
-                },
                 .Fn => @compileError("use zigFnToBog"),
                 .ComptimeInt, .Int => {
-                    const int = try vm.gc.alloc(.int);
-                    int.* = .{
-                        // try to implicit cast the value
-                        .int = val,
-                    };
-                    return int;
+                    const res = try vm.gc.alloc();
+                    // try to implicit cast the value
+                    res.* = Value.int(val);
+                    return res;
                 },
                 .ComptimeFloat, .Float => {
-                    const num = try vm.gc.alloc(.num);
-                    num.* = .{
-                        // try to implicit cast the value
-                        .num = val,
-                    };
-                    return num;
+                    const res = try vm.gc.alloc();
+                    // try to implicit cast the value
+                    res.* = Value.num(val);
+                    return res;
                 },
                 .ErrorUnion => if (val) |some| {
                     return zigToBog(vm, some);
                 } else |e| {
                     // wrap error string
-                    const str = try vm.gc.alloc(.str);
+                    const str = try vm.gc.alloc();
                     str.* = Value.string(@errorName(e));
-                    const err = try vm.gc.alloc(.err);
-                    err.* = .{ .err = str };
-                    return err;
+                    const res = try vm.gc.alloc();
+                    res.* = Value.err(str);
+                    return res;
                 },
                 .Enum => {
-                    const tag = try vm.gc.alloc(.tagged);
-                    tag.* = .{
-                        .tagged = .{
-                            .name = @tagName(val),
-                            .value = Value.Null,
-                        },
-                    };
+                    const tag = try vm.gc.alloc();
+                    tag.* = Value.tagged(@tagName(val), Value.Null);
                     return tag;
                 },
                 .Optional => if (val) |some| {
@@ -865,7 +876,7 @@ pub const Value =union(Type) {
                     },
                     .ErrorUnion => if (res) |val| {
                         return Value.zigToBog(ctx.vm, val);
-                    } else |err| switch (@as(anyerror, err)) {
+                    } else |er| switch (@as(anyerror, er)) {
                         error.FatalError, error.Throw => |e| return e,
                         else => return Value.zigToBog(ctx.vm, res),
                     },
@@ -886,14 +897,14 @@ pub const Value =union(Type) {
             }
         };
 
-        const native = try vm.gc.alloc(.native);
-        native.* = .{
+        const native = try vm.gc.alloc();
+        native.* = .{ .ty = .native, .v = .{
             .native = .{
                 .arg_count = bog_arg_count,
                 .variadic = variadic,
                 .func = S.native,
             },
-        };
+        } };
         return native;
     }
 
@@ -906,71 +917,72 @@ pub const Value =union(Type) {
 
         return switch (T) {
             void => {
-                if (val.* != .@"null")
+                if (val.ty != .@"null")
                     return ctx.throw("expected a null");
             },
             bool => {
-                if (val.* != .bool)
+                if (val.ty != .bool)
                     return ctx.throw("expected a bool");
-                return val.bool;
+                return val.v.bool;
             },
             []const u8 => {
-                if (val.* != .str)
+                if (val.ty != .str)
                     return ctx.throw("expected a string");
-                return val.str.data;
+                return val.v.str.data;
             },
             *Map, *const Map => {
-                if (val.* != .map)
+                if (val.ty != .map)
                     return ctx.throw("expected a map");
-                return &val.map;
+                return &val.v.map;
             },
             *List, *const List => {
-                if (val.* != .list)
+                if (val.ty != .list)
                     return ctx.throw("expected a list");
-                return &val.list;
+                return &val.v.list;
             },
             *Value, *const Value => val,
             *String, *const String => {
-                if (val.* != .str)
+                if (val.ty != .str)
                     return ctx.throw("expected a string");
-                return &val.str;
+                return &val.v.str;
             },
             []*Value, []const *Value, []*const Value, []const *const Value => {
-                switch (val.*) {
-                    .tuple => |t| return t,
-                    .list => |*l| return l.items,
+                switch (val.ty) {
+                    .tuple => return val.v.tuple,
+                    .list => return val.v.list.inner.items,
                     else => return ctx.throw("expected a list or a tuple"),
                 }
             },
             else => switch (@typeInfo(T)) {
-                .Int => switch (val.*) {
-                    .int => |int| {
-                        if (int < std.math.minInt(T) or int > std.math.maxInt(T))
+                .Int => switch (val.ty) {
+                    .int => {
+                        const i = val.v.int;
+                        if (i < std.math.minInt(T) or i > std.math.maxInt(T))
                             return ctx.throw("cannot fit int in desired type");
-                        return @intCast(T, int);
+                        return @intCast(T, i);
                     },
-                    .num => |num| std.math.lossyCast(T, num),
+                    .num => std.math.lossyCast(T, val.v.num),
                     else => return ctx.throw("expected int"),
                 },
                 .Float => |info| switch (info.bits) {
-                    32 => switch (val.*) {
-                        .num => |num| @floatCast(f32, num),
-                        .int => |int| @intToFloat(f32, int),
+                    32 => switch (val.ty) {
+                        .num => @floatCast(f32, val.v.num),
+                        .int => @intToFloat(f32, val.v.int),
                         else => return ctx.throw("expected num"),
                     },
-                    64 => switch (val.*) {
-                        .num => |num| num,
-                        .int => |int| @intToFloat(f64, int),
+                    64 => switch (val.ty) {
+                        .num => val.v.num,
+                        .int => @intToFloat(f64, val.v.int),
                         else => return ctx.throw("expected num"),
                     },
                     else => @compileError("unsupported float"),
                 },
                 .Enum => {
-                    if (val.* != .tagged)
+                    if (val.ty != .tagged)
                         return ctx.throw("expected tag");
-                    const e = std.meta.stringToEnum(T, val.tagged.name) orelse
+                    const e = std.meta.stringToEnum(T, val.v.tagged.name) orelse
                         return ctx.throw("no value by such name");
-                    if (val.tagged.value.* != .@"null")
+                    if (val.v.tagged.value.ty != .@"null")
                         return ctx.throw("expected no value");
                     return e;
                 },
@@ -980,28 +992,28 @@ pub const Value =union(Type) {
     }
 
     pub fn jsonStringify(val: *const Value, options: std.json.StringifyOptions, writer: anytype) @TypeOf(writer).Error!void {
-        switch (val.*) {
+        switch (val.ty) {
             .@"null" => try writer.writeAll("null"),
-            .tuple => |t| {
+            .tuple => {
                 try writer.writeByte('[');
-                for (t) |e, i| {
+                for (val.v.tuple) |e, i| {
                     if (i != 0) try writer.writeByte(',');
                     try e.jsonStringify(options, writer);
                 }
                 try writer.writeByte(']');
             },
-            .list => |*l| {
+            .list => {
                 try writer.writeByte('[');
-                for (l.inner.items) |e, i| {
+                for (val.v.list.inner.items) |e, i| {
                     if (i != 0) try writer.writeByte(',');
                     try e.jsonStringify(options, writer);
                 }
                 try writer.writeByte(']');
             },
-            .map => |*m| {
+            .map => {
                 try writer.writeByte('{');
                 var i: usize = 0;
-                var iter = m.iterator();
+                var iter = val.v.map.iterator();
                 while (iter.next()) |entry| : (i += 1) {
                     if (i != 0)
                         try writer.writeAll(", ");
@@ -1017,8 +1029,8 @@ pub const Value =union(Type) {
             .num,
             .bool,
             => try val.dump(writer, 0),
-            .str => |s| {
-                try writer.print("\"{}\"", .{std.zig.fmtEscapes(s.data)});
+            .str => {
+                try writer.print("\"{}\"", .{std.zig.fmtEscapes(val.v.str.data)});
             },
             .native,
             .func,

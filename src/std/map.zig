@@ -6,10 +6,10 @@ const Vm = bog.Vm;
 /// Creates a list of the maps keys
 pub fn keys(ctx: Vm.Context, map: *const Value.Map) !*Value {
     const gc = &ctx.vm.gc;
-    var ret = try gc.alloc(.list);
-    ret.* = .{ .list = .{} };
-    try ret.list.inner.resize(gc.gpa, map.count());
-    const items = ret.list.inner.items;
+    var ret = try gc.alloc();
+    ret.* = Value.list();
+    try ret.v.list.inner.resize(gc.gpa, map.count());
+    const items = ret.v.list.inner.items;
 
     var i: usize = 0;
     var iter = map.iterator();
@@ -23,10 +23,10 @@ pub fn keys(ctx: Vm.Context, map: *const Value.Map) !*Value {
 /// Creates a list of the maps values
 pub fn values(ctx: Vm.Context, map: *const Value.Map) !*Value {
     const gc = &ctx.vm.gc;
-    var ret = try gc.alloc(.list);
-    ret.* = .{ .list = .{} };
-    try ret.list.inner.resize(gc.gpa, map.count());
-    const items = ret.list.inner.items;
+    var ret = try gc.alloc();
+    ret.* = Value.list();
+    try ret.v.list.inner.resize(gc.gpa, map.count());
+    const items = ret.v.list.inner.items;
 
     var i: usize = 0;
     var iter = map.iterator();
@@ -40,22 +40,22 @@ pub fn values(ctx: Vm.Context, map: *const Value.Map) !*Value {
 /// Creates a list of kv pairs
 pub fn entries(ctx: Vm.Context, map: *const Value.Map) !*Value {
     const gc = &ctx.vm.gc;
-    var ret = try ctx.vm.gc.alloc(.list);
-    ret.* = .{ .list = .{} };
-    try ret.list.inner.resize(gc.gpa, map.count());
-    const items = ret.list.inner.items;
+    var ret = try ctx.vm.gc.alloc();
+    ret.* = Value.list();
+    try ret.v.list.inner.resize(gc.gpa, map.count());
+    const items = ret.v.list.inner.items;
 
     var i: usize = 0;
     var iter = map.iterator();
     while (iter.next()) |e| : (i += 1) {
-        var entry = try gc.alloc(.map);
-        entry.* = .{ .map = .{} };
-        try entry.map.ensureTotalCapacity(gc.gpa, 2);
+        var entry = try gc.alloc();
+        entry.* = Value.map();
+        try entry.v.map.ensureTotalCapacity(gc.gpa, 2);
 
         const val_str = Value.string("value");
         const key_str = Value.string("key");
-        entry.map.putAssumeCapacityNoClobber(try gc.dupe(&key_str), try gc.dupe(e.key_ptr.*));
-        entry.map.putAssumeCapacityNoClobber(try gc.dupe(&val_str), try gc.dupe(e.value_ptr.*));
+        entry.v.map.putAssumeCapacityNoClobber(try gc.dupe(&key_str), try gc.dupe(e.key_ptr.*));
+        entry.v.map.putAssumeCapacityNoClobber(try gc.dupe(&val_str), try gc.dupe(e.value_ptr.*));
 
         items[i] = entry;
     }

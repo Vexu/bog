@@ -25,6 +25,13 @@ pub const Builder = struct {
         };
     }
 
+    pub fn finishValue(b: Builder) Value {
+        return .{ .ty = .str, .v = .{ .str = .{
+            .data = b.inner.items,
+            .capacity = b.inner.capacity,
+        } } };
+    }
+
     pub fn cancel(b: *Builder) void {
         b.inner.deinit();
         b.* = undefined;
@@ -79,18 +86,19 @@ pub fn dump(str: String, writer: anytype) !void {
 }
 
 pub fn get(str: *const String, ctx: Vm.Context, index: *const Value, res: *?*Value) Value.NativeError!void {
-    switch (index.*) {
+    switch (index.ty) {
         .int => return ctx.frame.fatal(ctx.vm, "TODO str get int"),
         .range => return ctx.frame.fatal(ctx.vm, "TODO str get with ranges"),
-        .str => |*s| {
+        .str => {
+            const s = index.v.str.data;
             if (res.* == null) {
-                res.* = try ctx.vm.gc.alloc(.int);
+                res.* = try ctx.vm.gc.alloc();
             }
 
-            if (mem.eql(u8, s.data, "len")) {
-                res.*.?.* = .{ .int = @intCast(i64, str.data.len) };
+            if (mem.eql(u8, s, "len")) {
+                res.*.?.* = Value.int(@intCast(i64, str.data.len));
             } else inline for (@typeInfo(methods).Struct.decls) |method| {
-                if (mem.eql(u8, s.data, method.name)) {
+                if (mem.eql(u8, s, method.name)) {
                     res.* = try Value.zigFnToBog(ctx.vm, @field(methods, method.name));
                     return;
                 }
@@ -166,13 +174,13 @@ pub const methods = struct {
 
                     switch (fmt_type) {
                         'x', 'X' => {
-                            if (args.t[arg_i].* != .int) {
-                                return ctx.throwFmt("'x' takes an integer as an argument, got '{}'", .{args.t[arg_i].ty()});
+                            if (args.t[arg_i].ty != .int) {
+                                return ctx.throwFmt("'x' takes an integer as an argument, got '{s}'", .{args.t[arg_i].typeName()});
                             }
-                            try std.fmt.formatInt(args.t[arg_i].int, 16, @intToEnum(std.fmt.Case, @boolToInt(fmt[0] == 'X')), options, w);
+                            try std.fmt.formatInt(args.t[arg_i].v.int, 16, @intToEnum(std.fmt.Case, @boolToInt(fmt[0] == 'X')), options, w);
                         },
-                        0 => if (args.t[arg_i].* == .str) {
-                            try b.append(args.t[arg_i].str.data);
+                        0 => if (args.t[arg_i].ty == .str) {
+                            try b.append(args.t[arg_i].v.str.data);
                         } else {
                             try args.t[arg_i].dump(w, default_dump_depth);
                         },
@@ -190,14 +198,14 @@ pub const methods = struct {
             return ctx.throw("unused arguments");
         }
 
-        const ret = try ctx.vm.gc.alloc(.str);
-        ret.* = Value{ .str = b.finish() };
+        const ret = try ctx.vm.gc.alloc();
+        ret.* = b.finishValue();
         return ret;
     }
 
     pub fn join(str: Value.This([]const u8), ctx: Vm.Context, strs: Value.Variadic([]const u8)) !*Value {
         if (strs.t.len == 0) {
-            const ret = try ctx.vm.gc.alloc(.str);
+            const ret = try ctx.vm.gc.alloc();
             ret.* = Value.string("");
             return ret;
         }
@@ -215,8 +223,8 @@ pub const methods = struct {
             b.inner.appendSliceAssumeCapacity(arg);
         }
 
-        const ret = try ctx.vm.gc.alloc(.str);
-        ret.* = Value{ .str = b.finish() };
+        const ret = try ctx.vm.gc.alloc();
+        ret.* = b.finishValue();
         return ret;
     }
 };
@@ -240,16 +248,12 @@ pub fn as(str: *String, ctx: Vm.Context, type_id: Type) Value.NativeError!*Value
             return ctx.throw("cannot cast string to bool");
     }
 
-    const new_val = try ctx.vm.gc.alloc(type_id);
+    const new_val = try ctx.vm.gc.alloc();
     new_val.* = switch (type_id) {
-        .int => .{
-            .int = std.fmt.parseInt(i64, str.data, 0) catch |err|
-                return ctx.throwFmt("cannot cast string to int: {s}", .{@errorName(err)}),
-        },
-        .num => .{
-            .num = std.fmt.parseFloat(f64, str.data) catch |err|
-                return ctx.throwFmt("cannot cast string to num: {s}", .{@errorName(err)}),
-        },
+        .int => Value.int(std.fmt.parseInt(i64, str.data, 0) catch |err|
+            return ctx.throwFmt("cannot cast string to int: {s}", .{@errorName(err)})),
+        .num => Value.num(std.fmt.parseFloat(f64, str.data) catch |err|
+            return ctx.throwFmt("cannot cast string to num: {s}", .{@errorName(err)})),
         .bool => unreachable,
         .str => unreachable, // already string
         .tuple,
@@ -262,7 +266,7 @@ pub fn as(str: *String, ctx: Vm.Context, type_id: Type) Value.NativeError!*Value
 }
 
 pub fn from(val: *Value, vm: *Vm) Vm.Error!*Value {
-    const str = try vm.gc.alloc(.str);
+    const str = try vm.gc.alloc();
 
     if (val == Value.Null) {
         str.* = Value.string("null");
@@ -273,12 +277,12 @@ pub fn from(val: *Value, vm: *Vm) Vm.Error!*Value {
     } else {
         var b = builder(vm.gc.gpa);
         try val.dump(b.writer(), default_dump_depth);
-        str.* = .{ .str = b.finish() };
+        str.* = b.finishValue();
     }
     return str;
 }
 
 pub fn in(str: *const String, val: *const Value) bool {
-    if (val.* != .str) return false;
-    return mem.indexOf(u8, str.data, val.str.data) != null;
+    if (val.ty != .str) return false;
+    return mem.indexOf(u8, str.data, val.v.str.data) != null;
 }

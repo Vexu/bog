@@ -24,9 +24,9 @@ pub fn eql(a: List, b: List) bool {
 }
 
 pub fn get(list: *const List, ctx: Vm.Context, index: *const Value, res: *?*Value) Value.NativeError!void {
-    switch (index.*) {
+    switch (index.ty) {
         .int => {
-            var i = index.int;
+            var i = index.v.int;
             if (i < 0)
                 i += @intCast(i64, list.inner.items.len);
             if (i < 0 or i >= list.inner.items.len)
@@ -34,13 +34,14 @@ pub fn get(list: *const List, ctx: Vm.Context, index: *const Value, res: *?*Valu
 
             res.* = list.inner.items[@intCast(u32, i)];
         },
-        .range => |r| {
+        .range => {
+            const r = index.v.range;
             if (r.start < 0 or r.end > list.inner.items.len)
                 return ctx.throw("index out of bounds");
 
-            res.* = try ctx.vm.gc.alloc(.list);
-            res.*.?.* = .{ .list = .{} };
-            const res_list = &res.*.?.*.list;
+            res.* = try ctx.vm.gc.alloc();
+            res.*.?.* = Value.list();
+            const res_list = &res.*.?.*.v.list;
             try res_list.inner.ensureUnusedCapacity(ctx.vm.gc.gpa, r.count());
 
             var it = r.iterator();
@@ -48,15 +49,16 @@ pub fn get(list: *const List, ctx: Vm.Context, index: *const Value, res: *?*Valu
                 res_list.inner.appendAssumeCapacity(list.inner.items[@intCast(u32, some)]);
             }
         },
-        .str => |s| {
+        .str => {
+            const s = index.v.str.data;
             if (res.* == null) {
-                res.* = try ctx.vm.gc.alloc(.int);
+                res.* = try ctx.vm.gc.alloc();
             }
 
-            if (mem.eql(u8, s.data, "len")) {
-                res.*.?.* = .{ .int = @intCast(i64, list.inner.items.len) };
+            if (mem.eql(u8, s, "len")) {
+                res.*.?.* = Value.int(@intCast(i64, list.inner.items.len));
             } else inline for (@typeInfo(methods).Struct.decls) |method| {
-                if (mem.eql(u8, s.data, method.name)) {
+                if (mem.eql(u8, s, method.name)) {
                     res.* = try Value.zigFnToBog(ctx.vm, @field(methods, method.name));
                     return;
                 }
@@ -75,9 +77,9 @@ pub const methods = struct {
 };
 
 pub fn set(list: *List, ctx: Vm.Context, index: *const Value, new_val: *Value) Value.NativeError!void {
-    switch (index.*) {
+    switch (index.ty) {
         .int => {
-            var i = index.int;
+            var i = index.v.int;
             if (i < 0)
                 i += @intCast(i64, list.inner.items.len);
             if (i < 0 or i >= list.inner.items.len)
@@ -85,7 +87,8 @@ pub fn set(list: *List, ctx: Vm.Context, index: *const Value, new_val: *Value) V
 
             list.inner.items[@intCast(u32, i)] = new_val;
         },
-        .range => |r| {
+        .range => {
+            const r = index.v.range;
             if (r.start < 0 or r.end > list.inner.items.len)
                 return ctx.throw("index out of bounds");
 

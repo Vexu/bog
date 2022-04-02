@@ -80,20 +80,20 @@ pub const Frame = struct {
         f.* = undefined;
     }
 
-    pub fn newVal(f: *Frame, vm: *Vm, ref: Ref, ty: Type) !*Value {
+    pub fn newVal(f: *Frame, vm: *Vm, ref: Ref) !*Value {
         const res = try f.newRef(vm, ref);
         if (res.*) |some| {
             // attempt to use old value for better performance in loops
-            switch (some.*) {
+            switch (some.ty) {
                 // simple values can be reused
                 .int, .num, .range, .native => return some,
                 // if string doesn't own it's contents it can be reused
-                .str => |s| if (s.capacity == 0) return some,
+                .str => if (some.v.str.capacity == 0) return some,
                 else => {},
             }
         }
         // allocate a new value if previous cannot be used or there isn't one
-        res.* = try vm.gc.alloc(ty);
+        res.* = try vm.gc.alloc();
         return res.*.?;
     }
 
@@ -123,9 +123,9 @@ pub const Frame = struct {
     pub inline fn valDupeSimple(f: *Frame, vm: *Vm, ref: Ref) !*Value {
         const old = f.val(ref);
         // do the opposite of newVal in case the value is added to an aggregate
-        switch (old.*) {
+        switch (old.ty) {
             .int, .num, .range, .native => {},
-            .str => |s| if (s.capacity != 0) return old,
+            .str => if (old.v.str.capacity != 0) return old,
             else => return old,
         }
         return vm.gc.dupe(old);
@@ -133,16 +133,16 @@ pub const Frame = struct {
 
     pub fn int(f: *Frame, vm: *Vm, ref: Ref) !?i64 {
         const res = f.val(ref);
-        if (res.* != .int) {
+        if (res.ty != .int) {
             try f.throw(vm, "expected an integer");
             return null;
         }
-        return res.int;
+        return res.v.int;
     }
 
     pub fn num(f: *Frame, vm: *Vm, ref: Ref) !?*Value {
         const res = f.val(ref);
-        switch (res.*) {
+        switch (res.ty) {
             .int, .num => return res,
             else => {
                 try f.throw(vm, "expected a number");
@@ -153,11 +153,11 @@ pub const Frame = struct {
 
     pub fn @"bool"(f: *Frame, vm: *Vm, ref: Ref) !?bool {
         const res = f.val(ref);
-        if (res.* != .bool) {
+        if (res.ty != .bool) {
             try f.throw(vm, "expected a bool");
             return null;
         }
-        return res.bool;
+        return res.v.bool;
     }
 
     pub fn ctx(f: *Frame, vm: *Vm) Context {
@@ -290,9 +290,9 @@ pub fn compileAndRun(vm: *Vm, file_path: []const u8) !*Value {
 
     vm.gc.stack_protect_start = @frameAddress();
 
-    var frame_val = try vm.gc.alloc(.frame);
-    frame_val.* = .{ .frame = &frame };
-    defer frame_val.* = .{ .int = 0 }; // clear frame
+    var frame_val = try vm.gc.alloc();
+    frame_val.* = Value.frame(&frame);
+    defer frame_val.* = Value.int(0); // clear frame
 
     return vm.run(&frame);
 }
@@ -319,17 +319,17 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 };
             },
             .int => {
-                const res = try f.newVal(vm, ref, .int);
+                const res = try f.newVal(vm, ref);
 
-                res.* = .{ .int = data[inst].int };
+                res.* = Value.int(data[inst].int);
             },
             .num => {
-                const res = try f.newVal(vm, ref, .num);
+                const res = try f.newVal(vm, ref);
 
-                res.* = .{ .num = data[inst].num };
+                res.* = Value.num(data[inst].num);
             },
             .str => {
-                const res = try f.newVal(vm, ref, .str);
+                const res = try f.newVal(vm, ref);
 
                 const str = mod.strings[data[inst].str.offset..][0..data[inst].str.len];
                 res.* = Value.string(str);
@@ -339,27 +339,28 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
 
                 var len: usize = 0;
                 for (items) |item_ref| {
-                    switch (f.val(item_ref).*) {
-                        .spread => |spread| len += spread.len(),
+                    const val = f.val(item_ref);
+                    switch (val.ty) {
+                        .spread => len += val.v.spread.len(),
                         else => len += 1,
                     }
                 }
-                const res = try f.newVal(vm, ref, .tuple);
-                res.* = .{ .tuple = try vm.gc.gpa.alloc(*Value, len) };
+                const res = try f.newVal(vm, ref);
+                res.* = Value.tuple(try vm.gc.gpa.alloc(*Value, len));
 
                 var i: usize = 0;
                 for (items) |item_ref| {
                     const val = try f.valDupeSimple(vm, item_ref);
-                    switch (val.*) {
-                        .spread => |spread| {
-                            const spread_items = spread.items();
+                    switch (val.ty) {
+                        .spread => {
+                            const spread_items = val.v.spread.items();
                             for (spread_items) |item| {
-                                res.tuple[i] = item;
+                                res.v.tuple[i] = item;
                                 i += 1;
                             }
                         },
                         else => {
-                            res.tuple[i] = val;
+                            res.v.tuple[i] = val;
                             i += 1;
                         },
                     }
@@ -370,68 +371,66 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
 
                 var len: usize = 0;
                 for (items) |item_ref| {
-                    switch (f.val(item_ref).*) {
-                        .spread => |spread| len += spread.len(),
+                    const val = f.val(item_ref);
+                    switch (val.ty) {
+                        .spread => len += val.v.spread.len(),
                         else => len += 1,
                     }
                 }
 
-                const res = try f.newVal(vm, ref, .list);
-                res.* = .{ .list = .{} };
-                try res.list.inner.ensureUnusedCapacity(vm.gc.gpa, len);
+                const res = try f.newVal(vm, ref);
+                res.* = Value.list();
+                try res.v.list.inner.ensureUnusedCapacity(vm.gc.gpa, len);
 
                 for (items) |item_ref| {
                     const val = try f.valDupeSimple(vm, item_ref);
-                    switch (val.*) {
-                        .spread => |spread| res.list.inner.appendSliceAssumeCapacity(spread.items()),
-                        else => res.list.inner.appendAssumeCapacity(val),
+                    switch (val.ty) {
+                        .spread => res.v.list.inner.appendSliceAssumeCapacity(val.v.spread.items()),
+                        else => res.v.list.inner.appendAssumeCapacity(val),
                     }
                 }
             },
             .build_map => {
                 const items = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
 
-                const res = try f.newVal(vm, ref, .map);
-                res.* = .{ .map = .{} };
+                const res = try f.newVal(vm, ref);
+                res.* = Value.map();
 
-                try res.map.ensureUnusedCapacity(vm.gc.gpa, @intCast(u32, items.len));
+                try res.v.map.ensureUnusedCapacity(vm.gc.gpa, @intCast(u32, items.len));
 
                 var map_i: u32 = 0;
                 while (map_i < items.len) : (map_i += 2) {
                     const key = try f.valDupeSimple(vm, items[map_i]);
                     const val = try f.valDupeSimple(vm, items[map_i + 1]);
-                    res.map.putAssumeCapacity(key, val);
+                    res.v.map.putAssumeCapacity(key, val);
                 }
             },
             .build_error => {
-                const res = try f.newVal(vm, ref, .err);
+                const res = try f.newVal(vm, ref);
                 const arg = try f.valDupeSimple(vm, data[inst].un);
 
-                res.* = .{ .err = try vm.gc.dupe(arg) };
+                res.* = Value.err(arg);
             },
             .build_error_null => {
-                const res = try f.newVal(vm, ref, .err);
-                res.* = .{ .err = Value.Null };
+                const res = try f.newVal(vm, ref);
+                res.* = Value.err(Value.Null);
             },
             .build_tagged => {
-                const res = try f.newVal(vm, ref, .tagged);
+                const res = try f.newVal(vm, ref);
                 const arg = try f.valDupeSimple(vm, mod.extra[data[inst].extra.extra]);
                 const str_offset = @enumToInt(mod.extra[data[inst].extra.extra + 1]);
 
                 const name = mod.strings[str_offset..][0..data[inst].extra.len];
-                res.* = .{ .tagged = .{
-                    .name = name,
-                    .value = try vm.gc.dupe(arg),
-                } };
+                res.* = Value.tagged(name, arg);
             },
             .build_tagged_null => {
-                const res = try f.newVal(vm, ref, .tagged);
+                const res = try f.newVal(vm, ref);
 
                 const name = mod.strings[data[inst].str.offset..][0..data[inst].str.len];
-                res.* = .{ .tagged = .{ .name = name, .value = Value.Null } };
+                res.* = Value.tagged(name, Value.Null);
             },
             .build_func => {
-                const res = try f.newVal(vm, ref, .func);
+                const res = try f.newVal(vm, ref);
                 const extra = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
                 const captures_len = @enumToInt(extra[1]);
                 const fn_captures = extra[2..][0..captures_len];
@@ -443,40 +442,40 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     captures[i] = f.val(capture_ref);
                 }
 
-                res.* = .{
+                res.* = .{ .ty = .func, .v = .{
                     .func = .{
                         .module = mod,
                         .captures_ptr = captures.ptr,
                         .extra_index = data[inst].extra.extra,
                         .body_len = @intCast(u32, fn_body.len),
                     },
-                };
+                } };
             },
             .build_range => {
                 const start = (try f.int(vm, data[inst].bin.lhs)) orelse continue;
                 const end = (try f.int(vm, data[inst].bin.rhs)) orelse continue;
 
-                const res = try f.newVal(vm, ref, .range);
-                res.* = .{
+                const res = try f.newVal(vm, ref);
+                res.* = .{ .ty = .range, .v = .{
                     .range = .{
                         .start = start,
                         .end = end,
                     },
-                };
+                } };
             },
             .build_range_step => {
                 const start = (try f.int(vm, data[inst].range.start)) orelse continue;
                 const end = (try f.int(vm, mod.extra[data[inst].range.extra])) orelse continue;
                 const step = (try f.int(vm, mod.extra[data[inst].range.extra + 1])) orelse continue;
 
-                const res = try f.newVal(vm, ref, .range);
-                res.* = .{
+                const res = try f.newVal(vm, ref);
+                res.* = .{ .ty = .range, .v = .{
                     .range = .{
                         .start = start,
                         .end = end,
                         .step = step,
                     },
-                };
+                } };
             },
             .import => {
                 const res = try f.newRef(vm, ref);
@@ -487,7 +486,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .discard => {
                 const arg = f.val(data[inst].un);
 
-                if (arg.* == .err) {
+                if (arg.ty == .err) {
                     return f.fatal(vm, "error discarded");
                 }
             },
@@ -535,15 +534,14 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     continue;
                 }
 
-                const copy: Value = if (needNum(lhs, rhs)) .{
-                    .int = std.math.lossyCast(i64, @divFloor(asNum(lhs), asNum(rhs))),
-                } else .{
-                    .int = std.math.divFloor(i64, lhs.int, rhs.int) catch {
+                const copy = if (needNum(lhs, rhs))
+                    Value.int(std.math.lossyCast(i64, @divFloor(asNum(lhs), asNum(rhs))))
+                else
+                    Value.int(std.math.divFloor(i64, lhs.v.int, rhs.v.int) catch {
                         try f.throw(vm, "operation overflowed");
                         continue;
-                    },
-                };
-                const res = try f.newVal(vm, ref, .int);
+                    });
+                const res = try f.newVal(vm, ref);
                 res.* = copy;
             },
             .div => {
@@ -554,8 +552,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     continue;
                 }
 
-                const copy = Value{ .num = asNum(lhs) / asNum(rhs) };
-                const res = try f.newVal(vm, ref, .num);
+                const copy = Value.num(asNum(lhs) / asNum(rhs));
+                const res = try f.newVal(vm, ref);
                 res.* = copy;
             },
             .rem => {
@@ -570,72 +568,67 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     continue;
                 }
 
-                const copy: Value = if (needNum(lhs, rhs)) .{
-                    .num = @rem(asNum(lhs), asNum(rhs)),
-                } else .{
-                    .int = @rem(lhs.int, rhs.int),
-                };
-                const res = try f.newVal(vm, ref, .num);
+                const copy = if (needNum(lhs, rhs))
+                    Value.num(@rem(asNum(lhs), asNum(rhs)))
+                else
+                    Value.int(@rem(lhs.v.int, rhs.v.int));
+                const res = try f.newVal(vm, ref);
                 res.* = copy;
             },
             .mul => {
                 const lhs = (try f.num(vm, data[inst].bin.lhs)) orelse continue;
                 const rhs = (try f.num(vm, data[inst].bin.rhs)) orelse continue;
 
-                const copy: Value = if (needNum(lhs, rhs)) .{
-                    .num = asNum(lhs) * asNum(rhs),
-                } else .{
-                    .int = std.math.mul(i64, lhs.int, rhs.int) catch {
+                const copy = if (needNum(lhs, rhs))
+                    Value.num(asNum(lhs) * asNum(rhs))
+                else
+                    Value.int(std.math.mul(i64, lhs.v.int, rhs.v.int) catch {
                         try f.throw(vm, "operation overflowed");
                         continue;
-                    },
-                };
-                const res = try f.newVal(vm, ref, .num);
+                    });
+                const res = try f.newVal(vm, ref);
                 res.* = copy;
             },
             .pow => {
                 const lhs = (try f.num(vm, data[inst].bin.lhs)) orelse continue;
                 const rhs = (try f.num(vm, data[inst].bin.rhs)) orelse continue;
 
-                const copy: Value = if (needNum(lhs, rhs)) .{
-                    .num = std.math.pow(f64, asNum(lhs), asNum(rhs)),
-                } else .{
-                    .int = std.math.powi(i64, lhs.int, rhs.int) catch {
+                const copy = if (needNum(lhs, rhs))
+                    Value.num(std.math.pow(f64, asNum(lhs), asNum(rhs)))
+                else
+                    Value.int(std.math.powi(i64, lhs.v.int, rhs.v.int) catch {
                         try f.throw(vm, "operation overflowed");
                         continue;
-                    },
-                };
-                const res = try f.newVal(vm, ref, .num);
+                    });
+                const res = try f.newVal(vm, ref);
                 res.* = copy;
             },
             .add => {
                 const lhs = (try f.num(vm, data[inst].bin.lhs)) orelse continue;
                 const rhs = (try f.num(vm, data[inst].bin.rhs)) orelse continue;
 
-                const copy: Value = if (needNum(lhs, rhs)) .{
-                    .num = asNum(lhs) + asNum(rhs),
-                } else .{
-                    .int = std.math.add(i64, lhs.int, rhs.int) catch {
+                const copy = if (needNum(lhs, rhs))
+                    Value.num(asNum(lhs) + asNum(rhs))
+                else
+                    Value.int(std.math.add(i64, lhs.v.int, rhs.v.int) catch {
                         try f.throw(vm, "operation overflowed");
                         continue;
-                    },
-                };
-                const res = try f.newVal(vm, ref, .num);
+                    });
+                const res = try f.newVal(vm, ref);
                 res.* = copy;
             },
             .sub => {
                 const lhs = (try f.num(vm, data[inst].bin.lhs)) orelse continue;
                 const rhs = (try f.num(vm, data[inst].bin.rhs)) orelse continue;
 
-                const copy: Value = if (needNum(lhs, rhs)) .{
-                    .num = asNum(lhs) - asNum(rhs),
-                } else .{
-                    .int = std.math.sub(i64, lhs.int, rhs.int) catch {
+                const copy = if (needNum(lhs, rhs))
+                    Value.num(asNum(lhs) - asNum(rhs))
+                else
+                    Value.int(std.math.sub(i64, lhs.v.int, rhs.v.int) catch {
                         try f.throw(vm, "operation overflowed");
                         continue;
-                    },
-                };
-                const res = try f.newVal(vm, ref, .num);
+                    });
+                const res = try f.newVal(vm, ref);
                 res.* = copy;
             },
             .l_shift => {
@@ -651,8 +644,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 else
                     lhs << @intCast(u6, rhs);
 
-                const res = try f.newVal(vm, ref, .int);
-                res.* = .{ .int = val };
+                const res = try f.newVal(vm, ref);
+                res.* = Value.int(val);
             },
             .r_shift => {
                 const lhs = (try f.int(vm, data[inst].bin.lhs)) orelse continue;
@@ -667,29 +660,29 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 else
                     lhs << @intCast(u6, rhs);
 
-                const res = try f.newVal(vm, ref, .int);
-                res.* = .{ .int = val };
+                const res = try f.newVal(vm, ref);
+                res.* = Value.int(val);
             },
             .bit_and => {
                 const lhs = (try f.int(vm, data[inst].bin.lhs)) orelse continue;
                 const rhs = (try f.int(vm, data[inst].bin.rhs)) orelse continue;
 
-                const res = try f.newVal(vm, ref, .int);
-                res.* = .{ .int = lhs & rhs };
+                const res = try f.newVal(vm, ref);
+                res.* = Value.int(lhs & rhs);
             },
             .bit_or => {
                 const lhs = (try f.int(vm, data[inst].bin.lhs)) orelse continue;
                 const rhs = (try f.int(vm, data[inst].bin.rhs)) orelse continue;
 
-                const res = try f.newVal(vm, ref, .int);
-                res.* = .{ .int = lhs | rhs };
+                const res = try f.newVal(vm, ref);
+                res.* = Value.int(lhs | rhs);
             },
             .bit_xor => {
                 const lhs = (try f.int(vm, data[inst].bin.lhs)) orelse continue;
                 const rhs = (try f.int(vm, data[inst].bin.rhs)) orelse continue;
 
-                const res = try f.newVal(vm, ref, .int);
-                res.* = .{ .int = lhs ^ rhs };
+                const res = try f.newVal(vm, ref);
+                res.* = Value.int(lhs ^ rhs);
             },
             .equal => {
                 const res = try f.newRef(vm, ref);
@@ -713,7 +706,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const bool_val = if (needNum(lhs, rhs))
                     asNum(lhs) < asNum(rhs)
                 else
-                    lhs.int < rhs.int;
+                    lhs.v.int < rhs.v.int;
 
                 res.* = if (bool_val) Value.True else Value.False;
             },
@@ -725,7 +718,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const bool_val = if (needNum(lhs, rhs))
                     asNum(lhs) <= asNum(rhs)
                 else
-                    lhs.int <= rhs.int;
+                    lhs.v.int <= rhs.v.int;
 
                 res.* = if (bool_val) Value.True else Value.False;
             },
@@ -737,7 +730,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const bool_val = if (needNum(lhs, rhs))
                     asNum(lhs) > asNum(rhs)
                 else
-                    lhs.int > rhs.int;
+                    lhs.v.int > rhs.v.int;
 
                 res.* = if (bool_val) Value.True else Value.False;
             },
@@ -749,7 +742,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const bool_val = if (needNum(lhs, rhs))
                     asNum(lhs) >= asNum(rhs)
                 else
-                    lhs.int >= rhs.int;
+                    lhs.v.int >= rhs.v.int;
 
                 res.* = if (bool_val) Value.True else Value.False;
             },
@@ -757,10 +750,10 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const lhs = f.val(data[inst].bin.lhs);
                 const rhs = f.val(data[inst].bin.rhs);
 
-                switch (rhs.*) {
+                switch (rhs.ty) {
                     .str, .tuple, .list, .map, .range => {},
                     else => {
-                        try f.throwFmt(vm, "'in' not allowed with type {}", .{rhs.ty()});
+                        try f.throwFmt(vm, "'in' not allowed with type {s}", .{rhs.typeName()});
                         continue;
                     },
                 }
@@ -772,7 +765,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const container = f.val(data[inst].bin.lhs);
                 const operand = f.val(data[inst].bin.rhs);
 
-                try container.list.inner.append(vm.gc.gpa, try vm.gc.dupe(operand));
+                try container.v.list.inner.append(vm.gc.gpa, try vm.gc.dupe(operand));
             },
             .as => {
                 const arg = f.val(data[inst].bin_ty.operand);
@@ -795,12 +788,11 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .negate => {
                 const operand = (try f.num(vm, data[inst].un)) orelse continue;
 
-                const copy: Value = if (operand.* == .num) .{
-                    .num = -operand.num,
-                } else .{
-                    .int = -operand.int,
-                };
-                const res = try f.newVal(vm, ref, .num);
+                const copy = if (operand.ty == .num)
+                    Value.num(-operand.v.num)
+                else
+                    Value.int(-operand.v.int);
+                const res = try f.newVal(vm, ref);
                 res.* = copy;
             },
             .bool_not => {
@@ -812,67 +804,68 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .bit_not => {
                 const operand = (try f.int(vm, data[inst].un)) orelse continue;
 
-                const res = try f.newVal(vm, ref, .int);
-                res.* = .{ .int = ~operand };
+                const res = try f.newVal(vm, ref);
+                res.* = Value.int(~operand);
             },
             .spread => {
                 var iterable = f.val(data[inst].un);
 
-                switch (iterable.*) {
+                switch (iterable.ty) {
                     .str => {
                         return f.fatal(vm, "TODO spread str");
                     },
-                    .range => |r| {
-                        const res = try f.newVal(vm, ref, .list);
-                        res.* = .{ .list = .{} };
-                        try res.list.inner.ensureUnusedCapacity(vm.gc.gpa, r.count());
+                    .range => {
+                        const r = iterable.v.range;
+                        const res = try f.newVal(vm, ref);
+                        res.* = Value.list();
+                        try res.v.list.inner.ensureUnusedCapacity(vm.gc.gpa, r.count());
 
                         var it = r.iterator();
                         while (it.next()) |some| {
-                            const int = try vm.gc.alloc(.int);
-                            int.* = .{ .int = some };
-                            res.list.inner.appendAssumeCapacity(int);
+                            const int = try vm.gc.alloc();
+                            int.* = Value.int(some);
+                            res.v.list.inner.appendAssumeCapacity(int);
                         }
                         iterable = res;
                     },
                     .tuple, .list => {},
                     .iterator => unreachable,
                     else => {
-                        try f.throwFmt(vm, "cannot iterate {}", .{iterable.ty()});
+                        try f.throwFmt(vm, "cannot iterate {s}", .{iterable.typeName()});
                         continue;
                     },
                 }
 
-                const res = try f.newVal(vm, ref, .spread);
-                res.* = .{ .spread = .{ .iterable = iterable } };
+                const res = try f.newVal(vm, ref);
+                res.* = .{ .ty = .spread, .v = .{ .spread = .{ .iterable = iterable } } };
             },
             .unwrap_error => {
                 const arg = f.val(data[inst].un);
 
-                if (arg.* != .err) {
+                if (arg.ty != .err) {
                     try f.throw(vm, "expected an error");
                     continue;
                 }
 
                 const res = try f.newRef(vm, ref);
-                res.* = try vm.gc.dupe(arg.err);
+                res.* = try vm.gc.dupe(arg.v.err);
             },
             .unwrap_tagged => {
                 const operand = f.val(mod.extra[data[inst].extra.extra]);
                 const str_offset = @enumToInt(mod.extra[data[inst].extra.extra + 1]);
                 const name = mod.strings[str_offset..][0..data[inst].extra.len];
 
-                if (operand.* != .tagged) {
+                if (operand.ty != .tagged) {
                     try f.throw(vm, "expected a tagged value");
                     continue;
                 }
-                if (!mem.eql(u8, operand.tagged.name, name)) {
+                if (!mem.eql(u8, operand.v.tagged.name, name)) {
                     try f.throw(vm, "invalid tag");
                     continue;
                 }
 
                 const res = try f.newRef(vm, ref);
-                res.* = operand.tagged.value;
+                res.* = operand.v.tagged.value;
             },
             .unwrap_tagged_or_null => {
                 const res = try f.newRef(vm, ref);
@@ -880,8 +873,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const str_offset = @enumToInt(mod.extra[data[inst].extra.extra + 1]);
                 const name = mod.strings[str_offset..][0..data[inst].extra.len];
 
-                if (operand.* == .tagged and mem.eql(u8, operand.tagged.name, name)) {
-                    res.* = operand.tagged.value;
+                if (operand.ty == .tagged and mem.eql(u8, operand.v.tagged.name, name)) {
+                    res.* = operand.v.tagged.value;
                 } else {
                     res.* = Value.Null;
                 }
@@ -890,9 +883,9 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const container = f.val(data[inst].bin.lhs);
                 const len = @enumToInt(data[inst].bin.rhs);
 
-                const ok = switch (container.*) {
-                    .list => |list| list.inner.items.len == len,
-                    .tuple => |tuple| tuple.len == len,
+                const ok = switch (container.ty) {
+                    .list => container.v.list.inner.items.len == len,
+                    .tuple => container.v.tuple.len == len,
                     else => false,
                 };
                 const res = try f.newRef(vm, ref);
@@ -906,11 +899,11 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const container = f.val(data[inst].bin.lhs);
                 const len = @enumToInt(data[inst].bin.rhs);
 
-                const actual_len = switch (container.*) {
-                    .list => |list| list.inner.items.len,
-                    .tuple => |tuple| tuple.len,
+                const actual_len = switch (container.ty) {
+                    .list => container.v.list.inner.items.len,
+                    .tuple => container.v.tuple.len,
                     else => {
-                        try f.throwFmt(vm, "cannot destructure non list/tuple type {}", .{container.ty()});
+                        try f.throwFmt(vm, "cannot destructure non list/tuple type {s}", .{container.typeName()});
                         continue;
                     },
                 };
@@ -932,11 +925,11 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const container = f.val(data[inst].bin.lhs);
                 const len = @enumToInt(data[inst].bin.rhs);
 
-                const items = switch (container.*) {
-                    .list => |list| list.inner.items,
-                    .tuple => |tuple| tuple,
+                const items = switch (container.ty) {
+                    .list => container.v.list.inner.items,
+                    .tuple => container.v.tuple,
                     else => {
-                        try f.throwFmt(vm, "cannot destructure non list/tuple type {}", .{container.ty()});
+                        try f.throwFmt(vm, "cannot destructure non list/tuple type {s}", .{container.typeName()});
                         continue;
                     },
                 };
@@ -949,12 +942,12 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     continue;
                 }
 
-                const res = try f.newVal(vm, ref, .list);
-                res.* = .{ .list = .{} };
-                try res.list.inner.ensureUnusedCapacity(vm.gc.gpa, items.len - len);
+                const res = try f.newVal(vm, ref);
+                res.* = Value.list();
+                try res.v.list.inner.ensureUnusedCapacity(vm.gc.gpa, items.len - len);
 
                 for (items[len..]) |item| {
-                    res.list.inner.appendAssumeCapacity(item);
+                    res.v.list.inner.appendAssumeCapacity(item);
                 }
             },
             .get => {
@@ -970,7 +963,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
             .get_int => {
                 const res = try f.newRef(vm, ref);
                 const container = f.val(data[inst].bin.lhs);
-                const index = Value{ .int = @enumToInt(data[inst].bin.rhs) };
+                const index = Value.int(@enumToInt(data[inst].bin.rhs));
 
                 container.get(f.ctx(vm), &index, res) catch |err| switch (err) {
                     error.Throw => continue,
@@ -982,10 +975,10 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const container = f.val(data[inst].bin.lhs);
                 const index = f.val(data[inst].bin.rhs);
 
-                if (container.* != .map) {
+                if (container.ty != .map) {
                     res.* = Value.Null;
                 } else {
-                    res.* = container.map.get(index) orelse Value.Null;
+                    res.* = container.v.map.get(index) orelse Value.Null;
                 }
             },
             .set => {
@@ -1049,8 +1042,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const res = try f.newRef(vm, ref);
                 const arg = f.val(data[inst].jump_condition.operand);
 
-                if (arg.* == .err) {
-                    res.* = arg.err;
+                if (arg.ty == .err) {
+                    res.* = arg.v.err;
                 } else {
                     f.ip = data[inst].jump_condition.offset;
                 }
@@ -1069,7 +1062,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                 const res = try f.newRef(vm, ref);
                 const arg = f.val(data[inst].jump_condition.operand);
 
-                const end = arg.iterator.next(f.ctx(vm), res) catch |err| switch (err) {
+                const end = arg.v.iterator.next(f.ctx(vm), res) catch |err| switch (err) {
                     error.Throw => continue,
                     else => |e| return e,
                 };
@@ -1112,37 +1105,39 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     },
                     else => unreachable,
                 }
-                switch (callee.*) {
+                switch (callee.ty) {
                     .native, .func => {},
                     else => {
-                        try f.throwFmt(vm, "cannot call '{}'", .{callee.ty()});
+                        try f.throwFmt(vm, "cannot call '{s}'", .{callee.typeName()});
                         continue;
                     },
                 }
 
                 var args_len: usize = 0;
                 for (args) |item_ref| {
-                    switch (f.val(item_ref).*) {
-                        .spread => |spread| args_len += spread.len(),
+                    const val = f.val(item_ref);
+                    switch (val.ty) {
+                        .spread => args_len += val.v.spread.len(),
                         else => args_len += 1,
                     }
                 }
 
-                if (callee.* == .native) {
-                    if (callee.native.variadic) {
-                        if (args_len < callee.native.arg_count) {
+                if (callee.ty == .native) {
+                    const n = callee.v.native;
+                    if (n.variadic) {
+                        if (args_len < n.arg_count) {
                             try f.throwFmt(
                                 vm,
                                 "expected at least {} args, got {}",
-                                .{ callee.native.arg_count, args_len },
+                                .{ n.arg_count, args_len },
                             );
                             continue;
                         }
-                    } else if (callee.native.arg_count != args_len) {
+                    } else if (n.arg_count != args_len) {
                         try f.throwFmt(
                             vm,
                             "expected {} args, got {}",
-                            .{ callee.native.arg_count, args_len },
+                            .{ n.arg_count, args_len },
                         );
                         continue;
                     }
@@ -1153,9 +1148,9 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     var i: u32 = 0;
                     for (args) |arg_ref| {
                         const arg = try f.valDupeSimple(vm, arg_ref);
-                        switch (arg.*) {
-                            .spread => |spread| {
-                                const spread_items = spread.items();
+                        switch (arg.ty) {
+                            .spread => {
+                                const spread_items = arg.v.spread.items();
                                 for (spread_items) |item| {
                                     args_tuple[i] = item;
                                     i += 1;
@@ -1168,7 +1163,7 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         }
                     }
 
-                    const res = callee.native.func(f.ctxThis(this, vm), args_tuple) catch |err| switch (err) {
+                    const res = n.func(f.ctxThis(this, vm), args_tuple) catch |err| switch (err) {
                         error.Throw => continue,
                         else => |e| return e,
                     };
@@ -1176,9 +1171,10 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     // function may mutate the stack
                     const returned = try f.newRef(vm, ref);
                     returned.* = res;
-                } else if (callee.* == .func) {
-                    const callee_args = callee.func.args();
-                    const variadic = callee.func.variadic();
+                } else if (callee.ty == .func) {
+                    const func = callee.v.func;
+                    const callee_args = func.args();
+                    const variadic = func.variadic();
                     if (variadic) {
                         if (args_len < callee_args - 1) {
                             try f.throwFmt(
@@ -1204,13 +1200,13 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     defer vm.call_depth -= 1;
 
                     var new_frame = Frame{
-                        .mod = callee.func.module,
-                        .body = callee.func.body(),
+                        .mod = func.module,
+                        .body = func.body(),
                         .caller_frame = f,
                         .module_frame = f.module_frame,
                         .this = this,
                         .params = callee_args,
-                        .captures = callee.func.captures(),
+                        .captures = func.captures(),
                     };
                     errdefer new_frame.deinit(vm);
                     vm.getFrame(&new_frame);
@@ -1221,26 +1217,26 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         const non_variadic_args = callee_args - @boolToInt(variadic);
                         var var_args: *Value = undefined;
                         if (variadic) {
-                            var_args = try vm.gc.alloc(.list);
-                            var_args.* = .{ .list = .{} };
-                            try var_args.list.inner.ensureUnusedCapacity(vm.gc.gpa, args_len - non_variadic_args);
+                            var_args = try vm.gc.alloc();
+                            var_args.* = Value.list();
+                            try var_args.v.list.inner.ensureUnusedCapacity(vm.gc.gpa, args_len - non_variadic_args);
                         }
 
                         var i: u32 = 0;
                         var arg_list = &new_frame.stack;
                         for (args) |arg_ref| {
                             const arg = f.val(arg_ref);
-                            switch (arg.*) {
-                                .spread => |spread| {
-                                    const spread_items = spread.items();
+                            switch (arg.ty) {
+                                .spread => {
+                                    const spread_items = arg.v.spread.items();
                                     for (spread_items) |item| {
-                                        if (i == non_variadic_args) arg_list = &var_args.list.inner;
+                                        if (i == non_variadic_args) arg_list = &var_args.v.list.inner;
                                         arg_list.appendAssumeCapacity(item);
                                         i += 1;
                                     }
                                 },
                                 else => {
-                                    if (i == non_variadic_args) arg_list = &var_args.list.inner;
+                                    if (i == non_variadic_args) arg_list = &var_args.v.list.inner;
                                     arg_list.appendAssumeCapacity(arg);
                                     i += 1;
                                 },
@@ -1249,15 +1245,15 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                         if (variadic) new_frame.stack.appendAssumeCapacity(var_args);
                     }
 
-                    var frame_val = try vm.gc.alloc(.frame);
-                    frame_val.* = .{ .frame = &new_frame };
-                    defer frame_val.* = .{ .int = 0 }; // clear frame
+                    var frame_val = try vm.gc.alloc();
+                    frame_val.* = Value.frame(&new_frame);
+                    defer frame_val.* = Value.int(0); // clear frame
 
                     const returned = try vm.run(&new_frame);
-                    if (returned.* == .err) {
+                    if (returned.ty == .err) {
                         if (f.err_handlers.get()) |handler| {
                             const handler_operand = try f.newRef(vm, handler.operand);
-                            handler_operand.* = returned.err;
+                            handler_operand.* = returned.v.err;
                             f.ip = handler.offset;
                         }
                     }
@@ -1276,8 +1272,8 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     f.ip = handler.offset;
                     continue;
                 }
-                const res = try vm.gc.alloc(.err);
-                res.* = .{ .err = val };
+                const res = try vm.gc.alloc();
+                res.* = Value.err(val);
                 return val;
             },
         }
@@ -1353,29 +1349,29 @@ const ErrHandlers = extern union {
 };
 
 inline fn needNum(a: *Value, b: *Value) bool {
-    return a.* == .num or b.* == .num;
+    return a.ty == .num or b.ty == .num;
 }
 
 inline fn asNum(val: *Value) f64 {
-    return switch (val.*) {
-        .int => |v| @intToFloat(f64, v),
-        .num => |v| v,
+    return switch (val.ty) {
+        .int => @intToFloat(f64, val.v.int),
+        .num => val.v.num,
         else => unreachable,
     };
 }
 
 fn checkZero(val: *Value) bool {
-    switch (val.*) {
-        .int => |v| return v == 0,
-        .num => |v| return v == 0,
+    switch (val.ty) {
+        .int => return val.v.int == 0,
+        .num => return val.v.num == 0,
         else => unreachable,
     }
 }
 
 fn isNegative(val: *Value) bool {
-    switch (val.*) {
-        .int => |v| return v < 0,
-        .num => |v| return v < 0,
+    switch (val.ty) {
+        .int => return val.v.int < 0,
+        .num => return val.v.num < 0,
         else => unreachable,
     }
 }
@@ -1455,9 +1451,9 @@ fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) !*Value {
     vm.getFrame(&frame);
     frame.module_frame = &frame;
 
-    var frame_val = try vm.gc.alloc(.frame);
-    frame_val.* = .{ .frame = &frame };
-    defer frame_val.* = .{ .int = 0 }; // clear frame
+    var frame_val = try vm.gc.alloc();
+    frame_val.* = Value.frame(&frame);
+    defer frame_val.* = Value.int(0); // clear frame
 
     const res = vm.run(&frame);
     try vm.storeFrame(&frame);
@@ -1465,19 +1461,19 @@ fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) !*Value {
 }
 
 fn errorFmt(vm: *Vm, comptime fmt: []const u8, args: anytype) Vm.Error!*Value {
-    const str = try vm.gc.alloc(.str);
-    str.* = .{ .str = try Value.String.init(vm.gc.gpa, fmt, args) };
+    const str = try vm.gc.alloc();
+    str.* = .{ .ty = .str, .v = .{ .str = try Value.String.init(vm.gc.gpa, fmt, args) } };
 
-    const err = try vm.gc.alloc(.err);
-    err.* = .{ .err = str };
+    const err = try vm.gc.alloc();
+    err.* = Value.err(str);
     return err;
 }
 
 fn errorVal(vm: *Vm, msg: []const u8) !*Value {
-    const str = try vm.gc.alloc(.str);
+    const str = try vm.gc.alloc();
     str.* = Value.string(msg);
 
-    const err = try vm.gc.alloc(.err);
-    err.* = .{ .err = str };
+    const err = try vm.gc.alloc();
+    err.* = Value.err(str);
     return err;
 }

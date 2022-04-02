@@ -14,8 +14,8 @@ const Error = error{ UnexpectedToken, UnexpectedEndOfJson } || std.mem.Allocator
 fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) Error!*Value {
     switch (token) {
         .ObjectBegin => {
-            const res = try vm.gc.alloc(.map);
-            res.* = .{ .map = .{} };
+            const res = try vm.gc.alloc();
+            res.* = Value.map();
 
             while (true) {
                 var tok = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
@@ -26,13 +26,13 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
                 const key = try parseInternal(vm, tok, tokens);
                 tok = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
                 const val = try parseInternal(vm, tok, tokens);
-                try res.map.put(vm.gc.gpa, key, val);
+                try res.v.map.put(vm.gc.gpa, key, val);
             }
             return res;
         },
         .ArrayBegin => {
-            const res = try vm.gc.alloc(.list);
-            res.* = .{ .list = .{} };
+            const res = try vm.gc.alloc();
+            res.* = Value.list();
 
             while (true) {
                 const tok = (try tokens.next()) orelse return error.UnexpectedEndOfJson;
@@ -40,14 +40,14 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
                     .ArrayEnd => break,
                     else => {},
                 }
-                try res.list.inner.append(vm.gc.gpa, try parseInternal(vm, tok, tokens));
+                try res.v.list.inner.append(vm.gc.gpa, try parseInternal(vm, tok, tokens));
             }
             return res;
         },
         .ObjectEnd, .ArrayEnd => return error.UnexpectedToken,
         .String => |info| {
             const source_slice = info.slice(tokens.slice, tokens.i - 1);
-            const val = try vm.gc.alloc(.str);
+            const val = try vm.gc.alloc();
             switch (info.escapes) {
                 .None => val.* = Value.string(try vm.gc.gpa.dupe(u8, source_slice)),
                 .Some => {
@@ -60,11 +60,11 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
             return val;
         },
         .Number => |info| {
-            const val = try vm.gc.alloc(.int);
+            const val = try vm.gc.alloc();
             if (info.is_integer) {
-                val.* = .{ .int = try std.fmt.parseInt(i64, info.slice(tokens.slice, tokens.i - 1), 10) };
+                val.* = Value.int(try std.fmt.parseInt(i64, info.slice(tokens.slice, tokens.i - 1), 10));
             } else {
-                val.* = .{ .num = try std.fmt.parseFloat(f64, info.slice(tokens.slice, tokens.i - 1)) };
+                val.* = Value.num(try std.fmt.parseFloat(f64, info.slice(tokens.slice, tokens.i - 1)));
             }
             return val;
         },
@@ -74,9 +74,9 @@ fn parseInternal(vm: *Vm, token: std.json.Token, tokens: *std.json.TokenStream) 
     }
 }
 
-pub fn stringify(ctx: Vm.Context, val: *Value) !Value.String {
+pub fn stringify(ctx: Vm.Context, val: *Value) !Value {
     var b = Value.String.builder(ctx.vm.gc.gpa);
     errdefer b.cancel();
     try std.json.stringify(val, .{}, b.writer());
-    return b.finish();
+    return b.finishValue();
 }

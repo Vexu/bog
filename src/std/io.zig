@@ -8,8 +8,8 @@ pub fn print(vals: Value.Variadic(*Value)) !void {
     const writer = buf_writer.writer();
     for (vals.t) |val, i| {
         if (i != 0) try writer.writeByte(' ');
-        if (val.* == .str) {
-            try writer.writeAll(val.str.data);
+        if (val.ty == .str) {
+            try writer.writeAll(val.v.str.data);
         } else {
             try val.dump(writer, 4);
         }
