@@ -70,14 +70,21 @@ pub const Value = union(Type) {
         name: []const u8,
         value: *Value,
     },
-    iterator: struct {
+    iterator: Iterator,
+    spread: Spread,
+
+    /// always memoized
+    bool: bool,
+    @"null",
+
+    pub const Iterator = struct {
         value: *Value,
         i: packed union {
             u: usize,
             i: i64,
         } = .{ .u = 0 },
 
-        pub fn next(iter: *@This(), ctx: Vm.Context, res: *?*Value) !bool {
+        pub fn next(iter: *Iterator, ctx: Vm.Context, res: *?*Value) !bool {
             switch (iter.value.*) {
                 .tuple => |tuple| {
                     if (iter.i.u == tuple.len) {
@@ -150,8 +157,9 @@ pub const Value = union(Type) {
             }
             return true;
         }
-    },
-    spread: struct {
+    };
+
+    pub const Spread = struct {
         iterable: *Value,
 
         pub fn len(s: @This()) usize {
@@ -173,11 +181,7 @@ pub const Value = union(Type) {
                 else => unreachable,
             };
         }
-    },
-
-    /// always memoized
-    bool: bool,
-    @"null",
+    };
 
     pub const Func = struct {
         /// module in which this function exists
@@ -212,7 +216,7 @@ pub const Value = union(Type) {
             return @intCast(u64, @divFloor(r.end - r.start - 1, r.step));
         }
 
-        pub fn iterator(r: Range) Iterator {
+        pub fn iterator(r: Range) Range.Iterator {
             return .{ .r = r, .i = r.start };
         }
 
@@ -220,7 +224,7 @@ pub const Value = union(Type) {
             r: Range,
             i: i64,
 
-            pub fn next(iter: *Iterator) ?i64 {
+            pub fn next(iter: *Range.Iterator) ?i64 {
                 if (iter.i >= iter.r.end) {
                     return null;
                 }
