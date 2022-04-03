@@ -55,12 +55,13 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
         .discard_expr,
         .break_expr,
         .continue_expr,
+        .suspend_expr,
         => try renderToken(tree, tokens[node], aiw, space),
         .mut_ident_expr => {
             try renderToken(tree, tree.prevToken(tokens[node]), aiw, .space);
             try renderToken(tree, tokens[node], aiw, space);
         },
-        .bool_not_expr, .throw_expr => {
+        .bool_not_expr, .throw_expr, .await_expr, .resume_expr => {
             try renderToken(tree, tokens[node], aiw, .space);
             try renderNode(tree, data[node].un, aiw, space);
         },
@@ -310,7 +311,17 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
             try renderToken(tree, r_paren, aiw, getBlockIndent(tree, body, .space));
             return renderNode(tree, body, aiw, space);
         },
-        .call_expr, .call_expr_one => {
+        .call_expr,
+        .call_expr_one,
+        .async_call_expr,
+        .async_call_expr_one,
+        => {
+            switch (ids[node]) {
+                .async_call_expr, .async_call_expr_one => {
+                    try renderToken(tree, tree.firstToken(node), aiw, .space);
+                },
+                else => {},
+            }
             var buf: [2]Node.Index = undefined;
             const items = tree.nodeItems(node, &buf);
 

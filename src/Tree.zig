@@ -41,6 +41,7 @@ pub fn firstToken(tree: Tree, node: Node.Index) Token.Index {
         .bit_not_expr,
         .negate_expr,
         .spread_expr,
+        .await_expr,
         .decl,
         .ident_expr,
         .discard_expr,
@@ -48,6 +49,8 @@ pub fn firstToken(tree: Tree, node: Node.Index) Token.Index {
         .break_expr,
         .continue_expr,
         .throw_expr,
+        .suspend_expr,
+        .resume_expr,
         .fn_expr,
         .fn_expr_one,
         .paren_expr,
@@ -88,6 +91,11 @@ pub fn firstToken(tree: Tree, node: Node.Index) Token.Index {
         => return tree.prevToken(toks[cur]),
         .import_expr => return tree.prevToken(tree.prevToken(toks[cur])),
         .call_expr => cur = tree.extra[data[cur].range.start],
+        .async_call_expr => {
+            cur = tree.extra[data[cur].range.start];
+            const first_token = tree.firstToken(cur);
+            return tree.prevToken(first_token);
+        },
         .member_access_expr => cur = data[cur].un,
         .assign,
         .add_assign,
@@ -136,7 +144,7 @@ pub fn firstToken(tree: Tree, node: Node.Index) Token.Index {
         } else {
             cur = data[cur].bin.rhs;
         },
-        .match_case_let => {
+        .match_case_let, .async_call_expr_one => {
             cur = data[cur].bin.lhs;
             const first_token = tree.firstToken(cur);
             return tree.prevToken(first_token);
@@ -173,6 +181,7 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .null_expr,
         .break_expr,
         .continue_expr,
+        .suspend_expr,
         .member_access_expr,
         => return tokens[cur],
         .import_expr => return tree.nextToken(tokens[cur]),
@@ -188,6 +197,7 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .list_expr,
         .map_expr,
         .call_expr,
+        .async_call_expr,
         => {
             const next = tree.nextToken(tree.lastToken(tree.extra[data[cur].range.end - 1]));
             return if (tok_ids[next] == .comma)
@@ -219,7 +229,7 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         } else {
             return tree.nextToken(tokens[cur]);
         },
-        .call_expr_one => if (data[cur].bin.rhs != 0) {
+        .call_expr_one, .async_call_expr_one => if (data[cur].bin.rhs != 0) {
             const next = tree.nextToken(tree.lastToken(data[cur].bin.rhs));
             return if (tok_ids[next] == .comma)
                 tree.nextToken(next)
@@ -253,10 +263,12 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
             return tokens[cur];
         },
         .throw_expr,
+        .resume_expr,
         .bool_not_expr,
         .bit_not_expr,
         .negate_expr,
         .spread_expr,
+        .await_expr,
         .match_case_catch_all,
         => cur = data[cur].un,
         .is_expr, .as_expr => return tokens[cur],
@@ -467,6 +479,10 @@ pub const Node = struct {
         continue_expr,
         /// throw un
         throw_expr,
+        /// suspend
+        suspend_expr,
+        /// resume_un
+        resume_expr,
         /// fn (extra[start..end-1]) extra[end]
         fn_expr,
         /// fn (lhs) rhs, lhs may be omitted
@@ -515,6 +531,10 @@ pub const Node = struct {
         call_expr,
         /// lhs(rhs) rhs may be omitted
         call_expr_one,
+        /// async extra[start](extra[start+1]..extra[end])
+        async_call_expr,
+        /// async lhs(rhs) rhs may be omitted
+        async_call_expr_one,
         /// if lhs rhs
         if_expr,
         /// if cond extra[0] else extra[1]
@@ -570,6 +590,8 @@ pub const Node = struct {
         negate_expr,
         /// ...un
         spread_expr,
+        /// await un
+        await_expr,
 
         // binary expressions
 
@@ -784,6 +806,7 @@ pub fn nodeItems(tree: Tree, node: Node.Index, buf: *[2]Node.Index) []const Node
         .try_expr_one,
         .fn_expr_one,
         .call_expr_one,
+        .async_call_expr_one,
         .match_expr_one,
         .match_case_one,
         => {
@@ -805,6 +828,7 @@ pub fn nodeItems(tree: Tree, node: Node.Index, buf: *[2]Node.Index) []const Node
         .try_expr,
         .fn_expr,
         .call_expr,
+        .async_call_expr,
         .match_expr,
         => return tree.extra[data[node].range.start..data[node].range.end],
         else => unreachable,

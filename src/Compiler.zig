@@ -716,6 +716,13 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
             const val = try c.genFormatString(node);
             return c.wrapResult(node, val, res);
         },
+
+        .suspend_expr,
+        .resume_expr,
+        .async_call_expr,
+        .async_call_expr_one,
+        .await_expr,
+        => @panic("TODO"),
     }
     return c.wrapResult(node, .empty, res);
 }

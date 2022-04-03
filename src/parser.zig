@@ -282,7 +282,13 @@ pub const Parser = struct {
         return p.boolExpr(skip_nl, level);
     }
 
-    /// jump_expr : "return" block_or_expr? | "break" | "continue" | "throw" block_or_expr
+    /// jump_expr
+    ///     : "return" block_or_expr?
+    ///     | "break"
+    ///     | "continue"
+    ///     | "throw" block_or_expr
+    ///     | "suspend"
+    ///     | "resume" block_or_expr
     fn jumpExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!?Node.Index {
         const tok = p.tok_i;
         const id: Node.Id = switch (p.tok_ids[tok]) {
@@ -290,11 +296,13 @@ pub const Parser = struct {
             .keyword_break => .break_expr,
             .keyword_continue => .continue_expr,
             .keyword_throw => .throw_expr,
+            .keyword_suspend => .suspend_expr,
+            .keyword_resume => .resume_expr,
             else => return null,
         };
         p.tok_i += 1;
 
-        const op = if (id == .throw_expr)
+        const op = if (id == .throw_expr or id == .resume_expr)
             try p.blockOrExpr(skip_nl, level)
         else if (id == .return_expr and switch (p.tok_ids[p.tok_i]) {
             .eof, .nl, .r_paren, .r_brace, .r_bracket, .keyword_else, .keyword_catch, .comma, .colon => false,
@@ -520,7 +528,7 @@ pub const Parser = struct {
         return lhs;
     }
 
-    /// prefix_expr : ("-" | "~")? power_expr
+    /// prefix_expr : ("-" | "~" | "await")? power_expr
     fn prefixExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
         const tok = p.nextToken(skip_nl);
         switch (p.tok_ids[tok]) {
@@ -532,6 +540,10 @@ pub const Parser = struct {
                 p.skipNl();
                 return p.addUn(.bit_not_expr, tok, try p.powerExpr(skip_nl, level));
             },
+            .keyword_await => {
+                p.skipNl();
+                return p.addUn(.await_expr, tok, try p.powerExpr(skip_nl, level));
+            },
             else => {
                 p.tok_i = tok;
                 return try p.powerExpr(skip_nl, level);
@@ -539,44 +551,63 @@ pub const Parser = struct {
         }
     }
 
-    /// power_expr : primary_expr suffix_expr* ("**" power_expr)?
+    /// power_expr : suffix_expr ("**" power_expr)?
     fn powerExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
-        var primary = try p.primaryExpr(skip_nl, level);
-        primary = try p.suffixExpr(primary, skip_nl, level);
+        const primary = try p.suffixExpr(skip_nl, level);
         if (p.eatTokenNoNl(.asterisk_asterisk)) |tok| {
             p.skipNl();
-            primary = try p.addBin(.pow_expr, tok, primary, try p.powerExpr(skip_nl, level));
+            return p.addBin(.pow_expr, tok, primary, try p.powerExpr(skip_nl, level));
         }
         return primary;
     }
 
     /// suffix_expr
-    ///     : "[" expr "]"
-    ///     | "(" (expr ",")* expr? ")"
-    ///     | "." IDENTIFIER
-    fn suffixExpr(p: *Parser, primary: Node.Index, skip_nl: SkipNl, level: u8) Error!Node.Index {
-        var lhs = primary;
+    ///     : primary_expr suffix_op*
+    ///     | "async" primary_expr suffix_op* call_args
+    fn suffixExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
+        const is_async = p.eatToken(.keyword_async, .skip_nl) != null;
+        var lhs = try p.primaryExpr(skip_nl, level);
         while (true) {
-            if (p.eatToken(.l_bracket, skip_nl)) |tok| {
-                p.skipNl();
-                lhs = try p.addBin(.array_access_expr, tok, lhs, try p.expr(.skip_nl, level));
-                _ = try p.expectToken(.r_bracket, .keep_nl);
-            } else if (p.eatToken(.l_paren, .skip_nl)) |tok| {
-                const args = try p.listParser(skip_nl, level, spreadExpr, .r_paren, lhs);
-                switch (args.len) {
-                    0 => unreachable, // we pass lhs as first
-                    1 => lhs = try p.addBin(.call_expr_one, tok, lhs, null_node),
-                    2 => lhs = try p.addBin(.call_expr_one, tok, lhs, args[1]),
-                    else => lhs = try p.addList(.call_expr, tok, args),
-                }
-            } else if (p.eatTokenNoNl(.period)) |_| {
-                p.skipNl();
-                const ident = try p.expectToken(.identifier, skip_nl);
-                lhs = try p.addUn(.member_access_expr, ident, lhs);
-            } else {
-                return lhs;
-            }
+            if (try p.suffixOp(lhs, skip_nl, level)) |some| {
+                lhs = some;
+            } else if (try p.callArgs(is_async, lhs, skip_nl, level)) |some| {
+                if (is_async) return some;
+                lhs = some;
+            } else break;
         }
+        if (is_async) return p.reportErr("expected a function call", p.tok_i);
+        return lhs;
+    }
+    /// suffix_op
+    ///     : "[" expr "]"
+    ///     | call_args
+    ///     | "." IDENTIFIER
+    fn suffixOp(p: *Parser, lhs: Node.Index, skip_nl: SkipNl, level: u8) Error!?Node.Index {
+        if (p.eatToken(.l_bracket, skip_nl)) |tok| {
+            p.skipNl();
+            const res = try p.addBin(.array_access_expr, tok, lhs, try p.expr(.skip_nl, level));
+            _ = try p.expectToken(.r_bracket, .keep_nl);
+            return res;
+        } else if (p.eatTokenNoNl(.period)) |_| {
+            p.skipNl();
+            const ident = try p.expectToken(.identifier, skip_nl);
+            return try p.addUn(.member_access_expr, ident, lhs);
+        } else {
+            return null;
+        }
+    }
+
+    /// call_args : "(" (spread_expr ",")* spread_expr? ")"
+    fn callArgs(p: *Parser, is_async: bool, lhs: Node.Index, skip_nl: SkipNl, level: u8) Error!?Node.Index {
+        const tok = p.eatToken(.l_paren, .skip_nl) orelse return null;
+        const args = try p.listParser(skip_nl, level, spreadExpr, .r_paren, lhs);
+        const ops = [2][2]Node.Id{ .{ .call_expr_one, .call_expr }, .{ .async_call_expr_one, .async_call_expr } };
+        return switch (args.len) {
+            0 => unreachable, // we pass lhs as first
+            1 => try p.addBin(ops[@boolToInt(is_async)][0], tok, lhs, null_node),
+            2 => try p.addBin(ops[@boolToInt(is_async)][0], tok, lhs, args[1]),
+            else => try p.addList(ops[@boolToInt(is_async)][1], tok, args),
+        };
     }
 
     /// spread_expr : "..."? expr

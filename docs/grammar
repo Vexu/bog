@@ -17,7 +17,13 @@ expr
     | fn
     | bool_expr
 
-jump_expr : "return" block_or_expr? | "break" | "continue" | "throw" block_or_expr
+jump_expr
+    : "return" block_or_expr?
+    | "break"
+    | "continue"
+    | "throw" block_or_expr
+    | "suspend"
+    | "resume" block_or_expr
 
 fn : "fn" "(" (primary_expr ",")* (primary_expr "..."?)? ")" block_or_expr
 
@@ -44,14 +50,20 @@ mul_expr : cast_expr (("*" | "/" | "//" | "%") cast_expr)*
 
 cast_expr : prefix_expr ("as" type_name)?
 
-prefix_expr : ("-" | "~")? power_expr
+prefix_expr : ("-" | "~" | "await" )? power_expr
 
-power_expr : primary_expr suffix_expr* ("**" power_expr)?
+power_expr : suffix_expr ("**" power_expr)?
 
 suffix_expr
+    : primary_expr suffix_op*
+    | "async" primary_expr suffix_op* call_args
+
+suffix_op
     : "[" expr "]"
-    | "(" (spread_expr ",")* spread_expr? ")"
+    | call_args
     | "." IDENTIFIER
+
+call_args : "(" (spread_expr ",")* spread_expr? ")"
 
 spread_expr : "..."? expr
 
