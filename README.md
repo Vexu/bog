@@ -3,21 +3,61 @@ Small, strongly typed, embeddable language.
 
 ### Hello world
 ```julia
-const {print} = import("std.io")
-const world = "world"
+let {print} = import("std.io")
+let world = "world"
 print(f"hello {world}!")
+```
+
+### Async/await
+```julia
+let {print} = import("std.io")
+
+let foo = fn()
+    print("foo started")
+    let bar_frame = async bar()
+    print("in foo")
+    let bar_res = await bar_frame
+    print("foo finished")
+    return bar_res
+
+let bar = fn()
+    print("bar started")
+    suspend
+    print("bar resumed")
+    suspend
+    print("bar finished")
+    return 1
+
+
+print("main started")
+let foo_frame = async foo()
+print("in main")
+let res = await foo_frame
+print("main finished:", res)
+```
+```sh-session
+$ bog async.bog
+main started
+foo started
+bar started
+in foo
+bar resumed
+in main
+bar finished
+foo finished
+main finished: 1
 ```
 
 ### Calculator
 ```julia
-const {input, print} = import("std.io")
+let {input, print} = import("std.io")
 
 try
-    const val1 = input("first argument: ") as num
-    const op = input("operation: ")
-    const val2 = input("second argument: ") as num
+    let val1 = input("first argument: ") as num
+    let op = input("operation: ")
+    let val2 = input("second argument: ") as num
 
-    match (op)
+    match op
         "*" => print(val1 * val2)
         "+" => print(val1 + val2)
         "-" => print(val1 - val2)
@@ -31,58 +71,59 @@ catch
 ### Use command line arguments
 ```julia
 # run with `path/to/bog path/here.bog arg1 arg2 "foo"`
-const {print} = import("io")
+let {print} = import("io")
 print(import("args"))
 ```
 
 ### Loops
 ```julia
-let sum = 0
-for (let c in "hellö wörld")
-    if (c == "h") sum += 1
-    else if (c == "e") sum += 2
-    else if (c == "l") sum += 3
-    else if (c == "ö") sum += 4
-    else if (c == "w") sum += 5
-    else if (c == "d") sum += 6
+let mut sum = 0
+for let c in "hellö wörld"
+    match c
+        "h" => sum += 1
+        "e" => sum += 2
+        "l" => sum += 3
+        "ö" => sum += 4
+        "w" => sum += 5
+        "d" => sum += 6
 
 return sum # 31
 ```
 ```julia
-const getSome = fn(val)  if (val != 0) val - 1
+let getSome = fn(val) if (val != 0) val - 1
 
-let val = 10
-while (let newVal = getSome(val))
+let mut val = 10
+while let newVal = getSome(val)
     val = newVal
 return val # 0
 ```
 
 ### Error handling
 ```julia
-const {input, print} = import("std.io")
+let {input, print} = import("std.io")
 
-const fails_on_1 = fn(arg) if (arg == 1) error(69)
-const fails_on_2 = fn(arg) if (arg == 2) error(42)
-const fails_on_3 = fn(arg) if (arg == 3) error(17)
+let fails_on_1 = fn(arg) if arg == 1 error(69)
+let fails_on_2 = fn(arg) if arg == 2 error(42)
+let fails_on_3 = fn(arg) if arg == 3 error(17)
 
-const foo = fn(arg)
+let foo = fn(arg)
     try
         fails_on_1(arg)
         fails_on_2(arg)
         fails_on_3(arg)
-    catch (let err)
+    catch let err
         return err
 
     return 99
 
-print(for (let i in 0:4) foo(i)) # [99, 69, 42, 17]
+print(for let i in 0:4 foo(i)) # [99, 69, 42, 17]
 print(try fails_on_1(input("give number: ") as int) catch "gave 1")
 ```
 
 ### Destructuring assignment
 ```julia
-const add = fn ((a,b)) a + b
-const tuplify = fn (a,b) (a,b)
+let add = fn ((a,b)) a + b
+let tuplify = fn (a,b) (a,b)
 return add(tuplify(1,2)) # 3
 ```
 
@@ -156,7 +197,7 @@ std.debug.assert(bog_integer == 8);
 ```
 
 ```julia
-const {pow} = import("my_lib")
+let {pow} = import("my_lib")
 
 return 2 * pow(2)
 ```
