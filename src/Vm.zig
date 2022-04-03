@@ -73,6 +73,8 @@ pub const Frame = struct {
     stack: Stack = .{},
     /// Stack of error handlers that have been set up.
     err_handlers: ErrHandlers = .{ .short = .{} },
+    /// If true resuming this frame throws an error.
+    finished: bool = false,
 
     pub fn deinit(f: *Frame, vm: *Vm) void {
         f.err_handlers.deinit(vm.gc.gpa);
@@ -116,7 +118,7 @@ pub const Frame = struct {
         return &f.stack.items[@enumToInt(ref)];
     }
 
-    pub inline fn val(f: *Frame, ref: Ref) *Value {
+    pub fn val(f: *Frame, ref: Ref) *Value {
         return f.stack.items[@enumToInt(ref)];
     }
 
@@ -283,11 +285,14 @@ pub fn compileAndRun(vm: *Vm, file_path: []const u8) !*Value {
     frame_val.* = .{ .frame = &frame };
     defer frame_val.* = .{ .int = 0 }; // clear frame
 
-    return vm.run(&frame);
+    return vm.run(&frame) catch |err| switch (err) {
+        error.Suspended => return frame.fatal(vm, "TODO main function suspended"),
+        else => |e| return e,
+    };
 }
 
 /// Continues execution from current instruction pointer.
-pub fn run(vm: *Vm, f: *Frame) Error!*Value {
+pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
     const mod = f.mod;
     const body = f.body;
     const ops = mod.code.items(.op);
@@ -1068,40 +1073,103 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                     f.ip = data[inst].jump_condition.offset;
                 }
             },
+            .@"await" => {
+                const arg = f.val(data[inst].un);
+
+                if (arg.* != .frame) {
+                    try f.throw(vm, "expected a function frame");
+                    continue;
+                }
+                if (arg.frame.finished) {
+                    try f.throw(vm, "attempt to resume a finished function frame");
+                    continue;
+                }
+
+                const returned = vm.run(arg.frame) catch |err| {
+                    if (err == error.Suspended) {
+                        // rerun this await instruction once this function is resumed
+                        f.ip -= 1;
+                    }
+                    return err;
+                };
+                arg.frame.finished = true;
+
+                if (returned.* == .err) {
+                    if (f.err_handlers.get()) |handler| {
+                        const handler_operand = try f.newRef(vm, handler.operand);
+                        handler_operand.* = returned.err;
+                        f.ip = handler.offset;
+                    }
+                }
+                const res = try f.newRef(vm, ref);
+                res.* = returned;
+            },
+            .@"suspend" => {
+                return error.Suspended;
+            },
+            .@"resume" => {
+                const arg = f.val(data[inst].un);
+
+                if (arg.* != .frame) {
+                    try f.throw(vm, "expected a function frame");
+                    continue;
+                }
+                if (arg.frame.finished) {
+                    try f.throw(vm, "attempt to resume a finished function frame");
+                    continue;
+                }
+
+                _ = vm.run(arg.frame) catch |err| {
+                    if (err == error.Suspended) {
+                        // not our problem
+                        continue;
+                    }
+                    return err;
+                };
+            },
             .call,
             .call_one,
             .call_zero,
             .this_call,
             .this_call_zero,
+            .async_call,
+            .async_call_one,
+            .async_call_zero,
+            .async_this_call,
+            .async_this_call_zero,
             => {
                 var buf: [1]Ref = undefined;
                 var args: []const Ref = &.{};
                 var callee: *Value = undefined;
                 var this: *Value = Value.Null;
                 switch (ops[inst]) {
-                    .call => {
+                    .call, .async_call => {
                         const extra = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
                         callee = f.val(extra[0]);
                         args = extra[1..];
                     },
-                    .call_one => {
+                    .call_one, .async_call_one => {
                         callee = f.val(data[inst].bin.lhs);
                         buf[0] = data[inst].bin.rhs;
                         args = &buf;
                     },
-                    .call_zero => callee = f.val(data[inst].un),
-                    .this_call => {
+                    .call_zero, .async_call_zero => callee = f.val(data[inst].un),
+                    .this_call, .async_this_call => {
                         const extra = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
                         callee = f.val(extra[0]);
                         this = f.val(extra[1]);
                         args = extra[2..];
                     },
-                    .this_call_zero => {
+                    .this_call_zero, .async_this_call_zero => {
                         callee = f.val(data[inst].bin.lhs);
                         this = f.val(data[inst].bin.rhs);
                     },
                     else => unreachable,
                 }
+                const is_async = switch (ops[inst]) {
+                    .async_call, .async_call_one, .async_call_zero, .async_this_call, .async_this_call_zero => true,
+                    else => false,
+                };
                 switch (callee.*) {
                     .native, .func => {},
                     else => {
@@ -1156,6 +1224,10 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
                                 i += 1;
                             },
                         }
+                    }
+
+                    if (is_async) {
+                        return f.fatal(vm, "TODO async call native function");
                     }
 
                     const res = callee.native.func(f.ctxThis(this, vm), args_tuple) catch |err| switch (err) {
@@ -1241,9 +1313,25 @@ pub fn run(vm: *Vm, f: *Frame) Error!*Value {
 
                     var frame_val = try vm.gc.alloc(.frame);
                     frame_val.* = .{ .frame = &new_frame };
-                    defer frame_val.* = .{ .int = 0 }; // clear frame
+                    defer if (!is_async) {
+                        frame_val.* = .{ .int = 0 }; // clear frame
+                    };
 
-                    const returned = try vm.run(&new_frame);
+                    const returned = vm.run(&new_frame) catch |err| {
+                        if (err == error.Suspended) {
+                            const duped_frame = try vm.gc.gpa.create(Frame);
+                            errdefer vm.gc.gpa.destroy(duped_frame);
+                            duped_frame.* = new_frame;
+                            frame_val.frame = duped_frame;
+                            new_frame.stack = .{};
+                            new_frame.err_handlers = .{ .short = .{} };
+
+                            const res = try f.newRef(vm, ref);
+                            res.* = frame_val;
+                            if (is_async) continue;
+                        }
+                        return err;
+                    };
                     if (returned.* == .err) {
                         if (f.err_handlers.get()) |handler| {
                             const handler_operand = try f.newRef(vm, handler.operand);
@@ -1291,7 +1379,7 @@ const ErrHandlers = extern union {
         ptr: [*]Handler,
     },
 
-    fn deinit(e: *ErrHandlers, gpa: Allocator) void {
+    pub fn deinit(e: *ErrHandlers, gpa: Allocator) void {
         if (e.short.capacity != 4) {
             gpa.free(e.long.ptr[0..e.long.capacity]);
         }
@@ -1401,7 +1489,7 @@ fn importFile(vm: *Vm, path: []const u8) !*Bytecode {
     return duped;
 }
 
-fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) !*Value {
+fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) Error!*Value {
     const mod = vm.imported_modules.get(id) orelse if (mem.endsWith(u8, id, bog.extension))
         vm.importFile(id) catch |err| switch (err) {
             error.ImportingDisabled => {
@@ -1451,7 +1539,10 @@ fn import(vm: *Vm, caller_frame: *Frame, id: []const u8) !*Value {
 
     const res = vm.run(&frame);
     try vm.storeFrame(&frame);
-    return res;
+    return res catch |err| switch (err) {
+        error.Suspended => return frame.fatal(vm, "TODO import suspended"),
+        else => |e| return e,
+    };
 }
 
 fn errorFmt(vm: *Vm, comptime fmt: []const u8, args: anytype) Vm.Error!*Value {

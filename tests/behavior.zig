@@ -860,6 +860,7 @@ fn expectCallOutput(source: []const u8, args: anytype, expected: []const u8) !vo
 
     var frame_val = try vm.gc.alloc(.frame);
     frame_val.* = .{ .frame = &frame };
+    defer frame_val.* = .{ .int = 0 }; // clear frame
 
     const res = vm.run(&frame) catch |e| switch (e) {
         else => return e,
@@ -914,6 +915,7 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
 
     var frame_val = try vm.gc.alloc(.frame);
     frame_val.* = .{ .frame = &frame };
+    defer frame_val.* = .{ .int = 0 }; // clear frame
 
     const res = vm.run(&frame) catch |e| switch (e) {
         else => return e,

@@ -154,6 +154,7 @@ fn expectError(source: []const u8, expected: []const u8) !void {
 
     var frame_val = try vm.gc.alloc(.frame);
     frame_val.* = .{ .frame = &frame };
+    defer frame_val.* = .{ .int = 0 }; // clear frame
 
     _ = vm.run(&frame) catch |e| switch (e) {
         else => return error.UnexpectedError,

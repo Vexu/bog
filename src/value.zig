@@ -46,7 +46,7 @@ pub const Type = enum(u8) {
             .func,
             .tagged,
             => @tagName(ty),
-            .frame => unreachable,
+            .frame => "frame",
             .iterator => unreachable,
             .spread => unreachable,
             .native => "func",
@@ -294,7 +294,11 @@ pub const Value = union(Type) {
     pub fn deinit(value: *Value, allocator: Allocator) void {
         switch (value.*) {
             .bool, .@"null" => return,
-            .frame => {}, // frames are managed by the VM
+            .frame => |f| {
+                f.stack.deinit(allocator);
+                f.err_handlers.deinit(allocator);
+                allocator.destroy(f);
+            },
             .int, .num, .native, .tagged, .range, .iterator, .err, .spread => {},
             .tuple => |t| allocator.free(t),
             .map => |*m| m.deinit(allocator),

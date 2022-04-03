@@ -554,6 +554,8 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .return_expr => try c.genReturn(node),
         .break_expr => try c.genBreak(node),
         .continue_expr => try c.genContinue(node),
+        .resume_expr => try c.genResume(node),
+        .suspend_expr => _ = try c.addUn(.@"suspend", undefined, null),
         .for_expr, .for_let_expr => return c.genFor(node, res),
         .while_expr, .while_let_expr => return c.genWhile(node, res),
         .if_expr,
@@ -604,6 +606,10 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         },
         .negate_expr => {
             const val = try c.genNegate(node);
+            return c.wrapResult(node, val, res);
+        },
+        .await_expr => {
+            const val = try c.genAwait(node);
             return c.wrapResult(node, val, res);
         },
         .bool_and_expr => return c.genBoolAnd(node, res),
@@ -701,7 +707,13 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         .call_expr,
         .call_expr_one,
         => {
-            const val = try c.genCall(node);
+            const val = try c.genCall(node, false);
+            return c.wrapResult(node, val, res);
+        },
+        .async_call_expr,
+        .async_call_expr_one,
+        => {
+            const val = try c.genCall(node, true);
             return c.wrapResult(node, val, res);
         },
         .member_access_expr => {
@@ -716,13 +728,6 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
             const val = try c.genFormatString(node);
             return c.wrapResult(node, val, res);
         },
-
-        .suspend_expr,
-        .resume_expr,
-        .async_call_expr,
-        .async_call_expr_one,
-        .await_expr,
-        => @panic("TODO"),
     }
     return c.wrapResult(node, .empty, res);
 }
@@ -784,6 +789,15 @@ fn genContinue(c: *Compiler, node: Node.Index) !void {
         return c.reportErr("continue outside of loop", node);
 
     _ = try c.addInst(.jump, .{ .jump = loop.first_inst }, null);
+}
+
+fn genResume(c: *Compiler, node: Node.Index) !void {
+    const data = c.tree.nodes.items(.data);
+    const operand = try c.genNode(data[node].un, .value);
+    if (!operand.isRt()) {
+        return c.reportErr("expected a function frame", data[node].un);
+    }
+    _ = try c.addUn(.@"resume", operand.getRt(), node);
 }
 
 fn createListComprehension(c: *Compiler, ref: ?Ref) !Result {
@@ -1251,6 +1265,7 @@ const type_id_map = std.ComptimeStringMap(bog.Type, .{
     .{ "err", .err },
     .{ "range", .range },
     .{ "func", .func },
+    .{ "frame", .frame },
     .{ "tagged", .tagged },
 });
 
@@ -1399,6 +1414,18 @@ fn genNegate(c: *Compiler, node: Node.Index) Error!Value {
     } else {
         return Value{ .num = -operand.num };
     }
+}
+
+fn genAwait(c: *Compiler, node: Node.Index) Error!Value {
+    const data = c.tree.nodes.items(.data);
+    const operand = try c.genNode(data[node].un, .value);
+
+    if (!operand.isRt()) {
+        return c.reportErr("expected a function frame", data[node].un);
+    }
+
+    const ref = try c.addUn(.@"await", operand.getRt(), node);
+    return Value{ .ref = ref };
 }
 
 fn needNum(a: Value, b: Value) bool {
@@ -2051,7 +2078,7 @@ fn genFn(c: *Compiler, node: Node.Index) Error!Value {
     return Value{ .ref = func_ref };
 }
 
-fn genCall(c: *Compiler, node: Node.Index) Error!Value {
+fn genCall(c: *Compiler, node: Node.Index, is_async: bool) Error!Value {
     var buf: [2]Node.Index = undefined;
     const items = c.tree.nodeItems(node, &buf);
 
@@ -2085,6 +2112,11 @@ fn genCall(c: *Compiler, node: Node.Index) Error!Value {
         try c.list_buf.append(c.gpa, arg_ref);
     }
 
+    const ops = [2][2][3]Bytecode.Inst.Op{
+        .{ .{ .call_zero, .call_one, .call }, .{ .async_call_zero, .async_call_one, .async_call } },
+        .{ .{ undefined, .this_call_zero, .this_call }, .{ undefined, .async_this_call_zero, .async_this_call } },
+    };
+
     const arg_refs = c.list_buf.items[list_buf_top..];
     if (this) |some| {
         const res_ref = switch (arg_refs.len) {
@@ -2097,9 +2129,9 @@ fn genCall(c: *Compiler, node: Node.Index) Error!Value {
 
     const res_ref = switch (arg_refs.len) {
         0 => unreachable, // callee is always added
-        1 => try c.addUn(.call_zero, arg_refs[0], node),
-        2 => try c.addBin(.call_one, arg_refs[0], arg_refs[1], node),
-        else => try c.addExtra(.call, arg_refs, node),
+        1 => try c.addUn(ops[@boolToInt(this != null)][@boolToInt(is_async)][0], arg_refs[0], node),
+        2 => try c.addBin(ops[@boolToInt(this != null)][@boolToInt(is_async)][1], arg_refs[0], arg_refs[1], node),
+        else => try c.addExtra(ops[@boolToInt(this != null)][@boolToInt(is_async)][2], arg_refs, node),
     };
     return Value{ .ref = res_ref };
 }

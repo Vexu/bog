@@ -153,6 +153,7 @@ pub const Inst = struct {
         bool_not,
         bit_not,
         spread,
+        @"await",
 
         /// uses Data.un, error(A) => A
         unwrap_error,
@@ -219,10 +220,19 @@ pub const Inst = struct {
         /// uses Data.bin, lhs(this)
         this_call_zero,
 
+        // Async variants of various function call instructions.
+        async_call_zero,
+        async_call_one,
+        async_call,
+        async_this_call_zero,
+        async_this_call,
+
         // use Data.un
         ret,
         ret_null,
         throw,
+        @"suspend",
+        @"resume",
 
         pub fn needsDebugInfo(op: Op) bool {
             return switch (op) {
@@ -233,7 +243,9 @@ pub const Inst = struct {
                 .greater_than, .greater_than_equal, .mul, .pow, .add, .sub,
                 .l_shift, .r_shift, .bit_and, .bit_or, .bit_xor, .rem, .div,
                 .div_floor, .import, .build_range_step, .build_range,
-                .iter_init, .iter_next, .spread, .spread_dest, .get_int => true,
+                .iter_init, .iter_next, .spread, .spread_dest, .get_int,
+                .@"resume", .@"await", .async_call_zero, .async_call_one,
+                .async_call, .async_this_call_zero, .async_this_call,  => true,
                 // zig fmt: on
                 else => false,
             };
@@ -245,7 +257,8 @@ pub const Inst = struct {
                 .discard, .copy, .move, .append, .check_len,
                 .assert_len, .set, .push_err_handler, .pop_err_handler,
                 .jump, .jump_if_true, .jump_if_false, .jump_if_null, .ret,
-                .ret_null, .throw, .spread, .spread_dest, .get_int => false,
+                .ret_null, .throw, .spread, .spread_dest, .get_int,
+                .@"suspend", .@"resume" => false,
                 // zig fmt: on
                 else => true,
             };
@@ -440,6 +453,8 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
             .as, .is => std.debug.print("{} {s}\n", .{ data[i].bin_ty.operand, @tagName(data[i].bin_ty.ty) }),
             .ret,
             .throw,
+            .@"resume",
+            .@"await",
             .negate,
             .bool_not,
             .bit_not,
@@ -463,24 +478,25 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
                 "{d} cond {}\n",
                 .{ data[i].jump_condition.offset, data[i].jump_condition.operand },
             ),
-            .call => {
+            .call, .async_call => {
                 const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
                 std.debug.print("{}(", .{extra[0]});
                 dumpList(extra[1..]);
                 std.debug.print(")\n", .{});
             },
-            .this_call => {
+            .this_call, .async_this_call => {
                 const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
                 std.debug.print("{}.{}(", .{ extra[1], extra[0] });
                 dumpList(extra[2..]);
                 std.debug.print(")\n", .{});
             },
-            .call_one => std.debug.print("{}({})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
-            .this_call_zero => std.debug.print("{}.{}()\n", .{ data[i].bin.rhs, data[i].bin.lhs }),
-            .call_zero => std.debug.print("{}()\n", .{data[i].un}),
+            .call_one, .async_call_one => std.debug.print("{}({})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
+            .this_call_zero, .async_this_call_zero => std.debug.print("{}.{}()\n", .{ data[i].bin.rhs, data[i].bin.lhs }),
+            .call_zero, .async_call_zero => std.debug.print("{}()\n", .{data[i].un}),
             .ret_null,
             .build_error_null,
             .load_this,
+            .@"suspend",
             => std.debug.print("\n", .{}),
         }
     }
