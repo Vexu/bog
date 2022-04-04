@@ -1366,7 +1366,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                 }
                 const res = try vm.gc.alloc(.err);
                 res.* = .{ .err = val };
-                return val;
+                return res;
             },
         }
     }

@@ -865,13 +865,13 @@ pub const Value = union(Type) {
                 switch (@typeInfo(@TypeOf(res))) {
                     .ErrorSet => switch (@as(anyerror, res)) {
                         error.FatalError, error.Throw => |e| return e,
-                        else => return Value.zigToBog(ctx.vm, res),
+                        else => |e| return ctx.throw(@errorName(e)),
                     },
                     .ErrorUnion => if (res) |val| {
                         return Value.zigToBog(ctx.vm, val);
                     } else |err| switch (@as(anyerror, err)) {
                         error.FatalError, error.Throw => |e| return e,
-                        else => return Value.zigToBog(ctx.vm, res),
+                        else => |e| return ctx.throw(@errorName(e)),
                     },
                     else => return Value.zigToBog(ctx.vm, res),
                 }
