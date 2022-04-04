@@ -364,10 +364,7 @@ fn findSymbol(c: *Compiler, tok: TokenIndex) !FoundSymbol {
         for (c.globals.items) |global| {
             if (mem.eql(u8, global.name, name)) {
                 const ref = try c.addInst(.load_global, .{ .un = global.ref }, null);
-                return FoundSymbol{
-                    .ref = ref,
-                    .mut = global.mut,
-                };
+                return FoundSymbol{ .ref = ref, .mut = global.mut, .global = true };
             }
         }
     }
@@ -1826,6 +1823,8 @@ fn genAugAssign(c: *Compiler, node: Node.Index, res: Result) Error!Value {
                 .extra = extra,
             },
         }, node);
+    } else if (aug_assign.global) {
+        _ = try c.addBin(.store_global, aug_assign.val, res_ref, null);
     } else {
         _ = try c.addBin(.move, aug_assign.val, res_ref, null);
     }
@@ -2271,6 +2270,7 @@ const Lval = union(enum) {
         val: Ref = undefined,
         container: ?Ref = null,
         index: Ref = undefined,
+        global: bool = false,
     };
 };
 
@@ -2339,7 +2339,10 @@ fn genLvalIdent(c: *Compiler, node: Node.Index, lval: Lval, mutable: bool) Error
             if (!sym.mut) {
                 return c.reportErr("assignment to constant", node);
             }
-            if (val.* == .mut) {
+            if (sym.global) {
+                const val_ref = try c.makeRuntime(val.*);
+                _ = try c.addBin(.store_global, sym.ref, val_ref, null);
+            } else if (val.* == .mut) {
                 _ = try c.addBin(.copy, sym.ref, val.mut, null);
             } else {
                 const val_ref = try c.makeRuntime(val.*);
@@ -2352,6 +2355,7 @@ fn genLvalIdent(c: *Compiler, node: Node.Index, lval: Lval, mutable: bool) Error
                 return c.reportErr("assignment to constant", node);
             }
             aug.val = sym.ref;
+            aug.global = sym.global;
         },
     }
 }

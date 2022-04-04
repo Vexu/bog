@@ -523,6 +523,12 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                     return f.fatal(vm, "use of undefined variable");
                 res.* = f.module_frame.stack.items[ref_int];
             },
+            .store_global => {
+                const val = try f.valDupeSimple(vm, data[inst].bin.rhs);
+                const load_inst = body[Bytecode.refToIndex(data[inst].bin.lhs, f.params)];
+                const res = try f.module_frame.newRef(vm, data[load_inst].un);
+                res.* = val;
+            },
             .load_capture => {
                 const index = @enumToInt(data[inst].un);
                 const res = try f.newRef(vm, ref);

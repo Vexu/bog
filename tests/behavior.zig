@@ -1,3 +1,18 @@
+test "suspend/resume" {
+    try expectOutput(
+        \\let mut count = 0
+        \\let foo = fn()
+        \\    count += 1
+        \\    suspend
+        \\    count += 1
+        \\
+        \\let foo_frame = async foo()
+        \\if count != 1 throw "bad"
+        \\resume foo_frame
+        \\if count != 2 throw "bad"
+    , "null");
+}
+
 test "simple values are duped before being added to an aggregate value" {
     try expectOutput(
         \\let b = []

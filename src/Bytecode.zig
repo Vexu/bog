@@ -106,6 +106,8 @@ pub const Inst = struct {
         move,
         /// res = GLOBAL(operand)
         load_global,
+        /// GLOBAL(lhs) = rhs
+        store_global,
         /// res = CAPTURE(operand)
         load_capture,
         /// res = THIS
@@ -258,7 +260,7 @@ pub const Inst = struct {
                 .assert_len, .set, .push_err_handler, .pop_err_handler,
                 .jump, .jump_if_true, .jump_if_false, .jump_if_null, .ret,
                 .ret_null, .throw, .spread, .spread_dest, .get_int,
-                .@"suspend", .@"resume" => false,
+                .@"suspend", .@"resume", .store_global => false,
                 // zig fmt: on
                 else => true,
             };
@@ -423,6 +425,10 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
                 std.debug.print("{} {d}\n", .{ operand, len });
             },
             .load_global => std.debug.print("GLOBAL({})\n", .{data[i].un}),
+            .store_global => {
+                const load_inst = body[refToIndex(data[i].bin.lhs, params)];
+                std.debug.print("GLOBAL({}) = {}\n", .{ data[load_inst].un, data[i].bin.rhs });
+            },
             .load_capture => std.debug.print("CAPTURE({d})\n", .{@enumToInt(data[i].un)}),
             .copy,
             .move,
