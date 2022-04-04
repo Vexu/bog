@@ -555,6 +555,16 @@ pub const Value = union(Type) {
                 },
                 else => return ctx.throw("invalid index type"),
             },
+            .frame => |f| switch (index.*) {
+                .str => |s| {
+                    if (mem.eql(u8, s.data, "finished")) {
+                        res.* = if (f.result_val != null) Value.True else Value.False;
+                    } else {
+                        return ctx.throw("no such property");
+                    }
+                },
+                else => return ctx.throw("invalid index type"),
+            },
             else => return ctx.throw("invalid subscript type"),
         }
     }

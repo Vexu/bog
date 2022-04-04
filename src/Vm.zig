@@ -55,13 +55,13 @@ pub const Frame = struct {
     body: []const u32,
     /// Index into `body`.
     ip: u32 = 0,
+    /// Number of parameters current function has. Needed to calculate
+    /// a reference to instructions.
+    params: u32,
     /// The module in which this function lives in.
     mod: *Bytecode,
     /// Values this function captures.
     captures: []*Value,
-    /// Number of parameters current function has. Needed to calculate
-    /// a reference to instructions.
-    params: u32,
 
     /// Value of `this` as set by the caller.
     this: *Value = Value.Null,
@@ -73,8 +73,8 @@ pub const Frame = struct {
     stack: Stack = .{},
     /// Stack of error handlers that have been set up.
     err_handlers: ErrHandlers = .{ .short = .{} },
-    /// If true resuming this frame throws an error.
-    finished: bool = false,
+    /// If not null then the frame has finished.
+    result_val: ?*Value = null,
 
     pub fn deinit(f: *Frame, vm: *Vm) void {
         f.err_handlers.deinit(vm.gc.gpa);
@@ -1101,8 +1101,9 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                     try f.throw(vm, "expected a function frame");
                     continue;
                 }
-                if (arg.frame.finished) {
-                    try f.throw(vm, "attempt to resume a finished function frame");
+                if (arg.frame.result_val) |some| {
+                    const res = try f.newRef(vm, ref);
+                    res.* = some;
                     continue;
                 }
 
@@ -1113,7 +1114,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                     }
                     return err;
                 };
-                arg.frame.finished = true;
+                arg.frame.result_val = returned;
 
                 if (returned.* == .err) {
                     if (f.err_handlers.get()) |handler| {
@@ -1135,7 +1136,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                     try f.throw(vm, "expected a function frame");
                     continue;
                 }
-                if (arg.frame.finished) {
+                if (arg.frame.result_val != null) {
                     try f.throw(vm, "attempt to resume a finished function frame");
                     continue;
                 }
@@ -1365,8 +1366,15 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                     try vm.storeFrame(&new_frame);
                 }
             },
-            .ret => return f.val(data[inst].un),
-            .ret_null => return Value.Null,
+            .ret => {
+                const val = f.val(data[inst].un);
+                f.result_val = val;
+                return val;
+            },
+            .ret_null => {
+                f.result_val = Value.Null;
+                return Value.Null;
+            },
             .throw => {
                 const val = f.val(data[inst].un);
                 if (f.err_handlers.get()) |handler| {
@@ -1377,6 +1385,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                 }
                 const res = try vm.gc.alloc(.err);
                 res.* = .{ .err = val };
+                f.result_val = res;
                 return res;
             },
         }
