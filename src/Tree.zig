@@ -84,12 +84,12 @@ pub fn firstToken(tree: Tree, node: Node.Index) Token.Index {
         .catch_let_expr,
         .block_stmt,
         .block_stmt_two,
+        .import_expr,
         => return toks[cur],
         .mut_ident_expr,
         .enum_expr,
         .match_case_catch_all,
         => return tree.prevToken(toks[cur]),
-        .import_expr => return tree.prevToken(tree.prevToken(toks[cur])),
         .call_expr => cur = tree.extra[data[cur].range.start],
         .async_call_expr => {
             cur = tree.extra[data[cur].range.start];
@@ -184,7 +184,6 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .suspend_expr,
         .member_access_expr,
         => return tokens[cur],
-        .import_expr => return tree.nextToken(tokens[cur]),
         .match_case,
         .try_expr,
         .fn_expr,
@@ -270,6 +269,7 @@ pub fn lastToken(tree: Tree, node: Node.Index) Token.Index {
         .spread_expr,
         .await_expr,
         .match_case_catch_all,
+        .import_expr,
         => cur = data[cur].un,
         .is_expr, .as_expr => return tokens[cur],
         .decl,
@@ -521,7 +521,7 @@ pub const Node = struct {
         error_expr,
         /// @token un, un may be omitted
         enum_expr,
-        /// import(token)
+        /// import un
         import_expr,
         /// lhs[rhs]
         array_access_expr,

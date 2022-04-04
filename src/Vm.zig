@@ -484,10 +484,15 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                 };
             },
             .import => {
-                const res = try f.newRef(vm, ref);
-                const str = mod.strings[data[inst].str.offset..][0..data[inst].str.len];
+                const val = f.val(data[inst].un);
+                if (val.* != .str) {
+                    try f.throw(vm, "expected a string");
+                    continue;
+                }
+                const res_val = try vm.import(f, val.str.data);
 
-                res.* = try vm.import(f, str);
+                const res = try f.newRef(vm, ref);
+                res.* = res_val;
             },
             .discard => {
                 const arg = f.val(data[inst].un);

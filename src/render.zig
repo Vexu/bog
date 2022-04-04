@@ -164,12 +164,10 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
             try renderNode(tree, init_node, aiw, space);
         },
         .import_expr => {
-            const str = tokens[node];
-            const l_paren = tree.prevToken(str);
-            try renderToken(tree, tree.prevToken(l_paren), aiw, .none);
-            try renderToken(tree, l_paren, aiw, .none);
-            try renderToken(tree, str, aiw, .none);
-            try renderToken(tree, tree.nextToken(str), aiw, space);
+            const import = tokens[node];
+            const str = data[node].un;
+            try renderToken(tree, import, aiw, .space);
+            try renderNode(tree, str, aiw, space);
         },
         .error_expr => {
             const initializer = data[node].un;

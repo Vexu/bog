@@ -125,8 +125,8 @@ test "std.gc" {
         return error.SkipZigTest;
     }
     try expectOutput(
-        \\let {collect} = import("std.gc")
-        \\let json = import("std.json")
+        \\let {collect} = import "std.gc"
+        \\let json = import "std.json"
         \\
         \\let makeGarbage = fn()
         \\    json.stringify({"a" = [2, "foo", null]})
@@ -140,13 +140,13 @@ test "std.gc" {
 
 test "std.json" {
     try expectOutput(
-        \\let json = import("std.json")
+        \\let json = import "std.json"
         \\return json.parse("{\"a\":[2,\"foo\",null]}")
     ,
         \\{"a" = [2, "foo", null]}
     );
     try expectOutput(
-        \\let json = import("std.json")
+        \\let json = import "std.json"
         \\return json.stringify({"a" = [2, "foo", null]})
     ,
         \\"{\"a\":[2,\"foo\",null]}"
@@ -312,8 +312,8 @@ test "list.append" {
 test "std.map" {
     try expectOutput(
         \\let val = {foo = 2, bar = 3, 0 = 515, [1] = [2]}
-        \\let map = import("std.map")
-        \\let {assert} = import("std.debug")
+        \\let map = import "std.map"
+        \\let {assert} = import "std.debug"
         \\let keys = map.keys(val)
         \\assert(keys is list and keys.len == 4)
         \\let values = map.values(val)

@@ -80,7 +80,7 @@ primary_expr
     | initializer
     | "error" initializer?
     | "@" IDENTIFIER initializer?
-    | "import" "(" STRING ")"
+    | "import" block_or_expr
     | if
     | while
     | for

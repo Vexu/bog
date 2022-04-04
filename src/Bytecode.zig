@@ -355,7 +355,7 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
             .primitive => std.debug.print("{s}\n", .{@tagName(data[i].primitive)}),
             .int => std.debug.print("{d}\n", .{data[i].int}),
             .num => std.debug.print("{d}\n", .{data[i].num}),
-            .import, .str, .unwrap_tagged, .unwrap_tagged_or_null => {
+            .str, .unwrap_tagged, .unwrap_tagged_or_null => {
                 const str = b.strings[data[i].str.offset..][0..data[i].str.len];
                 std.debug.print("{s}\n", .{str});
             },
@@ -470,6 +470,7 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
             .discard,
             .build_error,
             .copy_un,
+            .import,
             => std.debug.print("{}\n", .{data[i].un}),
             .pop_err_handler,
             .jump,

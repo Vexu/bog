@@ -2007,13 +2007,15 @@ fn genRange(c: *Compiler, node: Node.Index) Error!Value {
 }
 
 fn genImport(c: *Compiler, node: Node.Index) Error!Value {
-    const tokens = c.tree.nodes.items(.token);
-    const str = try c.parseStr(tokens[node]);
+    const data = c.tree.nodes.items(.data);
+    const operand = data[node].un;
+    const str_val = try c.genNode(operand, .value);
+    if (!str_val.isRt() and str_val != .str) {
+        return c.reportErr("expected a string", operand);
+    }
+    const str_ref = try c.makeRuntime(str_val);
 
-    const res_ref = try c.addInst(.import, .{ .str = .{
-        .len = @intCast(u32, str.len),
-        .offset = try c.putString(str),
-    } }, node);
+    const res_ref = try c.addUn(.import, str_ref, operand);
     return Value{ .ref = res_ref };
 }
 

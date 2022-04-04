@@ -632,7 +632,7 @@ pub const Parser = struct {
     ///     | initializer
     ///     | "error" initializer?
     ///     | "@" IDENTIFIER initializer?
-    ///     | "import" "(" STRING ")"
+    ///     | "import" block_or_expr
     ///     | if
     ///     | while
     ///     | for
@@ -666,11 +666,8 @@ pub const Parser = struct {
                 return p.addUn(.enum_expr, ident, init);
             },
             .keyword_import => {
-                p.skipNl();
-                _ = try p.expectToken(.l_paren, .skip_nl);
-                const str = try p.expectToken(.string, .skip_nl);
-                _ = try p.expectToken(.r_paren, skip_nl);
-                return p.addUn(.import_expr, str, null_node);
+                const str = try p.blockOrExpr(skip_nl, level);
+                return p.addUn(.import_expr, tok, str);
             },
             else => {
                 p.tok_i = tok;

@@ -3,14 +3,14 @@ Small, strongly typed, embeddable language.
 
 ### Hello world
 ```julia
-let {print} = import("std.io")
+let {print} = import "std.io"
 let world = "world"
 print(f"hello {world}!")
 ```
 
 ### Async/await
 ```julia
-let {print} = import("std.io")
+let {print} = import "std.io"
 
 let foo = fn()
     print("foo started")
@@ -50,7 +50,7 @@ main finished: 1
 
 ### Calculator
 ```julia
-let {input, print} = import("std.io")
+let {input, print} = import "std.io"
 
 try
     let val1 = input("first argument: ") as num
@@ -71,8 +71,8 @@ catch
 ### Use command line arguments
 ```julia
 # run with `path/to/bog path/here.bog arg1 arg2 "foo"`
-let {print} = import("io")
-print(import("args"))
+let {print} = import "std.io"
+print(import "args")
 ```
 
 ### Loops
@@ -100,7 +100,7 @@ return val # 0
 
 ### Error handling
 ```julia
-let {input, print} = import("std.io")
+let {input, print} = import "std.io"
 
 let fails_on_1 = fn(arg) if arg == 1 error(69)
 let fails_on_2 = fn(arg) if arg == 2 error(42)
@@ -197,7 +197,7 @@ std.debug.assert(bog_integer == 8);
 ```
 
 ```julia
-let {pow} = import("my_lib")
+let {pow} = import "my_lib"
 
 return 2 * pow(2)
 ```
