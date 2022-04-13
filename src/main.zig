@@ -162,6 +162,7 @@ fn fmtFile(gpa: std.mem.Allocator, name: []const u8) FmtError!bool {
     defer errors.deinit();
 
     var tree = bog.parse(gpa, source, name, &errors) catch |e| switch (e) {
+        error.NeedInput => unreachable,
         error.TokenizeError, error.ParseError => {
             try errors.render(std.io.getStdErr().writer());
             return true;

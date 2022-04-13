@@ -483,7 +483,7 @@ pub const Value = union(Type) {
                 try writer.print("@{s}", .{t.name});
                 if (level == 0) {
                     try writer.writeAll("(...)");
-                } else {
+                } else if (t.value != Value.Null) {
                     try t.value.dump(writer, level - 1);
                 }
             },

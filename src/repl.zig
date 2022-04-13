@@ -71,6 +71,7 @@ pub const Repl = struct {
             .tok_starts = &.{},
             .extra = std.ArrayList(bog.Node.Index).init(gpa),
             .node_buf = std.ArrayList(bog.Node.Index).init(gpa),
+            .repl = true,
         };
 
         repl.compiler = bog.Compiler{
@@ -138,10 +139,17 @@ pub const Repl = struct {
 
     fn handleLine(repl: *Repl, reader: anytype, writer: anytype) !void {
         try repl.readLine(">>> ", reader, writer);
-        while (!(try repl.tokenize())) {
+        const node = while (true) {
+            if (try repl.tokenize()) {
+                if (repl.parse()) |some| {
+                    break some orelse return;
+                } else |err| switch (err) {
+                    error.NeedInput => {},
+                    else => |e| return e,
+                }
+            }
             try repl.readLine("... ", reader, writer);
-        }
-        const node = (try repl.parse()) orelse return;
+        } else unreachable;
         try repl.compile(node);
 
         const res = try repl.vm.run(&repl.frame);
@@ -162,11 +170,9 @@ pub const Repl = struct {
                 } else continue,
                 else => |err| return err,
             };
-            try repl.buffer.append(byte);
 
-            if (byte == '\n') {
-                return;
-            }
+            try repl.buffer.append(byte);
+            if (byte == '\n') return;
 
             if (repl.buffer.items.len - start_len == 1024) {
                 return error.StreamTooLong;

@@ -58,12 +58,15 @@ pub fn parseRepl(repl: *@import("repl.zig").Repl) Parser.Error!?Node.Index {
     repl.parser.tok_ids = repl.tokenizer.tokens.items(.id);
     repl.parser.tok_starts = repl.tokenizer.tokens.items(.start);
     repl.parser.source = repl.tokenizer.it.bytes;
+    const start_i = repl.parser.tok_i;
+    errdefer repl.parser.tok_i = start_i;
+    defer repl.parser.tok_i -= 1; // go before EOF
 
+    repl.parser.skipNl();
     if (repl.parser.eatToken(.eof, .skip_nl)) |_| return null;
     const ret = try repl.parser.stmt(0);
-    _ = try repl.parser.expectToken(.nl, .skip_nl);
+    repl.parser.skipNl();
     _ = try repl.parser.expectToken(.eof, .skip_nl);
-    repl.parser.tok_i -= 1; // go before EOF
 
     repl.tree = .{
         .root_nodes = repl.parser.node_buf.items,
@@ -86,8 +89,9 @@ pub const Parser = struct {
     errors: *bog.Errors,
     source: []const u8,
     path: []const u8,
+    repl: bool = false,
 
-    pub const Error = error{ParseError} || Allocator.Error;
+    pub const Error = error{ParseError, NeedInput} || Allocator.Error;
 
     const SkipNl = enum { skip_nl, keep_nl };
 
@@ -981,6 +985,7 @@ pub const Parser = struct {
     }
 
     fn reportErr(p: *Parser, msg: []const u8, tok: Token.Index) Error {
+        if (p.repl and p.tok_ids[p.tok_i] == .eof) return error.NeedInput;
         try p.errors.add(.{ .data = msg }, p.source, p.path, p.tok_starts[tok], .err);
         return error.ParseError;
     }

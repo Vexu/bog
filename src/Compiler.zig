@@ -38,11 +38,14 @@ params: u32 = 0,
 
 code: *Code,
 
-pub fn compile(gpa: Allocator, source: []const u8, path: []const u8, errors: *Errors) (Compiler.Error || bog.Parser.Error || bog.Tokenizer.Error)!Bytecode {
+pub fn compile(gpa: Allocator, source: []const u8, path: []const u8, errors: *Errors) (Compiler.Error || error{ParseError} || bog.Tokenizer.Error)!Bytecode {
     const duped_path = try gpa.dupe(u8, path);
     errdefer gpa.free(duped_path);
 
-    var tree = try bog.parse(gpa, source, duped_path, errors);
+    var tree = bog.parse(gpa, source, duped_path, errors) catch |err| switch (err) {
+        error.NeedInput => unreachable,
+        else => |e| return e,
+    };
     defer tree.deinit(gpa);
 
     var arena_state = std.heap.ArenaAllocator.init(gpa);
@@ -100,13 +103,22 @@ pub fn compileRepl(repl: *@import("repl.zig").Repl, node: Node.Index) Compiler.E
         if (ids[node] == .decl) repl.compiler.make_ident_global = true;
         defer repl.compiler.make_ident_global = false;
 
-        break :res_val try repl.compiler.genNode(node, .value);
+        break :res_val try repl.compiler.genNode(node, .value_or_empty);
     };
-    const res_ref = try repl.compiler.makeRuntime(res_val);
+    if (res_val == .empty) {
+        repl.compiler.instructions.set(0, .{
+            .op = .ret_null,
+            .data = .{ .un = undefined },
+        });
+    } else {
+        const res_ref = try repl.compiler.makeRuntime(res_val);
+        repl.compiler.instructions.set(0, .{
+            .op = .ret,
+            .data = .{ .un = res_ref },
+        });
+    }
 
     // add return
-    const data = repl.compiler.instructions.items(.data);
-    data[0] = .{ .un = res_ref };
     try repl.compiler.code.append(repl.compiler.gpa, 0);
 
     try repl.compiler.resolveGlobals();
@@ -481,6 +493,9 @@ const Result = union(enum) {
     /// A returnable value is expected
     ret,
 
+    /// A value or nothing is expected
+    value_or_empty,
+
     /// returns .empty if res != .rt
     fn toVal(res: Result) Value {
         return if (res == .ref) .{ .ref = res.ref } else .empty;
@@ -488,7 +503,7 @@ const Result = union(enum) {
 };
 
 fn wrapResult(c: *Compiler, node: Node.Index, val: Value, res: Result) Error!Value {
-    if (val == .empty and res != .discard) {
+    if (val == .empty and res != .discard and res != .value_or_empty) {
         return c.reportErr("expected a value", node);
     }
     if (res == .discard and val.isRt()) {
@@ -827,7 +842,7 @@ fn createListComprehension(c: *Compiler, ref: ?Ref) !Result {
 fn genFor(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     const sub_res = switch (res) {
         .discard => res,
-        .value, .ret => try c.createListComprehension(null),
+        .value, .ret, .value_or_empty => try c.createListComprehension(null),
         .ref => |ref| try c.createListComprehension(ref),
     };
     const for_expr = Tree.For.get(c.tree.*, node);
@@ -895,7 +910,7 @@ fn genFor(c: *Compiler, node: Node.Index, res: Result) Error!Value {
 fn genWhile(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     const sub_res = switch (res) {
         .discard => res,
-        .value, .ret => try c.createListComprehension(null),
+        .value, .ret, .value_or_empty => try c.createListComprehension(null),
         .ref => |ref| try c.createListComprehension(ref),
     };
     const while_expr = Tree.While.get(c.tree.*, node);
@@ -1005,7 +1020,7 @@ fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     }
     const sub_res = switch (res) {
         .ref, .discard, .ret => res,
-        .value => val: {
+        .value, .value_or_empty => val: {
             // add a dummy instruction we can store the value into
             break :val Result{ .ref = try c.addUn(.nop, undefined, null) };
         },
@@ -1044,7 +1059,7 @@ fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
 fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     const sub_res = switch (res) {
         .ref, .discard, .ret => res,
-        .value => val: {
+        .value, .value_or_empty => val: {
             // add a dummy instruction we can store the value into
             break :val Result{ .ref = try c.addUn(.nop, undefined, null) };
         },
@@ -1165,7 +1180,7 @@ fn genTry(c: *Compiler, node: Node.Index, res: Result) Error!Value {
 
     const sub_res = switch (res) {
         .ref, .discard, .ret => res,
-        .value => val: {
+        .value, .value_or_empty => val: {
             // add a dummy instruction we can store the value into
             break :val Result{ .ref = try c.addUn(.nop, undefined, null) };
         },
@@ -1762,7 +1777,7 @@ fn genArithmetic(c: *Compiler, node: Node.Index) Error!Value {
 }
 
 fn genAssign(c: *Compiler, node: Node.Index, res: Result) Error!Value {
-    if (res != .discard) {
+    if (res != .discard and res != .value_or_empty) {
         return c.reportErr("assignment produces no value", node);
     }
     const data = c.tree.nodes.items(.data);
@@ -1775,7 +1790,7 @@ fn genAssign(c: *Compiler, node: Node.Index, res: Result) Error!Value {
 }
 
 fn genAugAssign(c: *Compiler, node: Node.Index, res: Result) Error!Value {
-    if (res != .discard) {
+    if (res != .discard and res != .value_or_empty) {
         return c.reportErr("assignment produces no value", node);
     }
     const data = c.tree.nodes.items(.data);
@@ -2063,7 +2078,7 @@ fn genFn(c: *Compiler, node: Node.Index) Error!Value {
             .pow_assign, .div_assign, .div_floor_assign, .rem_assign, .l_shift_assign,
             .r_shift_assign, .bit_and_assign, .bit_or_assign, .bit_xor_assign => .discard,
             // zig fmt: on
-            else => .value,
+            else => .value_or_empty,
         };
 
         const body_val = try c.genNode(body, sub_res);

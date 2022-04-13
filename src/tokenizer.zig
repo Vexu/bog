@@ -497,8 +497,8 @@ pub const Tokenizer = struct {
             },
         } else {
             if (self.repl) {
-                if (self.indent_level == 0 and self.tokens.len > 2) {
-                    switch (self.tokens.items(.id)[self.tokens.len - 3]) {
+                if (self.indent_level == 0 and self.tokens.len > 1) {
+                    switch (self.tokens.items(.id)[self.tokens.len - 2]) {
                         // no further input is expected after these tokens
                         // so we can stop asking for more input
                         .identifier,
