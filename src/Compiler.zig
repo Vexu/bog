@@ -2524,8 +2524,10 @@ fn genLvalMap(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
 
     for (items) |item| {
         var key: Ref = undefined;
+        var value: Node.Index = data[item].bin.rhs;
         if (data[item].bin.lhs != 0) {
-            const last_node = c.getLastNode(data[item].bin.lhs);
+            value = data[item].bin.lhs;
+            const last_node = c.getLastNode(data[item].bin.rhs);
             const maybe_ident = c.tree.firstToken(last_node);
             if (tok_ids[maybe_ident] == .identifier) {
                 // `ident = value` is equal to `"ident" = value`
@@ -2539,11 +2541,11 @@ fn genLvalMap(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
                 defer c.make_ident_global = old_make_global;
                 c.make_ident_global = false;
 
-                var key_val = try c.genNode(data[item].bin.lhs, .value);
+                var key_val = try c.genNode(data[item].bin.rhs, .value);
                 key = try c.makeRuntime(key_val);
             }
         } else {
-            const last_node = c.getLastNode(data[item].bin.rhs);
+            const last_node = c.getLastNode(value);
             const maybe_ident = c.tree.firstToken(last_node);
             if (tok_ids[maybe_ident] != .identifier) {
                 return c.reportErr("expected a key", item);
@@ -2558,7 +2560,7 @@ fn genLvalMap(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
 
         const res_ref = try c.addBin(.get, container_ref, key, item);
         const res_val = Value{ .ref = res_ref };
-        try c.genLval(data[item].bin.rhs, switch (lval) {
+        try c.genLval(value, switch (lval) {
             .let => .{ .let = &res_val },
             .assign => .{ .assign = &res_val },
             else => unreachable,
@@ -2797,8 +2799,10 @@ fn genTryUnwrapMap(c: *Compiler, node: Node.Index, val: *const Value) Error!void
 
     for (items) |item| {
         var key: Ref = undefined;
+        var value: Node.Index = data[item].bin.rhs;
         if (data[item].bin.lhs != 0) {
-            const last_node = c.getLastNode(data[item].bin.lhs);
+            value = data[item].bin.lhs;
+            const last_node = c.getLastNode(data[item].bin.rhs);
             const maybe_ident = c.tree.firstToken(last_node);
             if (tok_ids[maybe_ident] == .identifier) {
                 // `ident = value` is equal to `"ident" = value`
@@ -2808,16 +2812,16 @@ fn genTryUnwrapMap(c: *Compiler, node: Node.Index, val: *const Value) Error!void
                     .offset = try c.putString(str),
                 } }, null);
             } else {
-                var key_val = try c.genNode(data[item].bin.lhs, .value);
+                var key_val = try c.genNode(data[item].bin.rhs, .value);
                 key = try c.makeRuntime(key_val);
             }
         } else {
-            const last_node = c.getLastNode(data[item].bin.rhs);
+            const last_node = c.getLastNode(value);
             const maybe_ident = c.tree.firstToken(last_node);
             if (tok_ids[maybe_ident] != .identifier) {
                 return c.reportErr("expected a key", item);
             }
-            // `ident` is equal to `"ident" = ident`
+            // `ident` is equal to `ident = "ident"`
             const str = c.tree.tokenSlice(maybe_ident);
             key = try c.addInst(.str, .{ .str = .{
                 .len = @intCast(u32, str.len),
@@ -2828,7 +2832,7 @@ fn genTryUnwrapMap(c: *Compiler, node: Node.Index, val: *const Value) Error!void
         const res_ref = try c.addBin(.get_or_null, container_ref, key, null);
         try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_null, res_ref));
 
-        try c.genTryUnwrap(data[item].bin.rhs, &.{ .ref = res_ref });
+        try c.genTryUnwrap(value, &.{ .ref = res_ref });
     }
 }
 
