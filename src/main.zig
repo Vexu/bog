@@ -108,7 +108,7 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
             process.exit(1);
         },
         .@"null" => {},
-        else => fatal("invalid return type '{}'", .{res.ty()}),
+        else => fatal("invalid return type '{s}'", .{res.typeName()}),
     }
 }
 

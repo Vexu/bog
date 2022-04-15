@@ -378,7 +378,7 @@ test "tagged values" {
 test "error map" {
     try expectOutput(
         \\let foo = error{a = 2}
-        \\let error{a = bar} = foo
+        \\let error{bar = a} = foo
         \\return bar * 2
     ,
         \\4
@@ -457,7 +457,7 @@ test "map" {
         \\let y = 2
         \\let map = {1 = 2, x = y}
         \\let {x} = map
-        \\let {x = foo} = map
+        \\let {foo = x} = map
         \\return x == foo
     ,
         \\true

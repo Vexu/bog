@@ -47,7 +47,7 @@ pub fn ln(ctx: Vm.Context, val: *Value) !*Value {
             res.* = Value{ .num = std.math.ln(n) };
             return res;
         },
-        else => return ctx.throwFmt("ln expects a number, got '{}'", .{val.ty()}),
+        else => return ctx.throwFmt("ln expects a number, got '{s}'", .{val.typeName()}),
     }
 }
 
@@ -64,7 +64,7 @@ pub fn sqrt(ctx: Vm.Context, val: *Value) !*Value {
             res.* = Value{ .num = std.math.sqrt(n) };
             return res;
         },
-        else => return ctx.throwFmt("sqrt expects a number, got '{}'", .{val.ty()}),
+        else => return ctx.throwFmt("sqrt expects a number, got '{s}'", .{val.typeName()}),
     };
 }
 

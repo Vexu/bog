@@ -119,7 +119,7 @@ const PageAndIndex = struct {
     index: usize,
 };
 
-fn markVal(gc: *Gc, maybe_value: ?*const Value) void {
+pub fn markVal(gc: *Gc, maybe_value: ?*const Value) void {
     const value = maybe_value orelse return;
     // These will never be allocated
     if (value == Value.Null or
@@ -207,6 +207,11 @@ fn markGray(gc: *Gc) void {
                     .tagged => |tag| {
                         gc.markVal(tag.value);
                     },
+                    .native_val => |n| {
+                        if (n.vtable.markVal) |some| {
+                            some(n.ptr, gc);
+                        }
+                    },
                     // These values cannot be allocated in aggregate_pages
                     .native, .str, .int, .num, .range, .@"null", .bool => {},
                 }
@@ -282,6 +287,7 @@ pub fn alloc(gc: *Gc, ty: Type) !*Value {
         .iterator,
         .tagged,
         .spread,
+        .native_val,
         => return gc.allocExtra(&gc.aggregate_pages),
     }
 }

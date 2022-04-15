@@ -210,7 +210,7 @@ pub const Inst = struct {
         // use Data.jump_condition
         iter_next,
 
-        /// uses Data.extra with 
+        /// uses Data.extra with
         /// extra[0] == callee
         call,
         /// uses Data.bin, lhs(rhs)

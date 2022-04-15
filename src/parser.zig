@@ -91,7 +91,7 @@ pub const Parser = struct {
     path: []const u8,
     repl: bool = false,
 
-    pub const Error = error{ParseError, NeedInput} || Allocator.Error;
+    pub const Error = error{ ParseError, NeedInput } || Allocator.Error;
 
     const SkipNl = enum { skip_nl, keep_nl };
 

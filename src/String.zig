@@ -167,7 +167,7 @@ pub const methods = struct {
                     switch (fmt_type) {
                         'x', 'X' => {
                             if (args.t[arg_i].* != .int) {
-                                return ctx.throwFmt("'x' takes an integer as an argument, got '{}'", .{args.t[arg_i].ty()});
+                                return ctx.throwFmt("'x' takes an integer as an argument, got '{s}'", .{args.t[arg_i].typeName()});
                             }
                             try std.fmt.formatInt(args.t[arg_i].int, 16, @intToEnum(std.fmt.Case, @boolToInt(fmt[0] == 'X')), options, w);
                         },

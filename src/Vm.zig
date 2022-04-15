@@ -776,7 +776,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                 switch (rhs.*) {
                     .str, .tuple, .list, .map, .range => {},
                     else => {
-                        try f.throwFmt(vm, "'in' not allowed with type {}", .{rhs.ty()});
+                        try f.throwFmt(vm, "'in' not allowed with type {s}", .{rhs.typeName()});
                         continue;
                     },
                 }
@@ -854,7 +854,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                     .tuple, .list => {},
                     .iterator => unreachable,
                     else => {
-                        try f.throwFmt(vm, "cannot iterate {}", .{iterable.ty()});
+                        try f.throwFmt(vm, "cannot iterate {s}", .{iterable.typeName()});
                         continue;
                     },
                 }
@@ -926,7 +926,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                     .list => |list| list.inner.items.len,
                     .tuple => |tuple| tuple.len,
                     else => {
-                        try f.throwFmt(vm, "cannot destructure non list/tuple type {}", .{container.ty()});
+                        try f.throwFmt(vm, "cannot destructure non list/tuple type {s}", .{container.typeName()});
                         continue;
                     },
                 };
@@ -952,7 +952,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                     .list => |list| list.inner.items,
                     .tuple => |tuple| tuple,
                     else => {
-                        try f.throwFmt(vm, "cannot destructure non list/tuple type {}", .{container.ty()});
+                        try f.throwFmt(vm, "cannot destructure non list/tuple type {s}", .{container.typeName()});
                         continue;
                     },
                 };
@@ -1195,7 +1195,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                 switch (callee.*) {
                     .native, .func => {},
                     else => {
-                        try f.throwFmt(vm, "cannot call '{}'", .{callee.ty()});
+                        try f.throwFmt(vm, "cannot call '{s}'", .{callee.typeName()});
                         continue;
                     },
                 }

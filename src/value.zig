@@ -27,31 +27,10 @@ pub const Type = enum(u8) {
     /// native being separate from .func is an implementation detail
     native,
 
+    native_val,
+
     /// Result of ... operand, needs special handling in contexts where allowed.
     spread,
-
-    pub fn format(ty: Type, comptime fmt: []const u8, _: std.fmt.FormatOptions, writer: anytype) !void {
-        comptime std.debug.assert(fmt.len == 0);
-        try writer.writeAll(switch (ty) {
-            .@"null",
-            .int,
-            .num,
-            .bool,
-            .str,
-            .tuple,
-            .map,
-            .list,
-            .err,
-            .range,
-            .func,
-            .tagged,
-            => @tagName(ty),
-            .frame => "frame",
-            .iterator => unreachable,
-            .spread => unreachable,
-            .native => "func",
-        });
-    }
 };
 
 pub const Value = union(Type) {
@@ -66,6 +45,7 @@ pub const Value = union(Type) {
     func: Func,
     frame: *Vm.Frame,
     native: Native,
+    native_val: NativeVal,
     tagged: struct {
         name: []const u8,
         value: *Value,
@@ -244,6 +224,26 @@ pub const Value = union(Type) {
         func: fn (Vm.Context, []*Value) NativeError!*Value,
     };
     pub const NativeError = Vm.Error || error{Throw};
+    pub const NativeVal = struct {
+        vtable: *const VTable,
+        ptr: *anyopaque,
+
+        pub const VTable = struct {
+            typeName: fn (*anyopaque) []const u8,
+            deinit: fn (*anyopaque, Allocator) void,
+            eql: fn (*anyopaque, *const Value) bool,
+
+            markVal: ?fn (*anyopaque, *bog.Gc) void,
+            hash: ?fn (*anyopaque) u32 = null,
+            get: ?fn (*anyopaque, Vm.Context, index: *const Value, res: *?*Value) NativeError!void = null,
+            set: ?fn (*anyopaque, Vm.Context, index: *const Value, new_val: *Value) NativeError!void = null,
+            contains: ?fn (*anyopaque, *const Value) bool = null,
+        };
+
+        pub inline fn unwrap(ptr: *anyopaque, comptime T: type) *T {
+            return @ptrCast(*T, @alignCast(@alignOf(T), ptr));
+        }
+    };
 
     /// Makes a distinct type which can be used as the parameter of a native function
     /// to easily get the value of `this`.
@@ -289,8 +289,27 @@ pub const Value = union(Type) {
         };
     }
 
-    pub inline fn ty(val: Value) Type {
-        return val;
+    pub fn typeName(val: Value) []const u8 {
+        return switch (val) {
+            .@"null",
+            .int,
+            .num,
+            .bool,
+            .str,
+            .tuple,
+            .map,
+            .list,
+            .err,
+            .range,
+            .func,
+            .tagged,
+            => @tagName(val),
+            .frame => "frame",
+            .iterator => unreachable,
+            .spread => unreachable,
+            .native => "func",
+            .native_val => |n| n.vtable.typeName(n.ptr),
+        };
     }
 
     /// Frees any extra memory allocated by value.
@@ -309,6 +328,7 @@ pub const Value = union(Type) {
             .list => |*l| l.deinit(allocator),
             .str => |*s| s.deinit(allocator),
             .func => |f| allocator.free(f.captures()),
+            .native_val => |n| n.vtable.deinit(n.ptr, allocator),
         }
         value.* = undefined;
     }
@@ -356,6 +376,13 @@ pub const Value = union(Type) {
                 hasher.update(tagged.name);
                 autoHash(&hasher, tagged.value);
             },
+            .native_val => |n| {
+                if (n.vtable.hash) |some| {
+                    return some(n.ptr);
+                } else {
+                    // TODO value not hashable?
+                }
+            },
         }
         return @truncate(u32, hasher.final());
     }
@@ -372,10 +399,11 @@ pub const Value = union(Type) {
                 .num => |b_val| n == b_val,
                 else => false,
             },
+            .native_val => |n| return n.vtable.eql(n.ptr, b),
             else => if (a.* != @as(std.meta.Tag(@TypeOf(b.*)), b.*)) return false,
         }
         return switch (a.*) {
-            .iterator, .spread, .int, .num => unreachable,
+            .iterator, .spread, .int, .num, .native_val => unreachable,
             .frame => a.frame == b.frame,
             .@"null" => true,
             .bool => |bool_val| bool_val == b.bool,
@@ -487,6 +515,10 @@ pub const Value = union(Type) {
                     try t.value.dump(writer, level - 1);
                 }
             },
+            .native_val => |n| {
+                // TODO expose dump function
+                try writer.writeAll(n.vtable.typeName(n.ptr));
+            },
         }
     }
 
@@ -565,6 +597,11 @@ pub const Value = union(Type) {
                 },
                 else => return ctx.throw("invalid index type"),
             },
+            .native_val => |n| if (n.vtable.get) |some| {
+                return some(n.ptr, ctx, index, res);
+            } else {
+                return ctx.throw("invalid subscript type");
+            },
             else => return ctx.throw("invalid subscript type"),
         }
     }
@@ -598,6 +635,11 @@ pub const Value = union(Type) {
             },
             .list => |*list| try list.set(ctx, index, new_val),
             .str => |*str| try str.set(ctx, index, new_val),
+            .native_val => |n| if (n.vtable.set) |some| {
+                return some(n.ptr, ctx, index, new_val);
+            } else {
+                return ctx.throw("invalid subscript type");
+            },
             .iterator => unreachable,
             else => return ctx.throw("invalid subscript type"),
         }
@@ -630,7 +672,7 @@ pub const Value = union(Type) {
                 .num => |num| num != 0,
                 .bool => unreachable,
                 .str => unreachable,
-                else => return ctx.throwFmt("cannot cast {} to bool", .{val.ty()}),
+                else => return ctx.throwFmt("cannot cast {s} to bool", .{val.typeName()}),
             };
 
             return if (bool_res) Value.True else Value.False;
@@ -644,7 +686,7 @@ pub const Value = union(Type) {
                     .num => |num| std.math.lossyCast(i64, num),
                     .bool => |b| @boolToInt(b),
                     .str => unreachable,
-                    else => return ctx.throwFmt("cannot cast {} to int", .{val.ty()}),
+                    else => return ctx.throwFmt("cannot cast {s} to int", .{val.typeName()}),
                 },
             },
             .num => .{
@@ -653,7 +695,7 @@ pub const Value = union(Type) {
                     .int => |int| @intToFloat(f64, int),
                     .bool => |b| @intToFloat(f64, @boolToInt(b)),
                     .str => unreachable,
-                    else => return ctx.throwFmt("cannot cast {} to num", .{val.ty()}),
+                    else => return ctx.throwFmt("cannot cast {s} to num", .{val.typeName()}),
                 },
             },
             .str, .list, .bool, .@"null" => unreachable,
@@ -688,6 +730,11 @@ pub const Value = union(Type) {
                 if (@rem(int - r.start, r.step) != 0) return false;
                 return true;
             },
+            .native_val => |n| if (n.vtable.contains) |some| {
+                return some(n.ptr, val);
+            } else {
+                return false; // TODO throw
+            },
             .iterator => unreachable,
             else => unreachable,
         }
@@ -699,7 +746,7 @@ pub const Value = union(Type) {
             .range => |r| start = r.start,
             .str, .tuple, .list, .map => {},
             .iterator => unreachable,
-            else => return ctx.throwFmt("cannot iterate {}", .{val.ty()}),
+            else => return ctx.throwFmt("cannot iterate {s}", .{val.typeName()}),
         }
         const iter = try ctx.vm.gc.alloc(.iterator);
         iter.* = .{
@@ -819,6 +866,32 @@ pub const Value = union(Type) {
                     return zigToBog(vm, some);
                 } else {
                     return Value.Null;
+                },
+                .Struct => {
+                    const T = @TypeOf(val);
+                    const S = struct {
+                        const vtable = NativeVal.VTable{
+                            .typeName = T.typeName,
+                            .deinit = T.deinit,
+                            .eql = T.eql,
+
+                            .markVal = if (@hasDecl(T, "markVal")) T.markVal else null,
+                            .hash = if (@hasDecl(T, "hash")) T.hash else null,
+                            .get = if (@hasDecl(T, "get")) T.get else null,
+                            .set = if (@hasDecl(T, "set")) T.set else null,
+                            .contains = if (@hasDecl(T, "contains")) T.contains else null,
+                        };
+                    };
+                    const ptr = try vm.gc.gpa.create(T);
+                    errdefer vm.gc.gpa.destroy(ptr);
+                    ptr.* = val;
+
+                    const native = try vm.gc.alloc(.native_val);
+                    native.* = .{ .native_val = .{
+                        .vtable = &S.vtable,
+                        .ptr = ptr,
+                    } };
+                    return native;
                 },
                 else => @compileError("unsupported type: " ++ @typeName(@TypeOf(val))),
             },
@@ -1040,6 +1113,7 @@ pub const Value = union(Type) {
             .range,
             .err,
             .tagged,
+            .native_val,
             => {
                 try writer.writeByte('\"');
                 try val.dump(writer, 0);
