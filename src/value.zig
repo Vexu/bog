@@ -227,6 +227,7 @@ pub const Value = union(Type) {
     pub const NativeVal = struct {
         vtable: *const VTable,
         ptr: *anyopaque,
+        type_id: usize,
 
         pub const VTable = struct {
             typeName: fn (*anyopaque) []const u8,
@@ -238,10 +239,32 @@ pub const Value = union(Type) {
             get: ?fn (*anyopaque, Vm.Context, index: *const Value, res: *?*Value) NativeError!void = null,
             set: ?fn (*anyopaque, Vm.Context, index: *const Value, new_val: *Value) NativeError!void = null,
             contains: ?fn (*anyopaque, *const Value) bool = null,
+
+            pub fn get(comptime T: type) *const VTable {
+                return &struct {
+                    const vtable = NativeVal.VTable{
+                        .typeName = T.typeName,
+                        .deinit = T.deinit,
+                        .eql = T.eql,
+
+                        .markVal = if (@hasDecl(T, "markVal")) T.markVal else null,
+                        .hash = if (@hasDecl(T, "hash")) T.hash else null,
+                        .get = if (@hasDecl(T, "get")) T.get else null,
+                        .set = if (@hasDecl(T, "set")) T.set else null,
+                        .contains = if (@hasDecl(T, "contains")) T.contains else null,
+                    };
+                }.vtable;
+            }
         };
 
         pub inline fn unwrap(ptr: *anyopaque, comptime T: type) *T {
             return @ptrCast(*T, @alignCast(@alignOf(T), ptr));
+        }
+
+        pub fn typeId(comptime _: type) usize {
+            return @ptrToInt(&struct {
+                var id: u8 = 0;
+            }.id);
         }
     };
 
@@ -867,32 +890,6 @@ pub const Value = union(Type) {
                 } else {
                     return Value.Null;
                 },
-                .Struct => {
-                    const T = @TypeOf(val);
-                    const S = struct {
-                        const vtable = NativeVal.VTable{
-                            .typeName = T.typeName,
-                            .deinit = T.deinit,
-                            .eql = T.eql,
-
-                            .markVal = if (@hasDecl(T, "markVal")) T.markVal else null,
-                            .hash = if (@hasDecl(T, "hash")) T.hash else null,
-                            .get = if (@hasDecl(T, "get")) T.get else null,
-                            .set = if (@hasDecl(T, "set")) T.set else null,
-                            .contains = if (@hasDecl(T, "contains")) T.contains else null,
-                        };
-                    };
-                    const ptr = try vm.gc.gpa.create(T);
-                    errdefer vm.gc.gpa.destroy(ptr);
-                    ptr.* = val;
-
-                    const native = try vm.gc.alloc(.native_val);
-                    native.* = .{ .native_val = .{
-                        .vtable = &S.vtable,
-                        .ptr = ptr,
-                    } };
-                    return native;
-                },
                 else => @compileError("unsupported type: " ++ @typeName(@TypeOf(val))),
             },
         }
@@ -1060,6 +1057,11 @@ pub const Value = union(Type) {
                     if (val.tagged.value.* != .@"null")
                         return ctx.throw("expected no value");
                     return e;
+                },
+                .Pointer => |info| {
+                    if (val.* != .native_val or NativeVal.typeId(info.child) != val.native_val.type_id)
+                        return ctx.throw("expected a " ++ @typeName(info.child));
+                    return NativeVal.unwrap(val.native_val.ptr, info.child);
                 },
                 else => @compileError("unsupported type: " ++ @typeName(T)),
             },
