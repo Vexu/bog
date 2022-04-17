@@ -261,6 +261,7 @@ pub fn addPackage(vm: *Vm, name: []const u8, comptime importable: anytype) Alloc
 pub fn addStd(vm: *Vm) Allocator.Error!void {
     try vm.addStdNoIo();
     try vm.addPackage("std.io", bog.std.io);
+    try vm.addPackage("std.fs", bog.std.fs);
     try vm.addPackage("std.os", bog.std.os);
 }
 
