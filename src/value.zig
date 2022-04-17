@@ -232,8 +232,8 @@ pub const Value = union(Type) {
         pub const VTable = struct {
             typeName: fn (*anyopaque) []const u8,
             deinit: fn (*anyopaque, Allocator) void,
-            eql: fn (*anyopaque, *const Value) bool,
 
+            eql: ?fn (*anyopaque, *const Value) bool = null,
             markVal: ?fn (*anyopaque, *bog.Gc) void,
             hash: ?fn (*anyopaque) u32 = null,
             get: ?fn (*anyopaque, Vm.Context, index: *const Value, res: *?*Value) NativeError!void = null,
@@ -245,8 +245,8 @@ pub const Value = union(Type) {
                     const vtable = NativeVal.VTable{
                         .typeName = T.typeName,
                         .deinit = T.deinit,
-                        .eql = T.eql,
 
+                        .eql = if (@hasDecl(T, "eql")) T.eql else null,
                         .markVal = if (@hasDecl(T, "markVal")) T.markVal else null,
                         .hash = if (@hasDecl(T, "hash")) T.hash else null,
                         .get = if (@hasDecl(T, "get")) T.get else null,
@@ -422,7 +422,11 @@ pub const Value = union(Type) {
                 .num => |b_val| n == b_val,
                 else => false,
             },
-            .native_val => |n| return n.vtable.eql(n.ptr, b),
+            .native_val => |n| if (n.vtable.eql) |some| {
+                return some(n.ptr, b);
+            } else {
+                return b.* == .native_val and n.ptr == b.native_val.ptr;
+            },
             else => if (a.* != @as(std.meta.Tag(@TypeOf(b.*)), b.*)) return false,
         }
         return switch (a.*) {
