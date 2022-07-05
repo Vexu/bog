@@ -180,10 +180,6 @@ pub fn log1p(val: f64) f64 {
     return math.log1p(val);
 }
 
-pub fn fma(x: f64, y: f64, z: f64) f64 {
-    return math.fma(f64, x, y, z);
-}
-
 pub fn asinh(val: f64) f64 {
     return math.asinh(val);
 }
