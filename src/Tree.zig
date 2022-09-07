@@ -409,7 +409,7 @@ pub const Node = struct {
             args_start: u32,
 
             pub fn str(f: @This(), extra: []Index) []Token.Index {
-                return @bitCast([]Token.Index, extra[f.fmt_start..f.args_start]);
+                return @ptrCast([]Token.Index, extra[f.fmt_start..f.args_start]);
             }
 
             pub fn exprs(f: @This(), extra: []Index) []Index {

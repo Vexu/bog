@@ -2100,7 +2100,7 @@ fn genFn(c: *Compiler, node: Node.Index) Error!Value {
     for (func.captures.items) |capture| {
         c.extra.appendAssumeCapacity(capture.parent_ref);
     }
-    c.extra.appendSliceAssumeCapacity(@bitCast([]const Ref, func.code.items));
+    c.extra.appendSliceAssumeCapacity(@ptrCast([]const Ref, func.code.items));
 
     const func_ref = try c.addInst(.build_func, .{
         .extra = .{

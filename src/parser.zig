@@ -709,7 +709,7 @@ pub const Parser = struct {
         try toks.append(try p.expectToken(.format_end, skip_nl));
 
         const fmt_start = @intCast(u32, p.extra.items.len);
-        try p.extra.appendSlice(@bitCast([]Node.Index, toks.items));
+        try p.extra.appendSlice(@ptrCast([]Node.Index, toks.items));
         const args_start = @intCast(u32, p.extra.items.len);
         try p.extra.appendSlice(p.node_buf.items[node_buf_top..]);
 
@@ -785,7 +785,7 @@ pub const Parser = struct {
         p: *Parser,
         skip_nl: SkipNl,
         level: u8,
-        parseFn: fn (*Parser, SkipNl, u8) Error!Node.Index,
+        comptime parseFn: fn (*Parser, SkipNl, u8) Error!Node.Index,
         term_id: Token.Id,
         first: ?Node.Index,
     ) Error![]Node.Index {

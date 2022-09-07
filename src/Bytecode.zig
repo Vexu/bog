@@ -386,7 +386,7 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
                 const args = @enumToInt(extra[0]);
                 const captures_len = @enumToInt(extra[1]);
                 const fn_captures = extra[2..][0..captures_len];
-                const fn_body = @bitCast([]const u32, extra[2 + captures_len ..]);
+                const fn_body = @ptrCast([]const u32, extra[2 + captures_len ..]);
                 std.debug.print("\n\nfn(args: {d}, captures: [", .{args});
                 dumpList(fn_captures);
                 std.debug.print("]) {{\n", .{});

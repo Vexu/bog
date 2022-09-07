@@ -33,8 +33,9 @@ pub fn main() !void {
         }
     }
 
-    const in = std.io.bufferedReader(std.io.getStdIn().reader()).reader();
-    var stdout = std.io.getStdOut().writer();
+    var buf_reader = std.io.bufferedReader(std.io.getStdIn().reader());
+    const in = buf_reader.reader();
+    const stdout = std.io.getStdOut().writer();
 
     try repl.run(gpa, in, stdout);
 }

@@ -221,13 +221,13 @@ pub fn tan(val: f64) f64 {
 }
 
 pub fn clz(val: i64) i64 {
-    return @clz(i64, val);
+    return @clz(val);
 }
 
 pub fn ctz(val: i64) i64 {
-    return @ctz(i64, val);
+    return @ctz(val);
 }
 
 pub fn popcount(val: i64) i64 {
-    return @popCount(i64, val);
+    return @popCount(val);
 }
