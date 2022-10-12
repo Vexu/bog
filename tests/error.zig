@@ -140,6 +140,7 @@ fn expectError(source: []const u8, expected: []const u8) !void {
     defer vm.deinit();
 
     var frame = bog.Vm.Frame{
+        .this = bog.Value.Null,
         .mod = &mod,
         .body = mod.main,
         .caller_frame = null,

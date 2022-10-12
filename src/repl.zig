@@ -109,6 +109,7 @@ pub const Repl = struct {
         try repl.vm.addStd();
 
         repl.frame = .{
+            .this = bog.Value.Null,
             .mod = &repl.bytecode,
             .body = &.{},
             .caller_frame = null,

@@ -64,7 +64,7 @@ pub const Frame = struct {
     captures: []*Value,
 
     /// Value of `this` as set by the caller.
-    this: *Value = Value.Null,
+    this: *Value, // = Value.Null,
     /// Frame of the function which called this, forms a call stack.
     caller_frame: ?*Frame,
     /// Frame of `mod.main`.
@@ -163,7 +163,7 @@ pub const Frame = struct {
     }
 
     pub fn ctx(f: *Frame, vm: *Vm) Context {
-        return .{ .vm = vm, .frame = f };
+        return .{ .this = Value.Null, .vm = vm, .frame = f };
     }
 
     pub fn ctxThis(f: *Frame, this: *Value, vm: *Vm) Context {
@@ -207,7 +207,7 @@ pub const Frame = struct {
 };
 
 pub const Context = struct {
-    this: *Value = Value.Null,
+    this: *Value, // = Value.Null,
     vm: *Vm,
     frame: *Vm.Frame,
 
@@ -281,6 +281,7 @@ pub fn compileAndRun(vm: *Vm, file_path: []const u8) !*Value {
     };
 
     var frame = Frame{
+        .this = Value.Null,
         .mod = mod,
         .body = mod.main,
         .caller_frame = null,
