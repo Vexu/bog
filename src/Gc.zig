@@ -33,7 +33,7 @@ const Page = struct {
     /// States of all values.
     meta: [val_count]State,
     /// Padding to ensure size is 1 MiB.
-    __padding: [pad_size]u8 = @compileError("do not initiate directly"),
+    __padding: [pad_size]u8,
 
     /// Index to the first free slot.
     free: u32,

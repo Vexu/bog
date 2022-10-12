@@ -18,7 +18,7 @@ gc: Gc,
 errors: Errors,
 
 /// Functions that act like modules, called by `import`ing a package by the name.
-imports: std.StringHashMapUnmanaged(fn (Context) Value.NativeError!*Value) = .{},
+imports: std.StringHashMapUnmanaged(*const fn (Context) Value.NativeError!*Value) = .{},
 
 /// All currently loaded packages and files.
 imported_modules: std.StringHashMapUnmanaged(*Bytecode) = .{},
@@ -107,7 +107,7 @@ pub const Frame = struct {
         try f.stack.ensureTotalCapacity(vm.gc.gpa, ref_int + 1);
         std.mem.set(
             ?*Value,
-            @bitCast([]?*Value, f.stack.items.ptr[f.stack.items.len .. ref_int + 1]),
+            @ptrCast([]?*Value, f.stack.items.ptr[f.stack.items.len .. ref_int + 1]),
             null,
         );
         f.stack.items.len = ref_int + 1;

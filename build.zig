@@ -29,10 +29,10 @@ pub fn build(b: *Builder) void {
     const c_example = b.addExecutable("bog_from_c", null);
     c_example.setBuildMode(mode);
     c_example.addCSourceFile("examples/bog_from_c.c", &[_][]const u8{});
-    c_example.addIncludeDir("include");
+    c_example.addIncludePath("include");
     c_example.linkLibrary(lib);
     c_example.linkLibC();
-    c_example.addLibPath("zig-cache/lib");
+    c_example.addLibraryPath("zig-cache/lib");
     c_example.step.dependOn(lib_step);
     c_example.setOutputDir("examples/bin");
 
@@ -56,7 +56,6 @@ pub fn build(b: *Builder) void {
     var exe = b.addExecutable("bog", "src/main.zig");
     exe.setBuildMode(mode);
     exe.install();
-    exe.use_stage1 = true;
 
     const fmt_step = b.step("fmt", "Format all source files");
     fmt_step.dependOn(&b.addFmt(&[_][]const u8{

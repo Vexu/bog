@@ -54,7 +54,6 @@ pub fn ln(ctx: Vm.Context, val: *Value) !*Value {
 pub fn sqrt(ctx: Vm.Context, val: *Value) !*Value {
     return switch (val.*) {
         .int => |i| {
-            _ = i;
             const res = try ctx.vm.gc.alloc(.int);
             res.* = Value{ .int = std.math.sqrt(@intCast(u64, i)) };
             return res;

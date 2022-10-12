@@ -183,7 +183,7 @@ pub const Value = union(Type) {
         }
 
         pub fn body(f: Func) []const u32 {
-            return @bitCast([]const u32, f.module.extra[f.extra_index + 2 + @enumToInt(f.module.extra[f.extra_index + 1]) ..][0..f.body_len]);
+            return @ptrCast([]const u32, f.module.extra[f.extra_index + 2 + @enumToInt(f.module.extra[f.extra_index + 1]) ..][0..f.body_len]);
         }
     };
 
@@ -221,7 +221,7 @@ pub const Value = union(Type) {
     pub const Native = struct {
         arg_count: u8,
         variadic: bool,
-        func: fn (Vm.Context, []*Value) NativeError!*Value,
+        func: *const fn (Vm.Context, []*Value) NativeError!*Value,
     };
     pub const NativeError = Vm.Error || error{Throw};
     pub const NativeVal = struct {
@@ -230,15 +230,15 @@ pub const Value = union(Type) {
         type_id: usize,
 
         pub const VTable = struct {
-            typeName: fn (*anyopaque) []const u8,
-            deinit: fn (*anyopaque, Allocator) void,
+            typeName: *const fn (*anyopaque) []const u8,
+            deinit: *const fn (*anyopaque, Allocator) void,
 
-            eql: ?fn (*anyopaque, *const Value) bool = null,
-            markVal: ?fn (*anyopaque, *bog.Gc) void,
-            hash: ?fn (*anyopaque) u32 = null,
-            get: ?fn (*anyopaque, Vm.Context, index: *const Value, res: *?*Value) NativeError!void = null,
-            set: ?fn (*anyopaque, Vm.Context, index: *const Value, new_val: *Value) NativeError!void = null,
-            contains: ?fn (*anyopaque, *const Value) bool = null,
+            eql: ?*const fn (*anyopaque, *const Value) bool = null,
+            markVal: ?*const fn (*anyopaque, *bog.Gc) void,
+            hash: ?*const fn (*anyopaque) u32 = null,
+            get: ?*const fn (*anyopaque, Vm.Context, index: *const Value, res: *?*Value) NativeError!void = null,
+            set: ?*const fn (*anyopaque, Vm.Context, index: *const Value, new_val: *Value) NativeError!void = null,
+            contains: ?*const fn (*anyopaque, *const Value) bool = null,
 
             pub fn get(comptime T: type) *const VTable {
                 return &struct {
