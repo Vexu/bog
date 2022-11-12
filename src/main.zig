@@ -33,11 +33,7 @@ pub fn main() !void {
         }
     }
 
-    var buf_reader = std.io.bufferedReader(std.io.getStdIn().reader());
-    const in = buf_reader.reader();
-    const stdout = std.io.getStdOut().writer();
-
-    try repl.run(gpa, in, stdout);
+    try repl.run(gpa, std.io.getStdIn(), std.io.getStdOut());
 }
 
 const usage =

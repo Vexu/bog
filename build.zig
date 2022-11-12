@@ -55,6 +55,7 @@ pub fn build(b: *Builder) void {
 
     var exe = b.addExecutable("bog", "src/main.zig");
     exe.setBuildMode(mode);
+    exe.addPackagePath("linenoize", "lib/linenoize/src/main.zig");
     exe.install();
 
     const fmt_step = b.step("fmt", "Format all source files");
