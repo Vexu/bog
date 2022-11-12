@@ -1,1 +1,2 @@
 *.zig text eol=lf
+lib/ linguist-vendored
