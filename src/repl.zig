@@ -159,7 +159,7 @@ pub const Repl = struct {
                     break some orelse return;
                 } else |err| switch (err) {
                     error.NeedInput => {},
-                    else => |e| return e
+                    else => |e| return e,
                 }
             }
 
@@ -188,7 +188,7 @@ pub const Repl = struct {
         } else |err| {
             switch (err) {
                 error.CtrlC => return error.EndOfStream,
-                else => |e| return e
+                else => |e| return e,
             }
         }
     }
