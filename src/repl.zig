@@ -183,6 +183,8 @@ pub const Repl = struct {
 
             try repl.buffer.appendSlice(line);
             try repl.buffer.append('\n');
+
+            try repl.ln.history.add(line);
         } else |err| {
             switch (err) {
                 error.CtrlC => return error.EndOfStream,
