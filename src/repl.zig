@@ -6,6 +6,7 @@ const bog = @import("bog.zig");
 const Vm = bog.Vm;
 const Errors = bog.Errors;
 const linenoize = @import("linenoize");
+const builtin = @import("builtin");
 
 pub fn run(gpa: Allocator, in: File, out: File) !void {
     var repl: Repl = undefined;
@@ -58,7 +59,9 @@ pub const Repl = struct {
         repl.buffer = try ArrayList(u8).initCapacity(gpa, std.mem.page_size);
         errdefer repl.buffer.deinit();
 
-        repl.ln = linenoize.Linenoise.init(gpa);
+        if (builtin.os.tag != .windows) {
+            repl.ln = linenoize.Linenoise.init(gpa);
+        }
 
         repl.tokenizer = .{
             .errors = &repl.vm.errors,
@@ -177,6 +180,16 @@ pub const Repl = struct {
     }
 
     fn readLine(repl: *Repl, in: File, out: File, prompt: []const u8) !void {
+        if (builtin.os.tag == .windows) {
+            try out.writeAll(prompt);
+
+            const line = try in.reader().readUntilDelimiterAlloc(repl.buffer.allocator, '\n', 1024);
+            defer repl.buffer.allocator.free(line);
+
+            try repl.buffer.appendSlice(line);
+            try repl.buffer.append('\n');
+            return;
+        }
         if (linenoize.linenoiseRaw(&repl.ln, in, out, prompt)) |maybe_line| {
             const line = maybe_line orelse return error.EndOfStream;
             defer repl.ln.allocator.free(line);
