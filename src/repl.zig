@@ -1,14 +1,18 @@
 const std = @import("std");
+const File = std.fs.File;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const bog = @import("bog.zig");
 const Vm = bog.Vm;
 const Errors = bog.Errors;
+const linenoize = @import("linenoize");
 
-pub fn run(gpa: Allocator, reader: anytype, writer: anytype) !void {
+pub fn run(gpa: Allocator, in: File, out: File) !void {
     var repl: Repl = undefined;
     try repl.init(gpa);
     defer repl.deinit();
+
+    const writer = out.writer();
 
     repl.vm.gc.stack_protect_start = @frameAddress();
 
@@ -21,7 +25,7 @@ pub fn run(gpa: Allocator, reader: anytype, writer: anytype) !void {
             repl.arena.deinit();
             repl.arena = std.heap.ArenaAllocator.init(gpa);
         }
-        repl.handleLine(reader, writer) catch |err| switch (err) {
+        repl.handleLine(in, out) catch |err| switch (err) {
             error.EndOfStream => return,
             error.TokenizeError, error.ParseError, error.CompileError => try repl.vm.errors.render(writer),
             error.FatalError => {
@@ -35,6 +39,7 @@ pub fn run(gpa: Allocator, reader: anytype, writer: anytype) !void {
 
 pub const Repl = struct {
     buffer: ArrayList(u8),
+    ln: linenoize.Linenoise,
     tokenizer: bog.Tokenizer,
     parser: bog.Parser,
     tree: bog.Tree,
@@ -52,6 +57,8 @@ pub const Repl = struct {
     fn init(repl: *Repl, gpa: Allocator) !void {
         repl.buffer = try ArrayList(u8).initCapacity(gpa, std.mem.page_size);
         errdefer repl.buffer.deinit();
+
+        repl.ln = linenoize.Linenoise.init(gpa);
 
         repl.tokenizer = .{
             .errors = &repl.vm.errors,
@@ -126,6 +133,7 @@ pub const Repl = struct {
     fn deinit(repl: *Repl) void {
         const gpa = repl.vm.gc.gpa;
         repl.buffer.deinit();
+        repl.ln.deinit();
         repl.tokenizer.tokens.deinit(gpa);
         repl.parser.node_buf.deinit();
         repl.parser.extra.deinit();
@@ -138,45 +146,47 @@ pub const Repl = struct {
         repl.* = undefined;
     }
 
-    fn handleLine(repl: *Repl, reader: anytype, writer: anytype) !void {
-        try repl.readLine(">>> ", reader, writer);
+    fn handleLine(repl: *Repl, in: File, out: File) !void {
+        const buffer_start = repl.buffer.items.len;
+        errdefer |e| if (e == error.CompileError) {
+            repl.buffer.shrinkAndFree(buffer_start);
+        };
+
+        try repl.readLine(in, out, ">>> ");
         const node = while (true) {
             if (try repl.tokenize()) {
                 if (repl.parse()) |some| {
                     break some orelse return;
                 } else |err| switch (err) {
                     error.NeedInput => {},
-                    else => |e| return e,
+                    else => |e| return e
                 }
             }
-            try repl.readLine("... ", reader, writer);
+
+            try repl.readLine(in, out, "... ");
         } else unreachable;
         try repl.compile(node);
 
         const res = try repl.vm.run(&repl.frame);
         repl.frame.stack.items[0] = res;
         if (res == bog.Value.Null) return;
+
+        const writer = out.writer();
         try res.dump(writer, 2);
         try writer.writeByte('\n');
     }
 
-    fn readLine(repl: *Repl, prompt: []const u8, reader: anytype, writer: anytype) !void {
-        try writer.writeAll(prompt);
-        const start_len = repl.buffer.items.len;
-        while (true) {
-            var byte: u8 = reader.readByte() catch |e| switch (e) {
-                error.EndOfStream => if (start_len == repl.buffer.items.len) {
-                    try writer.writeAll(std.cstr.line_sep);
-                    return error.EndOfStream;
-                } else continue,
-                else => |err| return err,
-            };
+    fn readLine(repl: *Repl, in: File, out: File, prompt: []const u8) !void {
+        if (linenoize.linenoiseRaw(&repl.ln, in, out, prompt)) |maybe_line| {
+            const line = maybe_line orelse return error.EndOfStream;
+            defer repl.ln.allocator.free(line);
 
-            try repl.buffer.append(byte);
-            if (byte == '\n') return;
-
-            if (repl.buffer.items.len - start_len == 1024) {
-                return error.StreamTooLong;
+            try repl.buffer.appendSlice(line);
+            try repl.buffer.append('\n');
+        } else |err| {
+            switch (err) {
+                error.CtrlC => return error.EndOfStream,
+                else => |e| return e
             }
         }
     }
