@@ -80,6 +80,7 @@ fn addTests(b: *Builder, examples_step: *std.build.Step, tests: anytype) void {
     inline for (tests) |t| {
         var test_step = b.addTest(t);
         test_step.addPackagePath("bog", "src/bog.zig");
+        test_step.addPackagePath("linenoize", "lib/linenoize/src/main.zig");
         tests_step.dependOn(&test_step.step);
     }
 }
