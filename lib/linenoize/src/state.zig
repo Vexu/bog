@@ -165,7 +165,7 @@ pub const LinenoiseState = struct {
                 if (i < completions.len) {
                     // Change to completion nr. i
                     // First, save buffer so we can restore it later
-                    const old_buf = self.buf.toOwnedSlice(self.allocator);
+                    const old_buf = try self.buf.toOwnedSlice(self.allocator);
                     const old_pos = self.pos;
 
                     // Show suggested completion

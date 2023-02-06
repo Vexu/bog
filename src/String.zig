@@ -229,7 +229,7 @@ pub fn set(str: *String, ctx: Vm.Context, index: *const Value, new_val: *const V
 }
 
 pub fn as(str: *String, ctx: Vm.Context, type_id: Type) Value.NativeError!*Value {
-    if (type_id == .@"null") {
+    if (type_id == .null) {
         return Value.Null;
     } else if (type_id == .bool) {
         if (mem.eql(u8, str.data, "true"))

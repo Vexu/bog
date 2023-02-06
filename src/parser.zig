@@ -45,9 +45,9 @@ pub fn parse(gpa: Allocator, source: []const u8, path: []const u8, errors: *bog.
     }
 
     return Tree{
-        .root_nodes = parser.node_buf.toOwnedSlice(),
+        .root_nodes = try parser.node_buf.toOwnedSlice(),
         .tokens = tokens,
-        .extra = parser.extra.toOwnedSlice(),
+        .extra = try parser.extra.toOwnedSlice(),
         .nodes = parser.nodes,
         .source = source,
         .path = path,

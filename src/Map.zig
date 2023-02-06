@@ -650,10 +650,10 @@ const IndexHeader = struct {
     /// Allocates an index header, and fills the entryIndexes array with empty.
     /// The distance array contents are undefined.
     fn alloc(allocator: Allocator, new_bit_index: u8) !*IndexHeader {
-        const len = @as(u32, 1) << @intCast(math.Log2Int(u32), new_bit_index);
+        const len = @as(usize, 1) << @intCast(math.Log2Int(usize), new_bit_index);
         const index_size = Map.capacityIndexSize(new_bit_index);
         const nbytes = @sizeOf(IndexHeader) + index_size * len;
-        const bytes = try allocator.allocAdvanced(u8, @alignOf(IndexHeader), nbytes, .exact);
+        const bytes = try allocator.alignedAlloc(u8, @alignOf(IndexHeader), nbytes);
         @memset(bytes.ptr + @sizeOf(IndexHeader), 0xff, bytes.len - @sizeOf(IndexHeader));
         const result = @ptrCast(*IndexHeader, bytes.ptr);
         result.* = .{

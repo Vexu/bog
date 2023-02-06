@@ -469,7 +469,7 @@ fn renderComments(tree: Tree, start: usize, end: usize, aiw: anytype) !bool {
         const newline = if (newline_index) |i| comment_start + i else null;
 
         const untrimmed_comment = tree.source[comment_start .. newline orelse tree.source.len];
-        const trimmed_comment = mem.trimRight(u8, untrimmed_comment, &std.ascii.spaces);
+        const trimmed_comment = mem.trimRight(u8, untrimmed_comment, &std.ascii.whitespace);
 
         // Don't leave any whitespace at the start of the file
         if (index != 0) {
@@ -490,7 +490,7 @@ fn renderComments(tree: Tree, start: usize, end: usize, aiw: anytype) !bool {
 
         index = 1 + (newline orelse end - 1);
 
-        const comment_content = mem.trimLeft(u8, trimmed_comment["//".len..], &std.ascii.spaces);
+        const comment_content = mem.trimLeft(u8, trimmed_comment["//".len..], &std.ascii.whitespace);
         if (aiw.disabled_offset != null and mem.eql(u8, comment_content, "bog fmt: on")) {
             // Write the source for which formatting was disabled directly
             // to the underlying writer, fixing up invaild whitespace.

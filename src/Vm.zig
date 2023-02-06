@@ -320,9 +320,9 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
             .primitive => {
                 const res = try f.newRef(vm, ref);
                 res.* = switch (data[inst].primitive) {
-                    .@"null" => Value.Null,
-                    .@"true" => Value.True,
-                    .@"false" => Value.False,
+                    .null => Value.Null,
+                    .true => Value.True,
+                    .false => Value.False,
                 };
             },
             .int => {

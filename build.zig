@@ -2,10 +2,14 @@ const std = @import("std");
 const Builder = std.build.Builder;
 
 pub fn build(b: *Builder) void {
-    const mode = b.standardReleaseOptions();
+    const mode = b.standardOptimizeOption(.{});
 
-    const lib = b.addStaticLibrary("bog", "src/lib.zig");
-    lib.setBuildMode(mode);
+    const lib = b.addStaticLibrary(.{
+        .name = "bog",
+        .optimize = mode,
+        .target = .{},
+        .root_source_file = .{ .path = "src/lib.zig" },
+    });
     lib.linkLibC();
 
     const lib_options = b.addOptions();
@@ -26,8 +30,11 @@ pub fn build(b: *Builder) void {
     lib_step.dependOn(&b.addInstallArtifact(lib).step);
 
     // c library usage example
-    const c_example = b.addExecutable("bog_from_c", null);
-    c_example.setBuildMode(mode);
+    const c_example = b.addExecutable(.{
+        .name = "bog_from_c",
+        .optimize = mode,
+        .target = .{},
+    });
     c_example.addCSourceFile("examples/bog_from_c.c", &[_][]const u8{});
     c_example.addIncludePath("include");
     c_example.linkLibrary(lib);
@@ -37,9 +44,15 @@ pub fn build(b: *Builder) void {
     c_example.setOutputDir("examples/bin");
 
     // calling zig from bog example
-    const zig_from_bog = b.addExecutable("zig_from_bog", "examples/zig_from_bog.zig");
-    zig_from_bog.setBuildMode(mode);
-    zig_from_bog.addPackagePath("bog", "src/bog.zig");
+    const zig_from_bog = b.addExecutable(.{
+        .name = "zig_from_bog",
+        .optimize = mode,
+        .target = .{},
+        .root_source_file = .{ .path = "examples/zig_from_bog.zig" },
+    });
+    zig_from_bog.addAnonymousModule("bog", .{
+        .source_file = .{ .path = "src/bog.zig" },
+    });
     zig_from_bog.setOutputDir("examples/bin");
 
     const examples_step = b.step("examples", "Build all examples");
@@ -53,9 +66,15 @@ pub fn build(b: *Builder) void {
         "tests/error.zig",
     });
 
-    var exe = b.addExecutable("bog", "src/main.zig");
-    exe.setBuildMode(mode);
-    exe.addPackagePath("linenoize", "lib/linenoize/src/main.zig");
+    var exe = b.addExecutable(.{
+        .name = "bog",
+        .optimize = mode,
+        .target = .{},
+        .root_source_file = .{ .path = "src/main.zig" },
+    });
+    exe.addAnonymousModule("linenoize", .{
+        .source_file = .{ .path = "lib/linenoize/src/main.zig" },
+    });
     exe.install();
 
     const fmt_step = b.step("fmt", "Format all source files");
@@ -78,9 +97,13 @@ fn addTests(b: *Builder, examples_step: *std.build.Step, tests: anytype) void {
     // tests_step.dependOn(examples_step);
     _ = examples_step;
     inline for (tests) |t| {
-        var test_step = b.addTest(t);
-        test_step.addPackagePath("bog", "src/bog.zig");
-        test_step.addPackagePath("linenoize", "lib/linenoize/src/main.zig");
+        var test_step = b.addTest(.{ .root_source_file = .{ .path = t } });
+        test_step.addAnonymousModule("bog", .{
+            .source_file = .{ .path = "src/bog.zig" },
+        });
+        test_step.addAnonymousModule("linenoize", .{
+            .source_file = .{ .path = "lib/linenoize/src/main.zig" },
+        });
         tests_step.dependOn(&test_step.step);
     }
 }

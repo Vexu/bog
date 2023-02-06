@@ -213,7 +213,7 @@ fn markGray(gc: *Gc) void {
                         }
                     },
                     // These values cannot be allocated in aggregate_pages
-                    .native, .str, .int, .num, .range, .@"null", .bool => {},
+                    .native, .str, .int, .num, .range, .null, .bool => {},
                 }
             }
             if (page.marked != 0) marked_any = true;
@@ -270,7 +270,7 @@ pub fn deinit(gc: *Gc) void {
 /// Allocate a new Value on the heap.
 pub fn alloc(gc: *Gc, ty: Type) !*Value {
     switch (ty) {
-        .@"null" => unreachable,
+        .null => unreachable,
         .bool => unreachable,
         .native,
         .str,

@@ -5,7 +5,7 @@ const bog = @import("bog.zig");
 const Vm = bog.Vm;
 
 pub const Type = enum(u8) {
-    @"null",
+    null,
     int,
     num,
     bool,
@@ -55,7 +55,7 @@ pub const Value = union(Type) {
 
     /// always memoized
     bool: bool,
-    @"null",
+    null,
 
     pub const Iterator = struct {
         value: *Value,
@@ -288,7 +288,7 @@ pub const Value = union(Type) {
         };
     }
 
-    var null_base = Value{ .@"null" = {} };
+    var null_base = Value{ .null = {} };
     var true_base = Value{ .bool = true };
     var false_base = Value{ .bool = false };
 
@@ -314,7 +314,7 @@ pub const Value = union(Type) {
 
     pub fn typeName(val: Value) []const u8 {
         return switch (val) {
-            .@"null",
+            .null,
             .int,
             .num,
             .bool,
@@ -339,7 +339,7 @@ pub const Value = union(Type) {
     /// Does not free values recursively.
     pub fn deinit(value: *Value, allocator: Allocator) void {
         switch (value.*) {
-            .bool, .@"null" => return,
+            .bool, .null => return,
             .frame => |f| {
                 f.stack.deinit(allocator);
                 f.err_handlers.deinit(allocator);
@@ -364,7 +364,7 @@ pub const Value = union(Type) {
         switch (key.*) {
             .iterator, .spread => unreachable,
             .frame => autoHash(&hasher, key.frame),
-            .@"null" => {},
+            .null => {},
             .int => |int| autoHash(&hasher, int),
             .num => {},
             .bool => |b| autoHash(&hasher, b),
@@ -432,7 +432,7 @@ pub const Value = union(Type) {
         return switch (a.*) {
             .iterator, .spread, .int, .num, .native_val => unreachable,
             .frame => a.frame == b.frame,
-            .@"null" => true,
+            .null => true,
             .bool => |bool_val| bool_val == b.bool,
             .str => |s| s.eql(b.str),
             .tuple => |t| {
@@ -470,7 +470,7 @@ pub const Value = union(Type) {
             .int => |i| try writer.print("{}", .{i}),
             .num => |n| try writer.print("{d}", .{n}),
             .bool => |b| try writer.writeAll(if (b) "true" else "false"),
-            .@"null" => try writer.writeAll("null"),
+            .null => try writer.writeAll("null"),
             .range => |r| {
                 try writer.print("{}:{}:{}", .{ r.start, r.end, r.step });
             },
@@ -674,7 +674,7 @@ pub const Value = union(Type) {
 
     /// `type_id` must be valid and cannot be .err, .range, .func or .native
     pub fn as(val: *Value, ctx: Vm.Context, type_id: Type) NativeError!*Value {
-        if (type_id == .@"null") {
+        if (type_id == .null) {
             return Value.Null;
         }
         if (val.* == type_id) {
@@ -725,7 +725,7 @@ pub const Value = union(Type) {
                     else => return ctx.throwFmt("cannot cast {s} to num", .{val.typeName()}),
                 },
             },
-            .str, .list, .bool, .@"null" => unreachable,
+            .str, .list, .bool, .null => unreachable,
             .tuple, .map => return ctx.frame.fatal(ctx.vm, "TODO cast to tuple/map"),
             else => unreachable,
         };
@@ -903,7 +903,7 @@ pub const Value = union(Type) {
         const Fn = @typeInfo(@TypeOf(func)).Fn;
         if (Fn.is_generic) @compileError("cannot wrap a generic function");
 
-        @setEvalBranchQuota(Fn.args.len * 1000);
+        @setEvalBranchQuota(Fn.params.len * 1000);
 
         const S = struct {
             fn native(ctx: Vm.Context, bog_args: []*Value) Value.NativeError!*Value {
@@ -913,8 +913,8 @@ pub const Value = union(Type) {
                 comptime var vm_passed = false;
                 comptime var this_passed = false;
                 comptime var variadic = false;
-                inline for (Fn.args) |arg, i| {
-                    const ArgT = arg.arg_type.?;
+                inline for (Fn.params) |arg, i| {
+                    const ArgT = arg.type.?;
                     if (variadic) @compileError("Value.Variadic must be the last parameter");
                     if (ArgT == Vm.Context) {
                         if (vm_passed) @compileError("function takes more than one Vm.Context");
@@ -944,7 +944,7 @@ pub const Value = union(Type) {
                         bog_arg_i += 1;
                     }
                 }
-                const res = @call(.{}, func, args);
+                const res = @call(.auto, func, args);
                 if (variadic) ctx.vm.gc.gpa.free(args[args.len - 1].t);
                 switch (@typeInfo(@TypeOf(res))) {
                     .ErrorSet => switch (@as(anyerror, res)) {
@@ -965,8 +965,8 @@ pub const Value = union(Type) {
         // TODO can't use bog_arg_i due to a stage1 bug.
         comptime var bog_arg_count = 0;
         comptime var variadic = false;
-        comptime for (Fn.args) |arg| {
-            const ArgT = arg.arg_type.?;
+        comptime for (Fn.params) |arg| {
+            const ArgT = arg.type.?;
             if (@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_Variadic_T")) {
                 variadic = true;
             } else if (ArgT != Vm.Context and !(@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T"))) {
@@ -994,7 +994,7 @@ pub const Value = union(Type) {
 
         return switch (T) {
             void => {
-                if (val.* != .@"null")
+                if (val.* != .null)
                     return ctx.throw("expected a null");
             },
             bool => {
@@ -1058,7 +1058,7 @@ pub const Value = union(Type) {
                         return ctx.throw("expected tag");
                     const e = std.meta.stringToEnum(T, val.tagged.name) orelse
                         return ctx.throw("no value by such name");
-                    if (val.tagged.value.* != .@"null")
+                    if (val.tagged.value.* != .null)
                         return ctx.throw("expected no value");
                     return e;
                 },
@@ -1074,7 +1074,7 @@ pub const Value = union(Type) {
 
     pub fn jsonStringify(val: *const Value, options: std.json.StringifyOptions, writer: anytype) @TypeOf(writer).Error!void {
         switch (val.*) {
-            .@"null" => try writer.writeAll("null"),
+            .null => try writer.writeAll("null"),
             .tuple => |t| {
                 try writer.writeByte('[');
                 for (t) |e, i| {

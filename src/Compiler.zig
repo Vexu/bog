@@ -79,9 +79,9 @@ pub fn compile(gpa: Allocator, source: []const u8, path: []const u8, errors: *Er
 
     return Bytecode{
         .code = compiler.instructions.toOwnedSlice(),
-        .extra = compiler.extra.toOwnedSlice(gpa),
-        .strings = compiler.strings.toOwnedSlice(gpa),
-        .main = code.toOwnedSlice(gpa),
+        .extra = try compiler.extra.toOwnedSlice(gpa),
+        .strings = try compiler.strings.toOwnedSlice(gpa),
+        .main = try code.toOwnedSlice(gpa),
         .debug_info = .{
             .lines = compiler.lines,
             .source = source,
@@ -202,7 +202,7 @@ const Value = union(enum) {
     /// reference to a mutable variable
     mut: Ref,
 
-    @"null",
+    null,
     int: i64,
     num: f64,
     Bool: bool,
@@ -344,10 +344,10 @@ fn makeRuntime(c: *Compiler, val: Value) Error!Ref {
     return switch (val) {
         .empty => unreachable,
         .mut, .ref => |ref| ref,
-        .@"null" => try c.addInst(.primitive, .{ .primitive = .@"null" }, null),
+        .null => try c.addInst(.primitive, .{ .primitive = .null }, null),
         .int => |int| try c.addInst(.int, .{ .int = int }, null),
         .num => |num| try c.addInst(.num, .{ .num = num }, null),
-        .Bool => |b| try c.addInst(.primitive, .{ .primitive = if (b) .@"true" else .@"false" }, null),
+        .Bool => |b| try c.addInst(.primitive, .{ .primitive = if (b) .true else .false }, null),
         .str => |str| try c.addInst(.str, .{ .str = .{
             .len = @intCast(u32, str.len),
             .offset = try c.putString(str),
@@ -552,7 +552,7 @@ fn genNode(c: *Compiler, node: Node.Index, res: Result) Error!Value {
             return c.wrapResult(node, val, res);
         },
         .null_expr => {
-            const val = Value{ .@"null" = {} };
+            const val = Value{ .null = {} };
             return c.wrapResult(node, val, res);
         },
         .ident_expr => {
@@ -935,7 +935,7 @@ fn genWhile(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         if (cond_val.isRt()) {
             // exit loop if cond == null
             cond_jump = try c.addJump(.jump_if_null, cond_val.getRt());
-        } else if (cond_val == .@"null") {
+        } else if (cond_val == .null) {
             // never executed
             return sub_res.toVal();
         }
@@ -1011,7 +1011,7 @@ fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
             return c.genNode(some, res);
         }
 
-        const res_val = Value{ .@"null" = {} };
+        const res_val = Value{ .null = {} };
         return c.wrapResult(node, res_val, res);
     } else {
         // jump past if_body if cond == false
@@ -1046,7 +1046,7 @@ fn genIf(c: *Compiler, node: Node.Index, res: Result) Error!Value {
         // sub_res is either ref or discard, either way wrapResult handles it
         _ = try c.genNode(some, sub_res);
     } else {
-        const res_val = Value{ .@"null" = {} };
+        const res_val = Value{ .null = {} };
         _ = try c.wrapResult(node, res_val, sub_res);
     }
 
@@ -1159,7 +1159,7 @@ fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     }
 
     if (!seen_catch_all) {
-        const res_val = Value{ .@"null" = {} };
+        const res_val = Value{ .null = {} };
         _ = try c.wrapResult(node, res_val, sub_res);
     }
 
@@ -1279,11 +1279,11 @@ fn genBlock(c: *Compiler, stmts: []const Node.Index, res: Result) Error!Value {
 
         _ = try c.genNode(stmt, .discard);
     }
-    return Value{ .@"null" = {} };
+    return Value{ .null = {} };
 }
 
 const type_id_map = std.ComptimeStringMap(bog.Type, .{
-    .{ "null", .@"null" },
+    .{ "null", .null },
     .{ "int", .int },
     .{ "num", .num },
     .{ "bool", .bool },
@@ -1310,7 +1310,7 @@ fn genAs(c: *Compiler, node: Node.Index) Error!Value {
         return c.reportErr("expected a type name", node);
 
     switch (type_id) {
-        .@"null", .int, .num, .bool, .str, .tuple, .map, .list => {},
+        .null, .int, .num, .bool, .str, .tuple, .map, .list => {},
         else => return c.reportErr("invalid cast type", node),
     }
 
@@ -1323,7 +1323,7 @@ fn genAs(c: *Compiler, node: Node.Index) Error!Value {
     }
 
     return switch (type_id) {
-        .@"null" => Value{ .@"null" = {} },
+        .null => Value{ .null = {} },
         .int => Value{
             .int = switch (lhs) {
                 .int => |val| val,
@@ -1396,7 +1396,7 @@ fn genIs(c: *Compiler, node: Node.Index) Error!Value {
 
     return Value{
         .Bool = switch (type_id) {
-            .@"null" => lhs == .@"null",
+            .null => lhs == .null,
             .int => lhs == .int,
             .num => lhs == .num,
             .bool => lhs == .Bool,
@@ -1598,7 +1598,7 @@ fn genComparison(c: *Compiler, node: Node.Index) Error!Value {
         },
         .equal, .not_equal => {
             const eql = switch (lhs_val) {
-                .@"null" => rhs_val == .@"null",
+                .null => rhs_val == .null,
                 .int => |a_val| switch (rhs_val) {
                     .int => |b_val| a_val == b_val,
                     .num => |b_val| @intToFloat(f64, a_val) == b_val,
@@ -1976,7 +1976,7 @@ fn genError(c: *Compiler, node: Node.Index) Error!Value {
         return Value{ .ref = ref };
     }
     const operand_val = try c.genNode(operand, .value);
-    if (operand_val == .@"null") {
+    if (operand_val == .null) {
         const ref = try c.addUn(.build_error_null, undefined, null);
         return Value{ .ref = ref };
     }
@@ -2082,7 +2082,7 @@ fn genFn(c: *Compiler, node: Node.Index) Error!Value {
         };
 
         const body_val = try c.genNode(body, sub_res);
-        if (body_val == .empty or body_val == .@"null") {
+        if (body_val == .empty or body_val == .null) {
             _ = try c.addUn(.ret_null, undefined, null);
         } else {
             const body_ref = try c.makeRuntime(body_val);

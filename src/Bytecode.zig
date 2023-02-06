@@ -270,9 +270,9 @@ pub const Inst = struct {
     pub const Data = union {
         none: void,
         primitive: enum {
-            @"null",
-            @"true",
-            @"false",
+            null,
+            true,
+            false,
         },
         int: i64,
         num: f64,

@@ -104,7 +104,7 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
             try stderr.writeAll("\n");
             process.exit(1);
         },
-        .@"null" => {},
+        .null => {},
         else => fatal("invalid return type '{s}'", .{res.typeName()}),
     }
 }
