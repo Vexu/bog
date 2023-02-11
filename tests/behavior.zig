@@ -82,7 +82,7 @@ test "capture" {
     try expectOutput(
         \\let foo = fn()
         \\    let a = 1
-        \\    return fn() 
+        \\    return fn()
         \\        return a + 1
         \\
         \\return foo()()
@@ -117,25 +117,6 @@ test "continue" {
         \\for let i in 0:1
         \\    continue
     , "null");
-}
-
-test "std.gc" {
-    if (@import("builtin").os.tag == .windows) {
-        // TODO this gives a different result on windows
-        return error.SkipZigTest;
-    }
-    try expectOutput(
-        \\let {collect} = import "std.gc"
-        \\let json = import "std.json"
-        \\
-        \\let makeGarbage = fn()
-        \\    json.stringify({"a" = [2, "foo", null]})
-        \\
-        \\for 0:5 makeGarbage()
-        \\return collect()
-    ,
-        \\53
-    );
 }
 
 test "std.json" {

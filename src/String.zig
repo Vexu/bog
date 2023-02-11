@@ -84,7 +84,7 @@ pub fn get(str: *const String, ctx: Vm.Context, index: *const Value, res: *?*Val
         .range => return ctx.frame.fatal(ctx.vm, "TODO str get with ranges"),
         .str => |*s| {
             if (res.* == null) {
-                res.* = try ctx.vm.gc.alloc(.int);
+                res.* = try ctx.vm.gc.alloc();
             }
 
             if (mem.eql(u8, s.data, "len")) {
@@ -190,14 +190,14 @@ pub const methods = struct {
             return ctx.throw("unused arguments");
         }
 
-        const ret = try ctx.vm.gc.alloc(.str);
+        const ret = try ctx.vm.gc.alloc();
         ret.* = Value{ .str = b.finish() };
         return ret;
     }
 
     pub fn join(str: Value.This([]const u8), ctx: Vm.Context, strs: Value.Variadic([]const u8)) !*Value {
         if (strs.t.len == 0) {
-            const ret = try ctx.vm.gc.alloc(.str);
+            const ret = try ctx.vm.gc.alloc();
             ret.* = Value.string("");
             return ret;
         }
@@ -215,7 +215,7 @@ pub const methods = struct {
             b.inner.appendSliceAssumeCapacity(arg);
         }
 
-        const ret = try ctx.vm.gc.alloc(.str);
+        const ret = try ctx.vm.gc.alloc();
         ret.* = Value{ .str = b.finish() };
         return ret;
     }
@@ -240,7 +240,7 @@ pub fn as(str: *String, ctx: Vm.Context, type_id: Type) Value.NativeError!*Value
             return ctx.throw("cannot cast string to bool");
     }
 
-    const new_val = try ctx.vm.gc.alloc(type_id);
+    const new_val = try ctx.vm.gc.alloc();
     new_val.* = switch (type_id) {
         .int => .{
             .int = std.fmt.parseInt(i64, str.data, 0) catch |err|
@@ -262,7 +262,7 @@ pub fn as(str: *String, ctx: Vm.Context, type_id: Type) Value.NativeError!*Value
 }
 
 pub fn from(val: *Value, vm: *Vm) Vm.Error!*Value {
-    const str = try vm.gc.alloc(.str);
+    const str = try vm.gc.alloc();
 
     if (val == Value.Null) {
         str.* = Value.string("null");

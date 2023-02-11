@@ -38,7 +38,7 @@ pub fn get(list: *const List, ctx: Vm.Context, index: *const Value, res: *?*Valu
             if (r.start < 0 or r.end > list.inner.items.len)
                 return ctx.throw("index out of bounds");
 
-            res.* = try ctx.vm.gc.alloc(.list);
+            res.* = try ctx.vm.gc.alloc();
             res.*.?.* = .{ .list = .{} };
             const res_list = &res.*.?.*.list;
             try res_list.inner.ensureUnusedCapacity(ctx.vm.gc.gpa, r.count());
@@ -50,7 +50,7 @@ pub fn get(list: *const List, ctx: Vm.Context, index: *const Value, res: *?*Valu
         },
         .str => |s| {
             if (res.* == null) {
-                res.* = try ctx.vm.gc.alloc(.int);
+                res.* = try ctx.vm.gc.alloc();
             }
 
             if (mem.eql(u8, s.data, "len")) {

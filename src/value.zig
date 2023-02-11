@@ -87,7 +87,7 @@ pub const Value = union(Type) {
                         return false;
                     }
                     if (res.* == null) {
-                        res.* = try ctx.vm.gc.alloc(.str);
+                        res.* = try ctx.vm.gc.alloc();
                     }
 
                     const cp_len = std.unicode.utf8ByteSequenceLength(str.data[iter.i.u]) catch
@@ -106,7 +106,7 @@ pub const Value = union(Type) {
                     }
 
                     if (res.* == null) {
-                        res.* = try ctx.vm.gc.alloc(.tuple);
+                        res.* = try ctx.vm.gc.alloc();
                     }
                     if (iter.i.u == 0) {
                         res.*.?.* = .{ .tuple = try ctx.vm.gc.gpa.alloc(*Value, 2) };
@@ -125,7 +125,7 @@ pub const Value = union(Type) {
                         return false;
                     }
                     if (res.* == null) {
-                        res.* = try ctx.vm.gc.alloc(.int);
+                        res.* = try ctx.vm.gc.alloc();
                     }
 
                     res.*.?.* = .{
@@ -343,7 +343,8 @@ pub const Value = union(Type) {
             .frame => |f| {
                 f.stack.deinit(allocator);
                 f.err_handlers.deinit(allocator);
-                allocator.destroy(f);
+                // base stack frame is not allocated
+                if (f.caller_frame != null) allocator.destroy(f);
             },
             .int, .num, .native, .tagged, .range, .iterator, .err, .spread => {},
             .tuple => |t| allocator.free(t),
@@ -566,7 +567,7 @@ pub const Value = union(Type) {
                     if (r.start < 0 or r.end > tuple.len)
                         return ctx.throw("index out of bounds");
 
-                    res.* = try ctx.vm.gc.alloc(.list);
+                    res.* = try ctx.vm.gc.alloc();
                     res.*.?.* = .{ .list = .{} };
                     const res_list = &res.*.?.*.list;
                     try res_list.inner.ensureUnusedCapacity(ctx.vm.gc.gpa, r.count());
@@ -578,7 +579,7 @@ pub const Value = union(Type) {
                 },
                 .str => |s| {
                     if (res.* == null) {
-                        res.* = try ctx.vm.gc.alloc(.int);
+                        res.* = try ctx.vm.gc.alloc();
                     }
 
                     if (mem.eql(u8, s.data, "len")) {
@@ -599,7 +600,7 @@ pub const Value = union(Type) {
             .range => |r| switch (index.*) {
                 .str => |s| {
                     if (res.* == null) {
-                        res.* = try ctx.vm.gc.alloc(.int);
+                        res.* = try ctx.vm.gc.alloc();
                     }
 
                     if (mem.eql(u8, s.data, "start")) {
@@ -705,7 +706,7 @@ pub const Value = union(Type) {
             return if (bool_res) Value.True else Value.False;
         }
 
-        const new_val = try ctx.vm.gc.alloc(type_id);
+        const new_val = try ctx.vm.gc.alloc();
         new_val.* = switch (type_id) {
             .int => .{
                 .int = switch (val.*) {
@@ -775,7 +776,7 @@ pub const Value = union(Type) {
             .iterator => unreachable,
             else => return ctx.throwFmt("cannot iterate {s}", .{val.typeName()}),
         }
-        const iter = try ctx.vm.gc.alloc(.iterator);
+        const iter = try ctx.vm.gc.alloc();
         iter.* = .{
             .iterator = .{
                 .value = try ctx.vm.gc.dupe(val),
@@ -796,18 +797,18 @@ pub const Value = union(Type) {
             bool => return if (val) Value.True else Value.False,
             *Value => return val,
             Value => {
-                const ret = try vm.gc.alloc(val);
+                const ret = try vm.gc.alloc();
                 ret.* = val;
                 return ret;
             },
             []const u8, []u8 => {
                 // assume val was allocated with vm.gc
-                const str = try vm.gc.alloc(.str);
+                const str = try vm.gc.alloc();
                 str.* = Value.string(val);
                 return str;
             },
             String => {
-                const str = try vm.gc.alloc(.str);
+                const str = try vm.gc.alloc();
                 str.* = Value{ .str = val };
                 return str;
             },
@@ -818,7 +819,7 @@ pub const Value = union(Type) {
                         if (decl.is_pub) pub_decls += 1;
                     }
 
-                    const res = try vm.gc.alloc(.map);
+                    const res = try vm.gc.alloc();
                     res.* = .{ .map = .{} };
                     try res.map.ensureTotalCapacity(vm.gc.gpa, pub_decls);
 
@@ -829,7 +830,7 @@ pub const Value = union(Type) {
                         if (comptime std.mem.eql(u8, decl.name, "fromBog")) continue;
                         if (comptime std.mem.eql(u8, decl.name, "format")) continue;
 
-                        const key = try vm.gc.alloc(.str);
+                        const key = try vm.gc.alloc();
                         key.* = Value.string(decl.name);
 
                         const value = if (@typeInfo(@TypeOf(@field(val, decl.name))) == .Fn)
@@ -846,7 +847,7 @@ pub const Value = union(Type) {
             else => switch (@typeInfo(@TypeOf(val))) {
                 .Pointer => |info| {
                     if (info.size == .Slice) @compileError("unsupported type: " ++ @typeName(val));
-                    const int = try vm.gc.alloc(.int);
+                    const int = try vm.gc.alloc();
                     int.* = .{
                         .int = @bitCast(isize, @ptrToInt(val)),
                     };
@@ -854,7 +855,7 @@ pub const Value = union(Type) {
                 },
                 .Fn => @compileError("use zigFnToBog"),
                 .ComptimeInt, .Int => {
-                    const int = try vm.gc.alloc(.int);
+                    const int = try vm.gc.alloc();
                     int.* = .{
                         // try to implicit cast the value
                         .int = val,
@@ -862,7 +863,7 @@ pub const Value = union(Type) {
                     return int;
                 },
                 .ComptimeFloat, .Float => {
-                    const num = try vm.gc.alloc(.num);
+                    const num = try vm.gc.alloc();
                     num.* = .{
                         // try to implicit cast the value
                         .num = val,
@@ -873,14 +874,14 @@ pub const Value = union(Type) {
                     return zigToBog(vm, some);
                 } else |e| {
                     // wrap error string
-                    const str = try vm.gc.alloc(.str);
+                    const str = try vm.gc.alloc();
                     str.* = Value.string(@errorName(e));
-                    const err = try vm.gc.alloc(.err);
+                    const err = try vm.gc.alloc();
                     err.* = .{ .err = str };
                     return err;
                 },
                 .Enum => {
-                    const tag = try vm.gc.alloc(.tagged);
+                    const tag = try vm.gc.alloc();
                     tag.* = .{
                         .tagged = .{
                             .name = @tagName(val),
@@ -974,7 +975,7 @@ pub const Value = union(Type) {
             }
         };
 
-        const native = try vm.gc.alloc(.native);
+        const native = try vm.gc.alloc();
         native.* = .{
             .native = .{
                 .arg_count = bog_arg_count,

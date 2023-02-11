@@ -15,12 +15,6 @@ pub fn run(gpa: Allocator, in: File, out: File) !void {
 
     const writer = out.writer();
 
-    repl.vm.gc.stack_protect_start = @frameAddress();
-
-    var frame_val = try repl.vm.gc.alloc(.frame);
-    frame_val.* = .{ .frame = &repl.frame };
-    defer frame_val.* = .{ .int = 0 }; // clear frame
-
     while (true) {
         defer {
             repl.arena.deinit();
@@ -131,9 +125,15 @@ pub const Repl = struct {
         repl.frame.module_frame = &repl.frame;
 
         try repl.frame.stack.append(gpa, bog.Value.Null);
+
+        var val = try repl.vm.gc.alloc();
+        val.* = .{ .frame = &repl.frame };
+        try repl.vm.gc.setBaseFrame(val);
     }
 
     fn deinit(repl: *Repl) void {
+        repl.vm.gc.clearBaseFrame();
+
         const gpa = repl.vm.gc.gpa;
         repl.buffer.deinit();
         repl.ln.deinit();
