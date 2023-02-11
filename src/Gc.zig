@@ -1,337 +1,363 @@
 //! A non-moving garbage collector.
-//! Inspired by https://www.pllab.riec.tohoku.ac.jp/papers/icfp2011UenoOhoriOtomoAuthorVersion.pdf
+
 const std = @import("std");
-const mem = std.mem;
-const Allocator = mem.Allocator;
-const assert = std.debug.assert;
-const log = std.log.scoped(.gc);
+const Allocator = std.mem.Allocator;
 const bog = @import("bog.zig");
 const Value = bog.Value;
 const Type = bog.Type;
-const expect = std.testing.expect;
 
-/// A pool of values prefixed with a header containing two bitmaps for
-/// the old and young generation.
-const Page = struct {
-    const max_size = 1_048_576;
-    comptime {
-        // 2^20, 1 MiB
-        assert(@sizeOf(Page) == max_size);
+/// the number of allocated objects per page
+const PAGE_LEN = 16; // 32 * 1024;
+
+comptime {
+    if (@popCount(@as(usize, PAGE_LEN)) != 1) {
+        @compileError("PAGE_LEN must be a power of 2.");
     }
-    const val_count = @divFloor(max_size - @sizeOf(u32) * 2, (@sizeOf(Value) + @sizeOf(State)));
-    const pad_size = max_size - @sizeOf(u32) * 2 - (@sizeOf(Value) + @sizeOf(State)) * val_count;
+}
 
-    const State = enum {
-        empty,
-        white,
-        gray,
-        black,
+/// a value with a header
+const Object = struct {
+    page_index: u32,
+    generation: u8,
+    value: Value,
+};
+
+/// tracks live objects in a block of memory
+const Page = struct {
+    // TODO instead use powers of 4 or 8?
+    const SET_SIZE = PAGE_LEN << 1;
+    /// the index into StateSet that represents the first object
+    const SET_BASE = PAGE_LEN;
+    const StateSet = std.StaticBitSet(SET_SIZE);
+
+    /// the raw object memory
+    data: [PAGE_LEN]Object = undefined,
+    /// used to track empty objects
+    chalkboard: StateSet = StateSet.initEmpty(),
+
+    /// used for indexing into chalkboard
+    const Bit = struct {
+        index: usize,
+
+        const ROOT = Bit.of(1);
+
+        fn of(index: usize) Bit {
+            std.debug.assert(index != 0);
+            return Bit{ .index = index };
+        }
+
+        fn isRoot(bit: Bit) bool {
+            return bit.index == 1;
+        }
+
+        fn isLeaf(bit: Bit) bool {
+            return bit.index >= SET_BASE;
+        }
+
+        fn parent(bit: Bit) Bit {
+            return Bit.of(bit.index >> 1);
+        }
+
+        fn left(bit: Bit) Bit {
+            return Bit.of(bit.index << 1);
+        }
+
+        fn right(bit: Bit) Bit {
+            return Bit.of((bit.index << 1) | 1);
+        }
+
+        fn sibling(bit: Bit) Bit {
+            return Bit.of(bit.index ^ 1);
+        }
     };
 
-    const List = std.ArrayListUnmanaged(*Page);
+    fn init(ally: Allocator) Allocator.Error!*Page {
+        const self = try ally.create(Page);
+        self.* = .{};
 
-    /// States of all values.
-    meta: [val_count]State,
-    /// Padding to ensure size is 1 MiB.
-    __padding: [pad_size]u8,
-
-    /// Index to the first free slot.
-    free: u32,
-
-    /// used during the collection phase to detect whether the Gc should keep
-    /// checking values in this page.
-    marked: u32,
-
-    /// Actual values, all pointers will stay valid as long as they are
-    /// referenced from a root.
-    values: [val_count]Value,
-
-    fn create() !*Page {
-        const page = try std.heap.page_allocator.create(Page);
-        mem.set(usize, mem.bytesAsSlice(usize, mem.asBytes(page)), 0);
-        return page;
+        return self;
     }
 
-    fn destroy(page: *Page, gc: *Gc) void {
-        for (page.meta) |s, i| {
-            if (s == .empty) continue;
-            page.values[i].deinit(gc.gpa);
-        }
-        std.heap.page_allocator.destroy(page);
+    fn isFull(self: *const Page) bool {
+        return self.get(Bit.ROOT);
     }
 
-    fn alloc(page: *Page) ?*Value {
-        while (page.free < page.values.len) {
-            defer page.free += 1;
+    fn get(self: *const Page, bit: Bit) bool {
+        return self.chalkboard.isSet(bit.index - 1);
+    }
 
-            if (page.meta[page.free] == .empty) {
-                page.meta[page.free] = .white;
-                return &page.values[page.free];
+    fn set(self: *Page, bit: Bit) void {
+        self.chalkboard.set(bit.index - 1);
+    }
+
+    fn unset(self: *Page, bit: Bit) void {
+        self.chalkboard.unset(bit.index - 1);
+    }
+
+    /// estimates how full this page is to determine whether it is 'saturated'
+    /// (should be collected)
+    fn isSaturated(self: *const Page) bool {
+        const LEVEL = 3;
+        const N = 1 << LEVEL; // both the index and the length of the level
+
+        comptime {
+            if (PAGE_LEN < (1 << LEVEL)) {
+                @compileError("isSaturated LEVEL is too large for PAGE_LEN");
             }
         }
-        return null;
+
+        // count set bits in level
+        var count: usize = 0;
+        var i: usize = 0;
+        while (i < N) : (i += 1) {
+            const index = i + N;
+            count += @boolToInt(self.chalkboard.isSet(index));
+        }
+
+        // if this page is 3/4 full, it is saturated
+        const ratio = @intToFloat(f64, count) / @intToFloat(f64, N);
+        return ratio > 0.75;
     }
 
-    fn clear(page: *Page, gc: *Gc) u32 {
-        var freed: u32 = 0;
-        var i: u32 = val_count;
-        while (i > 0) {
-            i -= 1;
-            switch (page.meta[i]) {
-                .black, .gray => {
-                    // value lives to see another day
-                    page.meta[i] = .white;
-                },
-                .white => {
-                    freed += 1;
-                    page.meta[i] = .empty;
-                    page.values[i].deinit(gc.gpa);
-                    page.free = i;
-                },
-                .empty => {},
+    /// if this page is saturated, collects all objects of the wrong generation
+    fn collect(self: *Page, ally: Allocator, gen: u8) void {
+        std.debug.print("collecting a page\n", .{});
+        if (!self.isSaturated()) {
+            std.debug.print("unsaturated\n", .{});
+            return;
+        }
+
+        for (self.data) |*obj, index| {
+            if (obj.generation != gen) {
+                obj.value.deinit(ally);
+                self.setFree(index);
             }
         }
-        return freed;
     }
 
-    fn indexOf(page: *Page, value: *const Value) ?u32 {
-        // is the value before this page
-        if (@ptrToInt(value) < @ptrToInt(&page.values[0])) return null;
-        // is the value after this page
-        if (@ptrToInt(value) > @ptrToInt(&page.values[page.values.len - 1])) return null;
+    /// finds the index of the first free object
+    fn firstFreeObject(self: *const Page) ?usize {
+        if (self.isFull()) {
+            return null;
+        }
 
-        // value is in this page
-        return @intCast(u32, (@ptrToInt(value) - @ptrToInt(&page.values[0])) / @sizeOf(Value));
+        // traverse chalkboard to find first open index, setting bits in the
+        // process
+        var bit = Bit.ROOT;
+        while (!bit.isLeaf()) {
+            const lhs = bit.left();
+            const rhs = bit.right();
+
+            bit = if (self.get(lhs)) rhs else lhs;
+        }
+
+        return bit.index - SET_BASE;
+    }
+
+    fn setUsed(self: *Page, obj_index: usize) void {
+        // while all children are used, iterate through parents and set each
+        // the parent bit to used as well
+        var bit = Bit.of(obj_index + SET_BASE);
+        while (true) : (bit = bit.parent()) {
+            self.set(bit);
+            if (bit.isRoot() or !self.get(bit.sibling())) break;
+        }
+    }
+
+    fn setFree(self: *Page, obj_index: usize) void {
+        // iterate through all parents and set each parent bit to free
+        var bit = Bit.of(obj_index + SET_BASE);
+        while (true) : (bit = bit.parent()) {
+            self.unset(bit);
+            if (bit.isRoot()) break;
+        }
+    }
+
+    fn alloc(self: *Page, page_index: u32, gen: u8) error{PageFull}!*Object {
+        const index = self.firstFreeObject() orelse {
+            return error.PageFull;
+        };
+
+        self.setUsed(index);
+
+        const obj = &self.data[index];
+        obj.page_index = page_index;
+        obj.generation = gen;
+
+        std.debug.print(
+            "alloc: page {} gen {} index {}\n",
+            .{ page_index, gen, index },
+        );
+
+        return obj;
+    }
+
+    fn free(self: *Page, obj: *Object) error{WrongPage}!void {
+        const base = @ptrToInt(&self.data);
+        const element = @ptrToInt(obj);
+
+        if (element < base or element >= base + self.data.len) {
+            return error.WrongPage;
+        }
+
+        const index = @divExact(element - base, @sizeOf(Object));
+        self.setFree(index);
+
+        std.debug.print(
+            "free: page {} gen {} index {}\n",
+            .{ obj.page_index, obj.generation, index },
+        );
     }
 };
 
 const Gc = @This();
 
-simple_pages: Page.List = .{},
-aggregate_pages: Page.List = .{},
 gpa: Allocator,
 page_limit: u32,
-stack_protect_start: usize = 0,
-allocated: u32 = 0,
+generation: u8 = 0,
+/// every bog program has a base frame which references all live values
+base_frame: ?*Value = null,
+pages: std.ArrayListUnmanaged(*Page) = .{},
 
-const PageAndIndex = struct {
-    page: *Page,
-    index: usize,
-};
-
-pub fn markVal(gc: *Gc, maybe_value: ?*const Value) void {
-    const value = maybe_value orelse return;
-    // These will never be allocated
-    if (value == Value.Null or
-        value == Value.True or
-        value == Value.False) return;
-
-    for (gc.simple_pages.items) |page| {
-        const index = page.indexOf(value) orelse continue;
-        if (page.meta[index] == .white) {
-            page.meta[index] = .black;
-        }
-        return;
-    }
-
-    for (gc.aggregate_pages.items) |page| {
-        const index = page.indexOf(value) orelse continue;
-        if (page.meta[index] == .white) {
-            page.meta[index] = .gray;
-            page.marked += 1;
-        }
-        return;
-    }
-
-    // Value was not allocated by gc.
-}
-
-fn markGray(gc: *Gc) void {
-    // mark all pages as dirty
-    for (gc.aggregate_pages.items) |page| {
-        page.marked = Page.val_count;
-    }
-
-    // mark all white values reachable from gray values as gray
-    var marked_any = true;
-    while (marked_any) {
-        marked_any = false;
-        for (gc.aggregate_pages.items) |page| {
-            if (page.marked == 0) continue;
-            page.marked = 0;
-            for (page.meta) |*s, i| {
-                if (s.* != .gray) continue;
-
-                s.* = .black;
-                switch (page.values[i]) {
-                    .list => |list| {
-                        for (list.inner.items) |val| {
-                            gc.markVal(val);
-                        }
-                    },
-                    .tuple => |tuple| {
-                        for (tuple) |val| {
-                            gc.markVal(val);
-                        }
-                    },
-                    .map => |map| {
-                        var iter = map.iterator();
-                        while (iter.next()) |entry| {
-                            gc.markVal(entry.key_ptr.*);
-                            gc.markVal(entry.value_ptr.*);
-                        }
-                    },
-                    .err => |err| {
-                        gc.markVal(err);
-                    },
-                    .func => |func| {
-                        for (func.captures()) |val| {
-                            gc.markVal(val);
-                        }
-                    },
-                    .frame => |frame| {
-                        for (frame.stack.items) |val| {
-                            gc.markVal(val);
-                        }
-                        for (frame.captures) |val| {
-                            gc.markVal(val);
-                        }
-                        gc.markVal(frame.this);
-                    },
-                    .iterator => |iter| {
-                        gc.markVal(iter.value);
-                    },
-                    .spread => |spread| {
-                        gc.markVal(spread.iterable);
-                    },
-                    .tagged => |tag| {
-                        gc.markVal(tag.value);
-                    },
-                    .native_val => |n| {
-                        if (n.vtable.markVal) |some| {
-                            some(n.ptr, gc);
-                        }
-                    },
-                    // These values cannot be allocated in aggregate_pages
-                    .native, .str, .int, .num, .range, .null, .bool => {},
-                }
-            }
-            if (page.marked != 0) marked_any = true;
-        }
-    }
-}
-
-/// Collect all unreachable values.
-pub fn collect(gc: *Gc) usize {
-    // mark roots as reachable
-    if (gc.stack_protect_start != 0) {
-        var i = @intToPtr([*]*Value, gc.stack_protect_start);
-        while (@ptrToInt(i) > @frameAddress()) : (i -= 1) {
-            gc.markVal(i[0]);
-        }
-    }
-
-    // mark values referenced from root values as reachable
-    gc.markGray();
-
-    // free all unreachable values
-    var freed: u32 = 0;
-    for (gc.simple_pages.items) |page| {
-        freed += page.clear(gc);
-    }
-    for (gc.aggregate_pages.items) |page| {
-        freed += page.clear(gc);
-    }
-    log.info("collected {d} out of {d} objects ({d:.2}%)", .{
-        freed,
-        gc.allocated,
-        (@intToFloat(f32, freed) / @intToFloat(f32, gc.allocated)) * 100,
-    });
-    gc.allocated -= freed;
-    return freed;
-}
-
-pub fn init(allocator: Allocator, page_limit: u32) Gc {
-    std.debug.assert(page_limit >= 1);
-    return .{
-        .gpa = allocator,
+pub fn init(ally: Allocator, page_limit: u32) Gc {
+    std.debug.assert(page_limit > 0);
+    return Gc{
+        .gpa = ally,
         .page_limit = page_limit,
     };
 }
 
 /// Frees all values and their allocations.
 pub fn deinit(gc: *Gc) void {
-    for (gc.aggregate_pages.items) |page| page.destroy(gc);
-    gc.aggregate_pages.deinit(gc.gpa);
-    for (gc.simple_pages.items) |page| page.destroy(gc);
-    gc.simple_pages.deinit(gc.gpa);
+    for (gc.pages.items) |page| gc.gpa.destroy(page);
+    gc.pages.deinit(gc.gpa);
 }
 
-/// Allocate a new Value on the heap.
-pub fn alloc(gc: *Gc, ty: Type) !*Value {
-    switch (ty) {
-        .null => unreachable,
-        .bool => unreachable,
-        .native,
-        .str,
-        .int,
-        .num,
-        .range,
-        => return gc.allocExtra(&gc.simple_pages),
-        .list,
-        .tuple,
-        .map,
-        .err,
-        .func,
-        .frame,
-        .iterator,
-        .tagged,
-        .spread,
-        .native_val,
-        => return gc.allocExtra(&gc.aggregate_pages),
+/// call at beginning of execution
+pub fn setBaseFrame(gc: *Gc, frame: *Value) !void {
+    gc.base_frame = frame;
+}
+
+/// call at end of execution
+pub fn clearBaseFrame(gc: *Gc) void {
+    gc.base_frame = null;
+}
+
+/// used by the gc and native values
+///
+/// sets the generation of the value's header to the current gc generation
+pub fn markVal(gc: *Gc, maybe_value: ?*const Value) void {
+    const value = maybe_value orelse return;
+
+    // mark header
+    const obj = @qualCast(*Object, @fieldParentPtr(Object, "value", value));
+    obj.generation = gc.generation;
+
+    // traverse children
+    switch (value.*) {
+        // memoized
+        .null, .bool => {},
+        // simple
+        .native, .str, .int, .num, .range => {},
+        // aggregate
+        .list => |list| {
+            for (list.inner.items) |val| {
+                gc.markVal(val);
+            }
+        },
+        .tuple => |tuple| {
+            for (tuple) |val| {
+                gc.markVal(val);
+            }
+        },
+        .map => |map| {
+            var iter = map.iterator();
+            while (iter.next()) |entry| {
+                gc.markVal(entry.key_ptr.*);
+                gc.markVal(entry.value_ptr.*);
+            }
+        },
+        .err => |err| {
+            gc.markVal(err);
+        },
+        .func => |func| {
+            for (func.captures()) |val| {
+                gc.markVal(val);
+            }
+        },
+        .frame => |frame| {
+            for (frame.stack.items) |val| {
+                gc.markVal(val);
+            }
+            for (frame.captures) |val| {
+                gc.markVal(val);
+            }
+            gc.markVal(frame.this);
+        },
+        .iterator => |iter| {
+            gc.markVal(iter.value);
+        },
+        .spread => |spread| {
+            gc.markVal(spread.iterable);
+        },
+        .tagged => |tag| {
+            gc.markVal(tag.value);
+        },
+        .native_val => |n| {
+            if (n.vtable.markVal) |some| {
+                some(n.ptr, gc);
+            }
+        },
     }
 }
 
-fn allocExtra(gc: *Gc, pages: *Page.List) !*Value {
-    if (pages.items.len == 0) {
-        const page = try Page.create();
-        errdefer page.destroy(gc);
-        try pages.append(gc.gpa, page);
+/// attempt to allocate a value without creating a new page
+fn noAlloc(gc: *Gc) ?*Value {
+    var i = @intCast(u32, gc.pages.items.len);
+    while (i > 0) {
+        i -= 1;
 
-        // we just created this page so it is empty.
-        gc.allocated += 1;
-        return page.alloc() orelse unreachable;
-    }
+        const page = gc.pages.items[i];
+        if (!page.isFull()) {
+            const obj = page.alloc(i, gc.generation) catch |e| switch (e) {
+                error.PageFull => unreachable,
+            };
 
-    for (pages.items) |page| {
-        if (page.alloc()) |some| {
-            gc.allocated += 1;
-            return some;
+            return &obj.value;
         }
     }
 
-    const freed = gc.collect();
+    return null;
+}
 
-    const threshold = 0.75;
-    const new_capacity = @intToFloat(f32, freed) / @intToFloat(f32, gc.allocated);
+/// iterate the generation, collect within each page
+fn collect(gc: *Gc) void {
+    gc.generation +%= 1;
+    gc.markVal(gc.base_frame);
 
-    if (new_capacity < threshold and pages.items.len != gc.page_limit) {
-        log.info("collected {d}, allocating a new page", .{freed});
+    for (gc.pages.items) |page| {
+        page.collect(gc.gpa, gc.generation);
+    }
+}
 
-        const page = try Page.create();
-        errdefer page.destroy(gc);
-        try pages.append(gc.gpa, page);
-
-        // we just created this page so it is empty.
-        gc.allocated += 1;
-        return page.alloc() orelse unreachable;
-    } else if (freed != 0) {
-        // we just freed a whole bunch of values, allocation cannot fail
-        return gc.allocExtra(pages) catch unreachable;
+pub fn alloc(gc: *Gc) Allocator.Error!*Value {
+    // attempt to allocate from an already allocated page
+    if (gc.noAlloc()) |value| {
+        return value;
     }
 
-    // no values could be collected and page_limit has been reached
-    return error.OutOfMemory;
+    // collect and then try again
+    gc.collect();
+
+    if (gc.noAlloc()) |value| {
+        return value;
+    }
+
+    // there is really no memory. make a new page and assert success
+    const page = try Page.init(gc.gpa);
+    try gc.pages.append(gc.gpa, page);
+
+    return gc.noAlloc().?;
 }
 
 /// Allocates a shallow copy of `val`.
@@ -341,7 +367,7 @@ pub fn dupe(gc: *Gc, val: *const Value) !*Value {
     if (val == Value.True) return Value.True;
     if (val == Value.False) return Value.False;
 
-    const new = try gc.alloc(val.*);
+    const new = try gc.alloc();
     switch (val.*) {
         .list => |*l| {
             new.* = .{ .list = .{} };
@@ -363,23 +389,4 @@ pub fn dupe(gc: *Gc, val: *const Value) !*Value {
         else => new.* = val.*,
     }
     return new;
-}
-
-test "stack protect" {
-    if (@import("builtin").os.tag == .windows) {
-        // TODO @frameAddress returns an address after &val1 on windows?
-        return error.SkipZigTest;
-    }
-    var gc = Gc.init(std.testing.allocator, 2);
-    defer gc.deinit();
-
-    gc.stack_protect_start = @frameAddress();
-
-    _ = try gc.alloc(.int);
-    _ = try gc.alloc(.int);
-
-    try expect(gc.collect() == 0);
-
-    gc.stack_protect_start = 0;
-    try expect(gc.collect() == 2);
 }
