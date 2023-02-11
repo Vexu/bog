@@ -6,7 +6,7 @@ const Vm = bog.Vm;
 /// Creates a list of the maps keys
 pub fn keys(ctx: Vm.Context, map: *const Value.Map) !*Value {
     const gc = &ctx.vm.gc;
-    var ret = try gc.alloc(.list);
+    var ret = try gc.alloc();
     ret.* = .{ .list = .{} };
     try ret.list.inner.resize(gc.gpa, map.count());
     const items = ret.list.inner.items;
@@ -23,7 +23,7 @@ pub fn keys(ctx: Vm.Context, map: *const Value.Map) !*Value {
 /// Creates a list of the maps values
 pub fn values(ctx: Vm.Context, map: *const Value.Map) !*Value {
     const gc = &ctx.vm.gc;
-    var ret = try gc.alloc(.list);
+    var ret = try gc.alloc();
     ret.* = .{ .list = .{} };
     try ret.list.inner.resize(gc.gpa, map.count());
     const items = ret.list.inner.items;
@@ -40,7 +40,7 @@ pub fn values(ctx: Vm.Context, map: *const Value.Map) !*Value {
 /// Creates a list of kv pairs
 pub fn entries(ctx: Vm.Context, map: *const Value.Map) !*Value {
     const gc = &ctx.vm.gc;
-    var ret = try ctx.vm.gc.alloc(.list);
+    var ret = try ctx.vm.gc.alloc();
     ret.* = .{ .list = .{} };
     try ret.list.inner.resize(gc.gpa, map.count());
     const items = ret.list.inner.items;
@@ -48,7 +48,7 @@ pub fn entries(ctx: Vm.Context, map: *const Value.Map) !*Value {
     var i: usize = 0;
     var iter = map.iterator();
     while (iter.next()) |e| : (i += 1) {
-        var entry = try gc.alloc(.map);
+        var entry = try gc.alloc();
         entry.* = .{ .map = .{} };
         try entry.map.ensureTotalCapacity(gc.gpa, 2);
 

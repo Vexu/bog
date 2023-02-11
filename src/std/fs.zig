@@ -5,7 +5,7 @@ const Vm = bog.Vm;
 
 pub fn open(ctx: Vm.Context, path: []const u8) !*Value {
     // TODO take options as parameters
-    const res = try ctx.vm.gc.alloc(.native_val);
+    const res = try ctx.vm.gc.alloc();
     res.* = .{ .native_val = .{
         .vtable = Value.NativeVal.VTable.get(File),
         .type_id = Value.NativeVal.typeId(File),
@@ -34,7 +34,7 @@ const File = struct {
         switch (index.*) {
             .str => |*s| {
                 if (res.* == null) {
-                    res.* = try ctx.vm.gc.alloc(.int);
+                    res.* = try ctx.vm.gc.alloc();
                 }
 
                 inline for (@typeInfo(methods).Struct.decls) |method| {

@@ -15,12 +15,6 @@ pub fn run(gpa: Allocator, in: File, out: File) !void {
 
     const writer = out.writer();
 
-    repl.vm.gc.stack_protect_start = @frameAddress();
-
-    var frame_val = try repl.vm.gc.alloc(.frame);
-    frame_val.* = .{ .frame = &repl.frame };
-    defer frame_val.* = .{ .int = 0 }; // clear frame
-
     while (true) {
         defer {
             repl.arena.deinit();
@@ -49,7 +43,7 @@ pub const Repl = struct {
     code: bog.Compiler.Code,
     arena: std.heap.ArenaAllocator,
     vm: Vm,
-    frame: Vm.Frame,
+    frame: *Vm.Frame,
 
     const tokenize = @import("tokenizer.zig").tokenizeRepl;
     const parse = @import("parser.zig").parseRepl;
@@ -118,22 +112,28 @@ pub const Repl = struct {
         errdefer repl.vm.deinit();
         try repl.vm.addStd();
 
-        repl.frame = .{
+        // set up base frame
+        repl.frame = try gpa.create(Vm.Frame);
+        repl.frame.* = .{
             .this = bog.Value.Null,
             .mod = &repl.bytecode,
             .body = &.{},
             .caller_frame = null,
-            .module_frame = undefined,
+            .module_frame = repl.frame,
             .captures = &.{},
             .params = 1,
         };
-        errdefer repl.frame.deinit(&repl.vm);
-        repl.frame.module_frame = &repl.frame;
 
         try repl.frame.stack.append(gpa, bog.Value.Null);
+
+        const frame_val = try repl.vm.gc.alloc();
+        frame_val.* = .{ .frame = repl.frame };
+        try repl.vm.gc.setBaseFrame(frame_val);
     }
 
     fn deinit(repl: *Repl) void {
+        repl.vm.gc.clearBaseFrame();
+
         const gpa = repl.vm.gc.gpa;
         repl.buffer.deinit();
         repl.ln.deinit();
@@ -144,7 +144,6 @@ pub const Repl = struct {
         repl.compiler.deinit();
         repl.code.deinit(gpa);
         repl.arena.deinit();
-        repl.frame.deinit(&repl.vm);
         repl.vm.deinit();
         repl.* = undefined;
     }
@@ -170,7 +169,7 @@ pub const Repl = struct {
         } else unreachable;
         try repl.compile(node);
 
-        const res = try repl.vm.run(&repl.frame);
+        const res = try repl.vm.run(repl.frame);
         repl.frame.stack.items[0] = res;
         if (res == bog.Value.Null) return;
 

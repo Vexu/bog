@@ -38,12 +38,12 @@ pub fn ln(ctx: Vm.Context, val: *Value) !*Value {
     switch (val.*) {
         .int => |i| {
             if (i <= 0) return ctx.throw("ln is undefined for numbers less than zero");
-            const res = try ctx.vm.gc.alloc(.int);
+            const res = try ctx.vm.gc.alloc();
             res.* = Value{ .int = std.math.lossyCast(i64, std.math.floor(std.math.ln(@intToFloat(f64, i)))) };
             return res;
         },
         .num => |n| {
-            const res = try ctx.vm.gc.alloc(.num);
+            const res = try ctx.vm.gc.alloc();
             res.* = Value{ .num = std.math.ln(n) };
             return res;
         },
@@ -54,12 +54,12 @@ pub fn ln(ctx: Vm.Context, val: *Value) !*Value {
 pub fn sqrt(ctx: Vm.Context, val: *Value) !*Value {
     return switch (val.*) {
         .int => |i| {
-            const res = try ctx.vm.gc.alloc(.int);
+            const res = try ctx.vm.gc.alloc();
             res.* = Value{ .int = std.math.sqrt(@intCast(u64, i)) };
             return res;
         },
         .num => |n| {
-            const res = try ctx.vm.gc.alloc(.num);
+            const res = try ctx.vm.gc.alloc();
             res.* = Value{ .num = std.math.sqrt(n) };
             return res;
         },

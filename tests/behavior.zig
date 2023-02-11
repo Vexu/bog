@@ -82,7 +82,7 @@ test "capture" {
     try expectOutput(
         \\let foo = fn()
         \\    let a = 1
-        \\    return fn() 
+        \\    return fn()
         \\        return a + 1
         \\
         \\return foo()()
@@ -117,25 +117,6 @@ test "continue" {
         \\for let i in 0:1
         \\    continue
     , "null");
-}
-
-test "std.gc" {
-    if (@import("builtin").os.tag == .windows) {
-        // TODO this gives a different result on windows
-        return error.SkipZigTest;
-    }
-    try expectOutput(
-        \\let {collect} = import "std.gc"
-        \\let json = import "std.json"
-        \\
-        \\let makeGarbage = fn()
-        \\    json.stringify({"a" = [2, "foo", null]})
-        \\
-        \\for 0:5 makeGarbage()
-        \\return collect()
-    ,
-        \\53
-    );
 }
 
 test "std.json" {
@@ -881,25 +862,23 @@ fn expectCallOutput(source: []const u8, args: anytype, expected: []const u8) !vo
     defer vm.deinit();
     vm.addStd() catch unreachable;
 
-    var frame = bog.Vm.Frame{
+    const frame = try vm.gc.gpa.create(bog.Vm.Frame);
+    frame.* = .{
         .this = bog.Value.Null,
         .mod = &mod,
         .body = mod.main,
         .caller_frame = null,
-        .module_frame = undefined,
+        .module_frame = frame,
         .captures = &.{},
         .params = 0,
     };
-    defer frame.deinit(&vm);
-    frame.module_frame = &frame;
 
-    vm.gc.stack_protect_start = @frameAddress();
+    const frame_val = try vm.gc.alloc();
+    frame_val.* = .{ .frame = frame };
+    try vm.gc.setBaseFrame(frame_val);
+    defer vm.gc.clearBaseFrame();
 
-    var frame_val = try vm.gc.alloc(.frame);
-    frame_val.* = .{ .frame = &frame };
-    defer frame_val.* = .{ .int = 0 }; // clear frame
-
-    const res = vm.run(&frame) catch |e| switch (e) {
+    const res = vm.run(frame) catch |e| switch (e) {
         else => return e,
         error.FatalError => {
             vm.errors.render(std.io.getStdErr().writer()) catch {};
@@ -937,25 +916,23 @@ fn expectOutput(source: []const u8, expected: []const u8) !void {
     defer vm.deinit();
     vm.addStd() catch unreachable;
 
-    var frame = bog.Vm.Frame{
+    const frame = try vm.gc.gpa.create(bog.Vm.Frame);
+    frame.* = .{
         .this = bog.Value.Null,
         .mod = &mod,
         .body = mod.main,
         .caller_frame = null,
-        .module_frame = undefined,
+        .module_frame = frame,
         .captures = &.{},
         .params = 0,
     };
-    defer frame.deinit(&vm);
-    frame.module_frame = &frame;
 
-    vm.gc.stack_protect_start = @frameAddress();
+    const frame_val = try vm.gc.alloc();
+    frame_val.* = .{ .frame = frame };
+    try vm.gc.setBaseFrame(frame_val);
+    defer vm.gc.clearBaseFrame();
 
-    var frame_val = try vm.gc.alloc(.frame);
-    frame_val.* = .{ .frame = &frame };
-    defer frame_val.* = .{ .int = 0 }; // clear frame
-
-    const res = vm.run(&frame) catch |e| switch (e) {
+    const res = vm.run(frame) catch |e| switch (e) {
         else => return e,
         error.FatalError => {
             vm.errors.render(std.io.getStdErr().writer()) catch {};
