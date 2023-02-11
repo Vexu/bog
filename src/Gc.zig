@@ -31,6 +31,7 @@ const Page = struct {
 
     /// the raw object memory
     data: [PAGE_LEN]Object = undefined,
+    max_used: usize = 0,
     /// used to track empty objects
     chalkboard: StateSet = StateSet.initEmpty(),
 
@@ -138,8 +139,12 @@ const Page = struct {
     }
 
     /// finds the index of the first free object
-    fn firstFreeObject(self: *const Page) ?usize {
-        if (self.isFull()) {
+    fn firstFreeObject(self: *Page) ?usize {
+        if (self.max_used < self.data.len) {
+            const index = self.max_used;
+            self.max_used += 1;
+            return index;
+        } else if (self.isFull()) {
             return null;
         }
 
