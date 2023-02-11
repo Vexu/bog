@@ -24,7 +24,6 @@ const Object = struct {
 
 /// tracks live objects in a block of memory
 const Page = struct {
-    // TODO instead use powers of 4 or 8?
     const SET_SIZE = PAGE_LEN << 1;
     /// the index into StateSet that represents the first object
     const SET_BASE = PAGE_LEN;
@@ -94,6 +93,11 @@ const Page = struct {
         self.chalkboard.unset(bit.index - 1);
     }
 
+    /// whether an object lives
+    fn lives(self: *Page, index: usize) bool {
+        return self.get(Bit.of(index + SET_BASE));
+    }
+
     /// estimates how full this page is to determine whether it is 'saturated'
     /// (should be collected)
     fn isSaturated(self: *const Page) bool {
@@ -128,9 +132,9 @@ const Page = struct {
         }
 
         for (self.data) |*obj, index| {
-            if (obj.generation != gen) {
-                obj.value.deinit(ally);
+            if (self.lives(index) and obj.generation != gen) {
                 self.setFree(index);
+                obj.value.deinit(ally);
             }
         }
     }
