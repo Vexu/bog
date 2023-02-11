@@ -40,11 +40,6 @@ pub const Options = struct {
 
     /// maximum size of imported files
     max_import_size: u32 = 5 * 1024 * 1024,
-
-    /// maximum amount of pages gc may allocate.
-    /// 1 page == 1 MiB.
-    /// default 2 GiB.
-    page_limit: u32 = 2048,
 };
 
 /// NOTE: should be ?*Value, but that makes stage1 shit its pants.
@@ -226,7 +221,7 @@ pub const Error = error{FatalError} || Allocator.Error;
 
 pub fn init(allocator: Allocator, options: Options) Vm {
     return .{
-        .gc = Gc.init(allocator, options.page_limit),
+        .gc = Gc.init(allocator),
         .errors = Errors.init(allocator),
         .options = options,
     };

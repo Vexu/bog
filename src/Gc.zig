@@ -7,7 +7,7 @@ const Value = bog.Value;
 const Type = bog.Type;
 
 /// the number of allocated objects per page
-const PAGE_LEN = 16; // 32 * 1024;
+const PAGE_LEN = 32 * 1024;
 
 comptime {
     if (@popCount(@as(usize, PAGE_LEN)) != 1) {
@@ -125,9 +125,7 @@ const Page = struct {
 
     /// if this page is saturated, collects all objects of the wrong generation
     fn collect(self: *Page, ally: Allocator, gen: u8) void {
-        std.debug.print("collecting a page\n", .{});
         if (!self.isSaturated()) {
-            std.debug.print("unsaturated\n", .{});
             return;
         }
 
@@ -188,11 +186,6 @@ const Page = struct {
         obj.page_index = page_index;
         obj.generation = gen;
 
-        std.debug.print(
-            "alloc: page {} gen {} index {}\n",
-            .{ page_index, gen, index },
-        );
-
         return obj;
     }
 
@@ -206,29 +199,19 @@ const Page = struct {
 
         const index = @divExact(element - base, @sizeOf(Object));
         self.setFree(index);
-
-        std.debug.print(
-            "free: page {} gen {} index {}\n",
-            .{ obj.page_index, obj.generation, index },
-        );
     }
 };
 
 const Gc = @This();
 
 gpa: Allocator,
-page_limit: u32,
 generation: u8 = 0,
 /// every bog program has a base frame which references all live values
 base_frame: ?*Value = null,
 pages: std.ArrayListUnmanaged(*Page) = .{},
 
-pub fn init(ally: Allocator, page_limit: u32) Gc {
-    std.debug.assert(page_limit > 0);
-    return Gc{
-        .gpa = ally,
-        .page_limit = page_limit,
-    };
+pub fn init(ally: Allocator) Gc {
+    return Gc{ .gpa = ally };
 }
 
 /// Frees all values and their allocations.
