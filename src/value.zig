@@ -343,8 +343,7 @@ pub const Value = union(Type) {
             .frame => |f| {
                 f.stack.deinit(allocator);
                 f.err_handlers.deinit(allocator);
-                // base stack frame is not allocated
-                if (f.caller_frame != null) allocator.destroy(f);
+                allocator.destroy(f);
             },
             .int, .num, .native, .tagged, .range, .iterator, .err, .spread => {},
             .tuple => |t| allocator.free(t),

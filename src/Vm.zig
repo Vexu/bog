@@ -274,24 +274,23 @@ pub fn compileAndRun(vm: *Vm, file_path: []const u8) !*Value {
         else => |e| return e,
     };
 
-    var frame = Frame{
+    const frame = try vm.gc.gpa.create(Frame);
+    frame.* = Frame{
         .this = Value.Null,
         .mod = mod,
         .body = mod.main,
         .caller_frame = null,
-        .module_frame = undefined,
+        .module_frame = frame,
         .captures = &.{},
         .params = 0,
     };
-    defer frame.deinit(vm);
-    frame.module_frame = &frame;
 
-    var val = try vm.gc.alloc();
-    val.* = .{ .frame = &frame };
+    const val = try vm.gc.alloc();
+    val.* = .{ .frame = frame };
     try vm.gc.setBaseFrame(val);
     defer vm.gc.clearBaseFrame();
 
-    return vm.run(&frame) catch |err| switch (err) {
+    return vm.run(frame) catch |err| switch (err) {
         error.Suspended => return frame.fatal(vm, "TODO main function suspended"),
         else => |e| return e,
     };

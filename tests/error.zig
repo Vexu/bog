@@ -139,25 +139,23 @@ fn expectError(source: []const u8, expected: []const u8) !void {
     }
     defer vm.deinit();
 
-    var frame = bog.Vm.Frame{
+    const frame = try vm.gc.gpa.create(bog.Vm.Frame);
+    frame.* = .{
         .this = bog.Value.Null,
         .mod = &mod,
         .body = mod.main,
         .caller_frame = null,
-        .module_frame = undefined,
+        .module_frame = frame,
         .captures = &.{},
         .params = 0,
     };
-    defer frame.deinit(&vm);
-    frame.module_frame = &frame;
 
-    vm.gc.stack_protect_start = @frameAddress();
+    const frame_val = try vm.gc.alloc();
+    frame_val.* = .{ .frame = frame };
+    try vm.gc.setBaseFrame(frame_val);
+    defer vm.gc.clearBaseFrame();
 
-    var frame_val = try vm.gc.alloc(.frame);
-    frame_val.* = .{ .frame = &frame };
-    defer frame_val.* = .{ .int = 0 }; // clear frame
-
-    _ = vm.run(&frame) catch |e| switch (e) {
+    _ = vm.run(frame) catch |e| switch (e) {
         else => return error.UnexpectedError,
         error.FatalError => {
             const result = vm.errors.list.items[0].msg;

@@ -13,7 +13,7 @@ test "format string" {
         \\f"foo {{1:2}:32} bar { 2
         \\*
         \\3:4} baz \t"
-        \\ 
+        \\
         \\
     ,
         \\f"foo {{1:2}:32} bar {2 *

@@ -86,7 +86,6 @@ const Page = struct {
         }
 
         ally.destroy(self);
-        self.* = undefined;
     }
 
     fn isFull(self: *const Page) bool {
@@ -244,6 +243,7 @@ pub fn setBaseFrame(gc: *Gc, frame: *Value) !void {
 /// call at end of execution
 pub fn clearBaseFrame(gc: *Gc) void {
     gc.base_frame = null;
+    gc.collect();
 }
 
 /// used by the gc and native values
