@@ -78,6 +78,17 @@ const Page = struct {
         return self;
     }
 
+    fn deinit(self: *Page, ally: Allocator) void {
+        for (self.data) |*obj, index| {
+            if (self.lives(index)) {
+                obj.value.deinit(ally);
+            }
+        }
+
+        ally.destroy(self);
+        self.* = undefined;
+    }
+
     fn isFull(self: *const Page) bool {
         return self.get(Bit.ROOT);
     }
@@ -221,7 +232,7 @@ pub fn init(ally: Allocator) Gc {
 
 /// Frees all values and their allocations.
 pub fn deinit(gc: *Gc) void {
-    for (gc.pages.items) |page| gc.gpa.destroy(page);
+    for (gc.pages.items) |page| page.deinit(gc.gpa);
     gc.pages.deinit(gc.gpa);
 }
 
