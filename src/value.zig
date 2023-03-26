@@ -569,7 +569,7 @@ pub const Value = union(Type) {
                     res.* = try ctx.vm.gc.alloc(.list);
                     res.*.?.* = .{ .list = .{} };
                     const res_list = &res.*.?.*.list;
-                    try res_list.inner.ensureUnusedCapacity(ctx.vm.gc.gpa, r.count());
+                    try res_list.inner.ensureUnusedCapacity(ctx.vm.gc.gpa, @intCast(usize, r.count()));
 
                     var it = r.iterator();
                     while (it.next()) |some| {
