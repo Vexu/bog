@@ -438,7 +438,7 @@ pub const Value = union(Type) {
             .tuple => |t| {
                 const b_val = b.tuple;
                 if (t.len != b_val.len) return false;
-                for (t) |v, i| {
+                for (t, 0..) |v, i| {
                     if (!v.eql(b_val[i])) return false;
                 }
                 return true;
@@ -479,7 +479,7 @@ pub const Value = union(Type) {
                     try writer.writeAll("(...)");
                 } else {
                     try writer.writeByte('(');
-                    for (t) |v, i| {
+                    for (t, 0..) |v, i| {
                         if (i != 0) try writer.writeAll(", ");
                         try v.dump(writer, level - 1);
                     }
@@ -508,7 +508,7 @@ pub const Value = union(Type) {
                     try writer.writeAll("[...]");
                 } else {
                     try writer.writeByte('[');
-                    for (l.inner.items) |v, i| {
+                    for (l.inner.items, 0..) |v, i| {
                         if (i != 0) try writer.writeAll(", ");
                         try v.dump(writer, level - 1);
                     }
@@ -913,7 +913,7 @@ pub const Value = union(Type) {
                 comptime var vm_passed = false;
                 comptime var this_passed = false;
                 comptime var variadic = false;
-                inline for (Fn.params) |arg, i| {
+                inline for (Fn.params, 0..) |arg, i| {
                     const ArgT = arg.type.?;
                     if (variadic) @compileError("Value.Variadic must be the last parameter");
                     if (ArgT == Vm.Context) {
@@ -936,7 +936,7 @@ pub const Value = union(Type) {
                         errdefer ctx.vm.gc.gpa.free(args_tuple);
                         args[i] = ArgT{ .t = args_tuple };
 
-                        for (bog_args[bog_arg_i..]) |val, tuple_i| {
+                        for (bog_args[bog_arg_i..], 0..) |val, tuple_i| {
                             args_tuple[tuple_i] = try val.bogToZig(ArgT.__bog_Variadic_T, ctx);
                         }
                     } else {
@@ -1077,7 +1077,7 @@ pub const Value = union(Type) {
             .null => try writer.writeAll("null"),
             .tuple => |t| {
                 try writer.writeByte('[');
-                for (t) |e, i| {
+                for (t, 0..) |e, i| {
                     if (i != 0) try writer.writeByte(',');
                     try e.jsonStringify(options, writer);
                 }
@@ -1085,7 +1085,7 @@ pub const Value = union(Type) {
             },
             .list => |*l| {
                 try writer.writeByte('[');
-                for (l.inner.items) |e, i| {
+                for (l.inner.items, 0..) |e, i| {
                     if (i != 0) try writer.writeByte(',');
                     try e.jsonStringify(options, writer);
                 }

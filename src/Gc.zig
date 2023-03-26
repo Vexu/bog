@@ -53,7 +53,7 @@ const Page = struct {
     }
 
     fn destroy(page: *Page, gc: *Gc) void {
-        for (page.meta) |s, i| {
+        for (page.meta, 0..) |s, i| {
             if (s == .empty) continue;
             page.values[i].deinit(gc.gpa);
         }
@@ -159,7 +159,7 @@ fn markGray(gc: *Gc) void {
         for (gc.aggregate_pages.items) |page| {
             if (page.marked == 0) continue;
             page.marked = 0;
-            for (page.meta) |*s, i| {
+            for (&page.meta, 0..) |*s, i| {
                 if (s.* != .gray) continue;
 
                 s.* = .black;

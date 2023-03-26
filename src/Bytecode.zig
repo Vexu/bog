@@ -337,7 +337,7 @@ fn dumpLineCol(b: *Bytecode, byte_offset: u32) void {
 pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
     const ops = b.code.items(.op);
     const data = b.code.items(.data);
-    for (body) |i, inst| {
+    for (body, 0..) |i, inst| {
         if (ops[i] == .nop) continue;
         const ref = indexToRef(inst, params);
         if (ops[i].needsDebugInfo()) {
@@ -510,7 +510,7 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
 }
 
 fn dumpList(list: []const Ref) void {
-    for (list) |item, i| {
+    for (list, 0..) |item, i| {
         if (i != 0) std.debug.print(", ", .{});
         std.debug.print("{}", .{item});
     }

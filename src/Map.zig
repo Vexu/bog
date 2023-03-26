@@ -186,7 +186,7 @@ fn getOrPutAssumeCapacityAdapted(self: *Map, key: *const Value) GetOrPutResult {
         const slice = self.entries.slice();
         const hashes_array = slice.items(.hash);
         const keys_array = slice.items(.key);
-        for (keys_array) |*item_key, i| {
+        for (keys_array, 0..) |*item_key, i| {
             if (hashes_array[i] == h and key.eql(item_key.*)) {
                 return GetOrPutResult{
                     .key_ptr = item_key,
@@ -291,7 +291,7 @@ pub fn getIndex(self: Map, key: *const Value) ?u32 {
         const slice = self.entries.slice();
         const hashes_array = slice.items(.hash);
         const keys_array = slice.items(.key);
-        for (keys_array) |*item_key, i| {
+        for (keys_array, 0..) |*item_key, i| {
             if (hashes_array[i] == h and key.eql(item_key.*)) {
                 return @intCast(u32, i);
             }
@@ -489,7 +489,7 @@ fn insertAllEntriesIntoNewHeaderGeneric(self: *Map, header: *IndexHeader, compti
     const items = slice.items(.hash);
     const indexes = header.indexes(I);
 
-    entry_loop: for (items) |key, i| {
+    entry_loop: for (items, 0..) |key, i| {
         const start_index = key;
         const end_index = start_index +% indexes.len;
         var index = start_index;
@@ -587,7 +587,7 @@ const min_bit_index = 5;
 const max_capacity = (1 << max_bit_index) - 1;
 const index_capacities = blk: {
     var caps: [max_bit_index + 1]u32 = undefined;
-    for (caps[0..max_bit_index]) |*item, i| {
+    for (caps[0..max_bit_index], 0..) |*item, i| {
         item.* = (1 << i) * 3 / 5;
     }
     caps[max_bit_index] = max_capacity;

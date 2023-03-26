@@ -445,7 +445,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                 const fn_body = extra[captures_len + 2 ..];
 
                 const captures = try vm.gc.gpa.alloc(*Value, captures_len);
-                for (fn_captures) |capture_ref, i| {
+                for (fn_captures, 0..) |capture_ref, i| {
                     // TODO should this use valDupeSimple
                     captures[i] = f.val(capture_ref);
                 }

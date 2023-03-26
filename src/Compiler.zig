@@ -1078,7 +1078,7 @@ fn genMatch(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     defer c.unwrap_jump_buf.items.len = jump_buf_start;
 
     var seen_catch_all = false;
-    for (cases[1..]) |case, case_i| {
+    for (cases[1..], 0..) |case, case_i| {
         if (seen_catch_all) {
             return c.reportErr("additional cases after a catch-all case", case);
         }
@@ -1208,7 +1208,7 @@ fn genTry(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     jump_buf_top += 1;
 
     var seen_catch_all = false;
-    for (catches) |catcher, catcher_i| {
+    for (catches, 0..) |catcher, catcher_i| {
         if (seen_catch_all) {
             return c.reportErr("additional handlers after a catch-all handler", catcher);
         }
@@ -1271,7 +1271,7 @@ fn genBlock(c: *Compiler, stmts: []const Node.Index, res: Result) Error!Value {
     const scope_count = c.scopes.items.len;
     defer c.scopes.items.len = scope_count;
 
-    for (stmts) |stmt, i| {
+    for (stmts, 0..) |stmt, i| {
         // return value of last instruction if it is not discarded
         if (i + 1 == stmts.len) {
             return c.genNode(stmt, res);
@@ -2064,7 +2064,7 @@ fn genFn(c: *Compiler, node: Node.Index) Error!Value {
         try c.scopes.append(c.gpa, .{ .func = &func });
 
         // destructure parameters
-        for (params) |param, i| {
+        for (params, 0..) |param, i| {
             try c.genLval(param, .{ .let = &.{ .ref = @intToEnum(Ref, i) } });
         }
 
@@ -2222,7 +2222,7 @@ fn genFormatString(c: *Compiler, node: Node.Index) Error!Value {
     const starts = c.tree.tokens.items(.start);
     const ends = c.tree.tokens.items(.end);
 
-    for (strings) |str, i| {
+    for (strings, 0..) |str, i| {
         if (i != 0 and token_ids[c.tree.prevToken(str)] == .equal) {
             assert(buf.pop() == '{');
             const first_token = c.tree.firstToken(args[i - 1]);
@@ -2481,7 +2481,7 @@ fn genLvalTupleList(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
     const ids = c.tree.nodes.items(.id);
 
     var spread = false;
-    for (items) |item, i| {
+    for (items, 0..) |item, i| {
         if (spread) {
             return c.reportErr("additional elements after spread destructuring", item);
         }
@@ -2504,7 +2504,7 @@ fn genLvalTupleList(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
         _ = try c.addBin(.assert_len, container_ref, @intToEnum(Ref, items.len), node);
     }
 
-    for (items) |item, i| {
+    for (items, 0..) |item, i| {
         const last_node = c.getLastNode(item);
         if (ids[last_node] == .discard_expr) {
             continue;
@@ -2788,7 +2788,7 @@ fn genTryUnwrapTupleList(c: *Compiler, node: Node.Index, val: *const Value) Erro
     const len_ref = try c.addBin(.check_len, val.getRt(), @intToEnum(Ref, items.len), null);
     try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, len_ref));
 
-    for (items) |item, i| {
+    for (items, 0..) |item, i| {
         const last_node = c.getLastNode(item);
         if (ids[last_node] == .discard_expr) {
             continue;

@@ -82,7 +82,7 @@ pub fn MultiArrayList(comptime S: type) type {
                 alignment: u32,
             };
             var data: [fields.len]Data = undefined;
-            for (fields) |field_info, i| {
+            for (fields, 0..) |field_info, i| {
                 data[i] = .{
                     .size = @sizeOf(field_info.type),
                     .size_index = i,
@@ -99,7 +99,7 @@ pub fn MultiArrayList(comptime S: type) type {
             std.sort.sort(Data, &data, &trash, Sort.lessThan);
             var sizes_bytes: [fields.len]u32 = undefined;
             var field_indexes: [fields.len]u32 = undefined;
-            for (data) |elem, i| {
+            for (data, 0..) |elem, i| {
                 sizes_bytes[i] = elem.size;
                 field_indexes[i] = elem.size_index;
             }
@@ -132,7 +132,7 @@ pub fn MultiArrayList(comptime S: type) type {
                 .capacity = self.capacity,
             };
             var ptr: [*]u8 = self.bytes;
-            for (sizes.bytes) |field_size, i| {
+            for (sizes.bytes, 0..) |field_size, i| {
                 result.ptrs[sizes.fields[i]] = ptr;
                 ptr += field_size * self.capacity;
             }
@@ -149,7 +149,7 @@ pub fn MultiArrayList(comptime S: type) type {
         /// Overwrite one array element with new data.
         pub fn set(self: *Self, index: u32, elem: S) void {
             const slices = self.slice();
-            inline for (fields) |field_info, i| {
+            inline for (fields, 0..) |field_info, i| {
                 slices.items(@intToEnum(Field, i))[index] = @field(elem, field_info.name);
             }
         }
@@ -158,7 +158,7 @@ pub fn MultiArrayList(comptime S: type) type {
         pub fn get(self: Self, index: u32) S {
             const slices = self.slice();
             var result: S = undefined;
-            inline for (fields) |field_info, i| {
+            inline for (fields, 0..) |field_info, i| {
                 @field(result, field_info.name) = slices.items(@intToEnum(Field, i))[index];
             }
             return result;
@@ -206,7 +206,7 @@ pub fn MultiArrayList(comptime S: type) type {
             assert(index <= self.len);
             self.len += 1;
             const slices = self.slice();
-            inline for (fields) |field_info, field_index| {
+            inline for (fields, 0..) |field_info, field_index| {
                 const field_slice = slices.items(@intToEnum(Field, field_index));
                 var i: u32 = self.len - 1;
                 while (i > index) : (i -= 1) {
@@ -221,7 +221,7 @@ pub fn MultiArrayList(comptime S: type) type {
         /// retain list ordering.
         pub fn swapRemove(self: *Self, index: u32) void {
             const slices = self.slice();
-            inline for (fields) |_, i| {
+            inline for (fields, 0..) |_, i| {
                 const field_slice = slices.items(@intToEnum(Field, i));
                 field_slice[index] = field_slice[self.len - 1];
                 field_slice[self.len - 1] = undefined;
@@ -233,7 +233,7 @@ pub fn MultiArrayList(comptime S: type) type {
         /// after it to preserve order.
         pub fn orderedRemove(self: *Self, index: u32) void {
             const slices = self.slice();
-            inline for (fields) |_, field_index| {
+            inline for (fields, 0..) |_, field_index| {
                 const field_slice = slices.items(@intToEnum(Field, field_index));
                 var i = index;
                 while (i < self.len - 1) : (i += 1) {
@@ -270,7 +270,7 @@ pub fn MultiArrayList(comptime S: type) type {
                 .exact,
             ) catch {
                 const self_slice = self.slice();
-                inline for (fields) |field_info, i| {
+                inline for (fields, 0..) |field_info, i| {
                     if (@sizeOf(field_info.type) != 0) {
                         const field = @intToEnum(Field, i);
                         const dest_slice = self_slice.items(field)[new_len..];
@@ -292,7 +292,7 @@ pub fn MultiArrayList(comptime S: type) type {
             self.len = new_len;
             const self_slice = self.slice();
             const other_slice = other.slice();
-            inline for (fields) |field_info, i| {
+            inline for (fields, 0..) |field_info, i| {
                 if (@sizeOf(field_info.type) != 0) {
                     const field = @intToEnum(Field, i);
                     // TODO we should be able to use std.mem.copy here but it causes a
@@ -357,7 +357,7 @@ pub fn MultiArrayList(comptime S: type) type {
             };
             const self_slice = self.slice();
             const other_slice = other.slice();
-            inline for (fields) |field_info, i| {
+            inline for (fields, 0..) |field_info, i| {
                 if (@sizeOf(field_info.type) != 0) {
                     const field = @intToEnum(Field, i);
                     mem.copy(field_info.type, other_slice.items(field), self_slice.items(field));
@@ -376,7 +376,7 @@ pub fn MultiArrayList(comptime S: type) type {
             result.len = self.len;
             const self_slice = self.slice();
             const result_slice = result.slice();
-            inline for (fields) |field_info, i| {
+            inline for (fields, 0..) |field_info, i| {
                 if (@sizeOf(field_info.type) != 0) {
                     const field = @intToEnum(Field, i);
                     // TODO we should be able to use std.mem.copy here but it causes a
@@ -397,7 +397,7 @@ pub fn MultiArrayList(comptime S: type) type {
                 slice: Slice,
 
                 pub fn swap(sc: @This(), a_index: u32, b_index: u32) void {
-                    inline for (fields) |field_info, i| {
+                    inline for (fields, 0..) |field_info, i| {
                         if (@sizeOf(field_info.type) != 0) {
                             const field = @intToEnum(Field, i);
                             const ptr = sc.slice.items(field);

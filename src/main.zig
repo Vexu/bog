@@ -251,7 +251,7 @@ fn debugTokens(gpa: std.mem.Allocator, args: [][]const u8) !void {
     const stream = std.io.getStdOut().writer();
     const starts = tokens.items(.start);
     const ends = tokens.items(.end);
-    for (tokens.items(.id)) |id, i| {
+    for (tokens.items(.id), 0..) |id, i| {
         switch (id) {
             .nl,
             .eof,

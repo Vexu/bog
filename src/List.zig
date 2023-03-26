@@ -17,7 +17,7 @@ pub fn deinit(l: *List, allocator: Allocator) void {
 
 pub fn eql(a: List, b: List) bool {
     if (a.inner.items.len != b.inner.items.len) return false;
-    for (a.inner.items) |v, i| {
+    for (a.inner.items, 0..) |v, i| {
         if (!v.eql(b.inner.items[i])) return false;
     }
     return true;
@@ -41,7 +41,7 @@ pub fn get(list: *const List, ctx: Vm.Context, index: *const Value, res: *?*Valu
             res.* = try ctx.vm.gc.alloc(.list);
             res.*.?.* = .{ .list = .{} };
             const res_list = &res.*.?.*.list;
-            try res_list.inner.ensureUnusedCapacity(ctx.vm.gc.gpa, r.count());
+            try res_list.inner.ensureUnusedCapacity(ctx.vm.gc.gpa, @intCast(usize, r.count()));
 
             var it = r.iterator();
             while (it.next()) |some| {
