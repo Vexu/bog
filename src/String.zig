@@ -208,7 +208,7 @@ pub const methods = struct {
         for (strs.t) |new| len += new.len;
         try b.inner.ensureUnusedCapacity(len);
 
-        for (strs.t) |arg, i| {
+        for (strs.t, 0..) |arg, i| {
             if (i != 0) {
                 b.inner.appendSliceAssumeCapacity(str.t);
             }

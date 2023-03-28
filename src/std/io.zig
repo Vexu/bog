@@ -6,7 +6,7 @@ const Vm = bog.Vm;
 pub fn print(vals: Value.Variadic(*Value)) !void {
     var buf_writer = std.io.bufferedWriter(std.io.getStdOut().writer());
     const writer = buf_writer.writer();
-    for (vals.t) |val, i| {
+    for (vals.t, 0..) |val, i| {
         if (i != 0) try writer.writeByte(' ');
         if (val.* == .str) {
             try writer.writeAll(val.str.data);

@@ -78,11 +78,13 @@ pub fn build(b: *Builder) void {
     exe.install();
 
     const fmt_step = b.step("fmt", "Format all source files");
-    fmt_step.dependOn(&b.addFmt(&[_][]const u8{
-        "build.zig",
-        "src",
-        "examples",
-        "tests",
+    fmt_step.dependOn(&b.addFmt(.{
+        .paths = &.{
+            "build.zig",
+            "src",
+            "examples",
+            "tests",
+        },
     }).step);
 
     const clean_step = b.step("clean", "Delete all artifacts created by zig build");

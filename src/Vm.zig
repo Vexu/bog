@@ -253,6 +253,9 @@ pub fn deinit(vm: *Vm) void {
 pub fn addPackage(vm: *Vm, name: []const u8, comptime importable: anytype) Allocator.Error!void {
     try vm.imports.putNoClobber(vm.gc.gpa, name, struct {
         fn func(ctx: Context) Vm.Error!*bog.Value {
+            if (@typeInfo(@TypeOf(importable)) == .Fn) {
+                return bog.Value.zigFnToBog(ctx.vm, importable);
+            }
             return bog.Value.zigToBog(ctx.vm, importable);
         }
     }.func);
@@ -445,7 +448,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                 const fn_body = extra[captures_len + 2 ..];
 
                 const captures = try vm.gc.gpa.alloc(*Value, captures_len);
-                for (fn_captures) |capture_ref, i| {
+                for (fn_captures, 0..) |capture_ref, i| {
                     // TODO should this use valDupeSimple
                     captures[i] = f.val(capture_ref);
                 }
@@ -843,7 +846,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                     .range => |r| {
                         const res = try f.newVal(vm, ref, .list);
                         res.* = .{ .list = .{} };
-                        try res.list.inner.ensureUnusedCapacity(vm.gc.gpa, r.count());
+                        try res.list.inner.ensureUnusedCapacity(vm.gc.gpa, @intCast(usize, r.count()));
 
                         var it = r.iterator();
                         while (it.next()) |some| {

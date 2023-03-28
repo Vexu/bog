@@ -20,7 +20,7 @@ pub fn render(tree: Tree, writer: anytype) @TypeOf(writer).Error!bool {
         break :end tok_starts[first_tok];
     };
     _ = try renderComments(tree, 0, end, &aiw);
-    for (tree.root_nodes) |decl, i| {
+    for (tree.root_nodes, 0..) |decl, i| {
         try renderNode(tree, decl, &aiw, .newline);
         if (isBlock(tree, decl)) {
             // render extra newlines after blocks
@@ -352,7 +352,7 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
             const stmts = tree.nodeItems(node, &buf);
 
             aiw.pushIndent();
-            for (stmts) |stmt, i| {
+            for (stmts, 0..) |stmt, i| {
                 try renderNode(tree, stmt, aiw, .newline);
 
                 if (isBlock(tree, stmt)) {
@@ -377,7 +377,7 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
             try renderToken(tree, tokens[node], aiw, getBlockIndent(tree, stmts[0], .space));
             try renderNode(tree, stmts[0], aiw, .space);
 
-            for (stmts[1..]) |catch_expr, i| {
+            for (stmts[1..], 0..) |catch_expr, i| {
                 if (i + 1 == stmts.len - 1) {
                     try renderNode(tree, catch_expr, aiw, space);
                 } else {
@@ -407,7 +407,7 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
         .format_expr => {
             const token_ids = tree.tokens.items(.id);
             const exprs = data[node].format.exprs(tree.extra);
-            for (data[node].format.str(tree.extra)) |str, i| {
+            for (data[node].format.str(tree.extra), 0..) |str, i| {
                 if (i != 0) {
                     const equal = tree.prevToken(str);
                     if (token_ids[equal] == .equal) {
@@ -439,7 +439,7 @@ fn renderCommaList(tree: Tree, nodes: []const Node.Index, last_token: Token.Inde
         }
         aiw.popIndent();
     } else {
-        for (nodes) |node, i| {
+        for (nodes, 0..) |node, i| {
             if (i + 1 == nodes.len) {
                 try renderNode(tree, node, aiw, space);
                 break;
