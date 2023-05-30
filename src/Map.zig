@@ -654,7 +654,7 @@ const IndexHeader = struct {
         const index_size = Map.capacityIndexSize(new_bit_index);
         const nbytes = @sizeOf(IndexHeader) + index_size * len;
         const bytes = try allocator.alignedAlloc(u8, @alignOf(IndexHeader), nbytes);
-        @memset(bytes.ptr + @sizeOf(IndexHeader), 0xff, bytes.len - @sizeOf(IndexHeader));
+        @memset(bytes[@sizeOf(IndexHeader)..], 0xff);
         const result = @ptrCast(*IndexHeader, bytes.ptr);
         result.* = .{
             .bit_index = new_bit_index,

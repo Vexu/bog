@@ -141,7 +141,7 @@ fn fmtFile(gpa: std.mem.Allocator, name: []const u8) FmtError!bool {
             var any_err = false;
             defer dir.close();
             var it = dir.iterate();
-            while (try it.next()) |entry| if (entry.kind == .Directory or std.mem.endsWith(u8, entry.name, bog.extension)) {
+            while (try it.next()) |entry| if (entry.kind == .directory or std.mem.endsWith(u8, entry.name, bog.extension)) {
                 const full_path = try std.fs.path.join(gpa, &[_][]const u8{ name, entry.name });
                 defer gpa.free(full_path);
                 any_err = (try fmtFile(gpa, full_path)) or any_err;

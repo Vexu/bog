@@ -48,7 +48,7 @@ const Page = struct {
 
     fn create() !*Page {
         const page = try std.heap.page_allocator.create(Page);
-        mem.set(usize, mem.bytesAsSlice(usize, mem.asBytes(page)), 0);
+        @memset(mem.bytesAsSlice(usize, mem.asBytes(page)), 0);
         return page;
     }
 

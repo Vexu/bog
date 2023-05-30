@@ -41,7 +41,7 @@ pub fn build(b: *Builder) void {
     c_example.linkLibC();
     c_example.addLibraryPath("zig-cache/lib");
     c_example.step.dependOn(lib_step);
-    c_example.setOutputDir("examples/bin");
+    c_example.override_dest_dir = .{ .custom = "examples/bin" };
 
     // calling zig from bog example
     const zig_from_bog = b.addExecutable(.{
@@ -53,7 +53,7 @@ pub fn build(b: *Builder) void {
     zig_from_bog.addAnonymousModule("bog", .{
         .source_file = .{ .path = "src/bog.zig" },
     });
-    zig_from_bog.setOutputDir("examples/bin");
+    zig_from_bog.override_dest_dir = .{ .custom = "examples/bin" };
 
     const examples_step = b.step("examples", "Build all examples");
     examples_step.dependOn(&b.addInstallArtifact(c_example).step);
@@ -75,7 +75,7 @@ pub fn build(b: *Builder) void {
     exe.addAnonymousModule("linenoize", .{
         .source_file = .{ .path = "lib/linenoize/src/main.zig" },
     });
-    exe.install();
+    b.installArtifact(exe);
 
     const fmt_step = b.step("fmt", "Format all source files");
     fmt_step.dependOn(&b.addFmt(.{

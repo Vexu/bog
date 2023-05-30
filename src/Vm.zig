@@ -105,8 +105,7 @@ pub const Frame = struct {
             return @ptrCast(*?*Value, &f.stack.items[ref_int]);
         }
         try f.stack.ensureTotalCapacity(vm.gc.gpa, ref_int + 1);
-        std.mem.set(
-            ?*Value,
+        @memset(
             @ptrCast([]?*Value, f.stack.items.ptr[f.stack.items.len .. ref_int + 1]),
             null,
         );

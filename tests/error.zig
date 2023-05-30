@@ -80,7 +80,7 @@ test "break outside loop" {
     );
 }
 
-test "invalid type" {
+test "use of undeclared identifier" {
     try expectError(
         \\foo
     ,
