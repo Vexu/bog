@@ -582,7 +582,7 @@ fn Index(comptime I: type) type {
 // /// length * the size of an Index(u32).  The index is 8 bytes (3 bits repr)
 // /// and max_usize + 1 is not representable, so we need to subtract out 4 bits.
 const max_representable_index_len = @bitSizeOf(u32) - 4;
-const max_bit_index = math.min(32, max_representable_index_len);
+const max_bit_index = @min(32, max_representable_index_len);
 const min_bit_index = 5;
 const max_capacity = (1 << max_bit_index) - 1;
 const index_capacities = blk: {
