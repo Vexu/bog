@@ -238,7 +238,7 @@ const Value = union(enum) {
 
     fn getNum(val: Value) f64 {
         return switch (val) {
-            .int => |v| @intToFloat(f64, v),
+            .int => |v| @floatFromInt(v),
             .num => |v| v,
             else => unreachable,
         };
@@ -279,11 +279,11 @@ const Value = union(enum) {
 pub const Error = error{CompileError} || Allocator.Error;
 
 fn indexToRef(code_len: usize, params: u32) Ref {
-    return @intToEnum(Ref, code_len + params);
+    return @enumFromInt(code_len + params);
 }
 
 fn addInst(c: *Compiler, op: Bytecode.Inst.Op, data: Bytecode.Inst.Data, node: ?Node.Index) !Ref {
-    const new_index = @intCast(u32, c.instructions.len);
+    const new_index = @as(u32, @intCast(c.instructions.len));
     const ref = indexToRef(c.code.items.len, c.params);
     try c.instructions.append(c.gpa, .{ .op = op, .data = data });
     try c.code.append(c.gpa, new_index);
@@ -308,7 +308,7 @@ fn addBin(c: *Compiler, op: Bytecode.Inst.Op, lhs: Ref, rhs: Ref, node: ?Node.In
 }
 
 fn addJump(c: *Compiler, op: Bytecode.Inst.Op, operand: Ref) !u32 {
-    const new_index = @intCast(u32, c.instructions.len);
+    const new_index = @as(u32, @intCast(c.instructions.len));
     _ = try c.addInst(op, .{
         .jump_condition = .{
             .operand = operand,
@@ -319,18 +319,18 @@ fn addJump(c: *Compiler, op: Bytecode.Inst.Op, operand: Ref) !u32 {
 }
 
 fn addExtra(c: *Compiler, op: Bytecode.Inst.Op, items: []const Ref, node: ?Node.Index) !Ref {
-    const extra = @intCast(u32, c.extra.items.len);
+    const extra = @as(u32, @intCast(c.extra.items.len));
     try c.extra.appendSlice(c.gpa, items);
     return c.addInst(op, .{
         .extra = .{
             .extra = extra,
-            .len = @intCast(u32, items.len),
+            .len = @as(u32, @intCast(items.len)),
         },
     }, node);
 }
 
 fn finishJump(c: *Compiler, jump_index: u32) void {
-    const offset = @intCast(u32, c.code.items.len);
+    const offset = @as(u32, @intCast(c.code.items.len));
     const data = c.instructions.items(.data);
     const ops = c.instructions.items(.op);
     if (ops[jump_index] == .jump or ops[jump_index] == .pop_err_handler) {
@@ -349,7 +349,7 @@ fn makeRuntime(c: *Compiler, val: Value) Error!Ref {
         .num => |num| try c.addInst(.num, .{ .num = num }, null),
         .Bool => |b| try c.addInst(.primitive, .{ .primitive = if (b) .true else .false }, null),
         .str => |str| try c.addInst(.str, .{ .str = .{
-            .len = @intCast(u32, str.len),
+            .len = @as(u32, @intCast(str.len)),
             .offset = try c.putString(str),
         } }, null),
     };
@@ -357,7 +357,7 @@ fn makeRuntime(c: *Compiler, val: Value) Error!Ref {
 
 fn putString(c: *Compiler, str: []const u8) !u32 {
     if (c.string_interner.get(str)) |some| return some;
-    const offset = @intCast(u32, c.strings.items.len);
+    const offset = @as(u32, @intCast(c.strings.items.len));
     try c.strings.appendSlice(c.gpa, str);
 
     _ = try c.string_interner.put(c.gpa, str, offset);
@@ -382,7 +382,7 @@ fn findSymbol(c: *Compiler, tok: TokenIndex) !FoundSymbol {
     }
     return c.findSymbolExtra(tok, c.scopes.items.len) catch |err| switch (err) {
         error.SymbolNotFound => {
-            const new_inst = @intCast(u32, c.instructions.len);
+            const new_inst = @as(u32, @intCast(c.instructions.len));
             const ref = try c.addInst(.load_global, undefined, null);
             try c.unresolved_globals.append(c.gpa, .{ .tok = tok, .index = new_inst });
             return FoundSymbol{ .ref = ref, .mut = false, .global = true };
@@ -412,10 +412,10 @@ fn findSymbolExtra(c: *Compiler, tok: TokenIndex, start_index: usize) FindSymbol
 
                 const sym = try c.findSymbolExtra(tok, i);
                 const loaded_capture = indexToRef(f.code.items.len, f.params);
-                const new_inst = @intCast(u32, c.instructions.len);
+                const new_inst = @as(u32, @intCast(c.instructions.len));
                 try c.instructions.append(c.gpa, .{
                     .op = .load_capture,
-                    .data = .{ .un = @intToEnum(Ref, f.captures.items.len) },
+                    .data = .{ .un = @as(Ref, @enumFromInt(f.captures.items.len)) },
                 });
                 try f.code.append(c.gpa, new_inst);
                 try f.captures.append(c.gpa, .{
@@ -859,7 +859,7 @@ fn genFor(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     // create the iterator
     const iter_ref = try c.addUn(.iter_init, cond_ref, for_expr.cond);
     var loop = Loop{
-        .first_inst = @intCast(u32, c.code.items.len),
+        .first_inst = @as(u32, @intCast(c.code.items.len)),
     };
     defer loop.breaks.deinit(c.gpa);
 
@@ -868,7 +868,7 @@ fn genFor(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     c.cur_loop = &loop;
 
     // iter next is fused with a jump_null, offset is set after body is generated
-    const jump_index = @intCast(u32, c.instructions.len);
+    const jump_index = @as(u32, @intCast(c.instructions.len));
     const elem_ref = try c.addInst(.iter_next, .{
         .jump_condition = .{
             .operand = iter_ref,
@@ -919,7 +919,7 @@ fn genWhile(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     defer c.scopes.items.len = scope_count;
 
     var loop = Loop{
-        .first_inst = @intCast(u32, c.code.items.len),
+        .first_inst = @as(u32, @intCast(c.code.items.len)),
     };
     defer loop.breaks.deinit(c.gpa);
 
@@ -1328,7 +1328,7 @@ fn genAs(c: *Compiler, node: Node.Index) Error!Value {
             .int = switch (lhs) {
                 .int => |val| val,
                 .num => |val| std.math.lossyCast(i64, val),
-                .Bool => |val| @boolToInt(val),
+                .Bool => |val| @intFromBool(val),
                 .str => |str| std.fmt.parseInt(i64, str, 0) catch
                     return c.reportErr("invalid cast to int", node),
                 else => return c.reportErr("invalid cast to int", node),
@@ -1337,8 +1337,8 @@ fn genAs(c: *Compiler, node: Node.Index) Error!Value {
         .num => Value{
             .num = switch (lhs) {
                 .num => |val| val,
-                .int => |val| @intToFloat(f64, val),
-                .Bool => |val| @intToFloat(f64, @boolToInt(val)),
+                .int => |val| @as(f64, @floatFromInt(val)),
+                .Bool => |val| @as(f64, @floatFromInt(@intFromBool(val))),
                 .str => |str| std.fmt.parseFloat(f64, str) catch
                     return c.reportErr("invalid cast to num", node),
                 else => return c.reportErr("invalid cast to num", node),
@@ -1601,11 +1601,11 @@ fn genComparison(c: *Compiler, node: Node.Index) Error!Value {
                 .null => rhs_val == .null,
                 .int => |a_val| switch (rhs_val) {
                     .int => |b_val| a_val == b_val,
-                    .num => |b_val| @intToFloat(f64, a_val) == b_val,
+                    .num => |b_val| @as(f64, @floatFromInt(a_val)) == b_val,
                     else => false,
                 },
                 .num => |a_val| switch (rhs_val) {
-                    .int => |b_val| a_val == @intToFloat(f64, b_val),
+                    .int => |b_val| a_val == @as(f64, @floatFromInt(b_val)),
                     .num => |b_val| a_val == b_val,
                     else => false,
                 },
@@ -1671,7 +1671,7 @@ fn genIntArithmetic(c: *Compiler, node: Node.Index) Error!Value {
             const val = if (r_int > std.math.maxInt(u6))
                 0
             else
-                l_int << @truncate(u6, @bitCast(u64, r_int));
+                l_int << @as(u6, @truncate(@as(u64, @bitCast(r_int))));
             return Value{ .int = val };
         },
         .r_shift => {
@@ -1680,7 +1680,7 @@ fn genIntArithmetic(c: *Compiler, node: Node.Index) Error!Value {
             const val = if (r_int > std.math.maxInt(u6))
                 if (l_int < 0) std.math.maxInt(i64) else @as(i64, 0)
             else
-                l_int >> @truncate(u6, @bitCast(u64, r_int));
+                l_int >> @as(u6, @truncate(@as(u64, @bitCast(r_int))));
             return Value{ .int = val };
         },
         else => unreachable,
@@ -1829,7 +1829,7 @@ fn genAugAssign(c: *Compiler, node: Node.Index, res: Result) Error!Value {
     const rhs_ref = try c.makeRuntime(rhs_val);
     const res_ref = try c.addBin(op, aug_assign.val, rhs_ref, node);
     if (aug_assign.container) |some| {
-        const extra = @intCast(u32, c.extra.items.len);
+        const extra = @as(u32, @intCast(c.extra.items.len));
         try c.extra.append(c.gpa, aug_assign.index);
         try c.extra.append(c.gpa, res_ref);
         _ = try c.addInst(.set, .{
@@ -1909,7 +1909,7 @@ fn genMap(c: *Compiler, node: Node.Index, res: Result) Error!Value {
                 // `ident = value` is equal to `"ident" = value`
                 const str = c.tree.tokenSlice(maybe_ident);
                 key = try c.addInst(.str, .{ .str = .{
-                    .len = @intCast(u32, str.len),
+                    .len = @as(u32, @intCast(str.len)),
                     .offset = try c.putString(str),
                 } }, null);
             } else {
@@ -1925,7 +1925,7 @@ fn genMap(c: *Compiler, node: Node.Index, res: Result) Error!Value {
             // `ident` is equal to `"ident" = ident`
             const str = c.tree.tokenSlice(maybe_ident);
             key = try c.addInst(.str, .{ .str = .{
-                .len = @intCast(u32, str.len),
+                .len = @as(u32, @intCast(str.len)),
                 .offset = try c.putString(str),
             } }, null);
         }
@@ -1946,7 +1946,7 @@ fn genEnum(c: *Compiler, node: Node.Index) Error!Value {
     const operand = data[node].un;
     if (operand == 0) {
         const res_ref = try c.addInst(.build_tagged_null, .{ .str = .{
-            .len = @intCast(u32, str.len),
+            .len = @as(u32, @intCast(str.len)),
             .offset = try c.putString(str),
         } }, null);
         return Value{ .ref = res_ref };
@@ -1956,13 +1956,13 @@ fn genEnum(c: *Compiler, node: Node.Index) Error!Value {
 
     const str_offset = try c.putString(str);
 
-    const extra = @intCast(u32, c.extra.items.len);
+    const extra = @as(u32, @intCast(c.extra.items.len));
     try c.extra.append(c.gpa, operand_ref);
-    try c.extra.append(c.gpa, @intToEnum(Ref, str_offset));
+    try c.extra.append(c.gpa, @as(Ref, @enumFromInt(str_offset)));
     const res_ref = try c.addInst(.build_tagged, .{
         .extra = .{
             .extra = extra,
-            .len = @intCast(u32, str.len),
+            .len = @as(u32, @intCast(str.len)),
         },
     }, null);
     return Value{ .ref = res_ref };
@@ -2009,7 +2009,7 @@ fn genRange(c: *Compiler, node: Node.Index) Error!Value {
     if (!step_val.isRt()) _ = try step_val.getInt(c, step);
     const step_ref = try c.makeRuntime(step_val);
 
-    const extra = @intCast(u32, c.extra.items.len);
+    const extra = @as(u32, @intCast(c.extra.items.len));
     try c.extra.append(c.gpa, end_ref);
     try c.extra.append(c.gpa, step_ref);
     const res_ref = try c.addInst(.build_range_step, .{
@@ -2037,10 +2037,10 @@ fn genImport(c: *Compiler, node: Node.Index) Error!Value {
 fn genFn(c: *Compiler, node: Node.Index) Error!Value {
     var buf: [2]Node.Index = undefined;
     const items = c.tree.nodeItems(node, &buf);
-    const params = items[@boolToInt(items[0] == 0) .. items.len - 1];
+    const params = items[@intFromBool(items[0] == 0) .. items.len - 1];
     const body = items[items.len - 1];
 
-    var func = Fn{ .params = @intCast(u32, params.len) };
+    var func = Fn{ .params = @as(u32, @intCast(params.len)) };
     defer func.code.deinit(c.gpa);
     defer func.captures.deinit(c.gpa);
     {
@@ -2065,7 +2065,7 @@ fn genFn(c: *Compiler, node: Node.Index) Error!Value {
 
         // destructure parameters
         for (params, 0..) |param, i| {
-            try c.genLval(param, .{ .let = &.{ .ref = @intToEnum(Ref, i) } });
+            try c.genLval(param, .{ .let = &.{ .ref = @as(Ref, @enumFromInt(i)) } });
         }
 
         // for one liner functions return the value of the expression,
@@ -2091,21 +2091,21 @@ fn genFn(c: *Compiler, node: Node.Index) Error!Value {
     }
 
     const maybe_ellipsis = c.tree.prevToken(c.tree.prevToken(c.tree.firstToken(body)));
-    const variadic_bit: u32 = @boolToInt(c.tree.tokens.items(.id)[maybe_ellipsis] == .ellipsis);
+    const variadic_bit: u32 = @intFromBool(c.tree.tokens.items(.id)[maybe_ellipsis] == .ellipsis);
 
-    const extra = @intCast(u32, c.extra.items.len);
+    const extra = @as(u32, @intCast(c.extra.items.len));
     try c.extra.ensureUnusedCapacity(c.gpa, 2 + func.captures.items.len + func.code.items.len);
-    c.extra.appendAssumeCapacity(@intToEnum(Ref, params.len | (variadic_bit << 31)));
-    c.extra.appendAssumeCapacity(@intToEnum(Ref, func.captures.items.len));
+    c.extra.appendAssumeCapacity(@as(Ref, @enumFromInt(params.len | (variadic_bit << 31))));
+    c.extra.appendAssumeCapacity(@as(Ref, @enumFromInt(func.captures.items.len)));
     for (func.captures.items) |capture| {
         c.extra.appendAssumeCapacity(capture.parent_ref);
     }
-    c.extra.appendSliceAssumeCapacity(@ptrCast([]const Ref, func.code.items));
+    c.extra.appendSliceAssumeCapacity(@as([]const Ref, @ptrCast(func.code.items)));
 
     const func_ref = try c.addInst(.build_func, .{
         .extra = .{
             .extra = extra,
-            .len = @intCast(u32, c.extra.items.len - extra),
+            .len = @as(u32, @intCast(c.extra.items.len - extra)),
         },
     }, null);
     return Value{ .ref = func_ref };
@@ -2128,7 +2128,7 @@ fn genCall(c: *Compiler, node: Node.Index, is_async: bool) Error!Value {
     const this = switch (c.tree.nodes.items(.id)[last_node]) {
         .member_access_expr,
         .array_access_expr,
-        => c.instructions.items(.data)[c.code.items[@enumToInt(callee_ref) - c.params]].bin.lhs,
+        => c.instructions.items(.data)[c.code.items[@intFromEnum(callee_ref) - c.params]].bin.lhs,
         else => null,
     };
 
@@ -2162,9 +2162,9 @@ fn genCall(c: *Compiler, node: Node.Index, is_async: bool) Error!Value {
 
     const res_ref = switch (arg_refs.len) {
         0 => unreachable, // callee is always added
-        1 => try c.addUn(ops[@boolToInt(this != null)][@boolToInt(is_async)][0], arg_refs[0], node),
-        2 => try c.addBin(ops[@boolToInt(this != null)][@boolToInt(is_async)][1], arg_refs[0], arg_refs[1], node),
-        else => try c.addExtra(ops[@boolToInt(this != null)][@boolToInt(is_async)][2], arg_refs, node),
+        1 => try c.addUn(ops[@intFromBool(this != null)][@intFromBool(is_async)][0], arg_refs[0], node),
+        2 => try c.addBin(ops[@intFromBool(this != null)][@intFromBool(is_async)][1], arg_refs[0], arg_refs[1], node),
+        else => try c.addExtra(ops[@intFromBool(this != null)][@intFromBool(is_async)][2], arg_refs, node),
     };
     return Value{ .ref = res_ref };
 }
@@ -2200,7 +2200,7 @@ fn genArrayAccess(c: *Compiler, node: Node.Index) Error!Value {
 
     var rhs_val = try c.genNode(rhs, .value);
     if (rhs_val == .int and rhs_val.int >= 0 and rhs_val.int <= std.math.maxInt(u32)) {
-        const res_ref = try c.addBin(.get_int, lhs_ref, @intToEnum(Ref, rhs_val.int), node);
+        const res_ref = try c.addBin(.get_int, lhs_ref, @as(Ref, @enumFromInt(rhs_val.int)), node);
         return Value{ .ref = res_ref };
     }
 
@@ -2394,13 +2394,13 @@ fn genLvalEnum(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
     const slice = c.tree.tokenSlice(tokens[node]);
     const str_offset = try c.putString(slice);
 
-    const extra = @intCast(u32, c.extra.items.len);
+    const extra = @as(u32, @intCast(c.extra.items.len));
     try c.extra.append(c.gpa, val.getRt());
-    try c.extra.append(c.gpa, @intToEnum(Ref, str_offset));
+    try c.extra.append(c.gpa, @as(Ref, @enumFromInt(str_offset)));
     const unwrapped_ref = try c.addInst(.unwrap_tagged, .{
         .extra = .{
             .extra = extra,
-            .len = @intCast(u32, slice.len),
+            .len = @as(u32, @intCast(slice.len)),
         },
     }, node);
 
@@ -2490,7 +2490,7 @@ fn genLvalTupleList(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
             spread = true;
 
             const data = c.tree.nodes.items(.data);
-            const res_ref = try c.addBin(.spread_dest, container_ref, @intToEnum(Ref, i), node);
+            const res_ref = try c.addBin(.spread_dest, container_ref, @as(Ref, @enumFromInt(i)), node);
             const res_val = Value{ .ref = res_ref };
             try c.genLval(data[item].un, switch (lval) {
                 .let => .{ .let = &res_val },
@@ -2501,7 +2501,7 @@ fn genLvalTupleList(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
     }
 
     if (!spread) {
-        _ = try c.addBin(.assert_len, container_ref, @intToEnum(Ref, items.len), node);
+        _ = try c.addBin(.assert_len, container_ref, @as(Ref, @enumFromInt(items.len)), node);
     }
 
     for (items, 0..) |item, i| {
@@ -2512,7 +2512,7 @@ fn genLvalTupleList(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
             break;
         }
 
-        const res_ref = try c.addBin(.get_int, container_ref, @intToEnum(Ref, i), node);
+        const res_ref = try c.addBin(.get_int, container_ref, @as(Ref, @enumFromInt(i)), node);
         const res_val = Value{ .ref = res_ref };
         try c.genLval(item, switch (lval) {
             .let => .{ .let = &res_val },
@@ -2548,7 +2548,7 @@ fn genLvalMap(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
                 // `ident = value` is equal to `"ident" = value`
                 const str = c.tree.tokenSlice(maybe_ident);
                 key = try c.addInst(.str, .{ .str = .{
-                    .len = @intCast(u32, str.len),
+                    .len = @as(u32, @intCast(str.len)),
                     .offset = try c.putString(str),
                 } }, null);
             } else {
@@ -2568,7 +2568,7 @@ fn genLvalMap(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
             // `ident` is equal to `"ident" = ident´
             const str = c.tree.tokenSlice(maybe_ident);
             key = try c.addInst(.str, .{ .str = .{
-                .len = @intCast(u32, str.len),
+                .len = @as(u32, @intCast(str.len)),
                 .offset = try c.putString(str),
             } }, null);
         }
@@ -2612,7 +2612,7 @@ fn genLvalMemberAccess(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
             else
                 try c.makeRuntime(val.*);
 
-            const extra = @intCast(u32, c.extra.items.len);
+            const extra = @as(u32, @intCast(c.extra.items.len));
             try c.extra.append(c.gpa, name_ref);
             try c.extra.append(c.gpa, val_ref);
             _ = try c.addInst(.set, .{
@@ -2655,7 +2655,7 @@ fn genLvalArrayAccess(c: *Compiler, node: Node.Index, lval: Lval) Error!void {
             else
                 try c.makeRuntime(val.*);
 
-            const extra = @intCast(u32, c.extra.items.len);
+            const extra = @as(u32, @intCast(c.extra.items.len));
             try c.extra.append(c.gpa, rhs_ref);
             try c.extra.append(c.gpa, val_ref);
             _ = try c.addInst(.set, .{
@@ -2712,13 +2712,13 @@ fn genTryUnwrapEnum(c: *Compiler, node: Node.Index, val: *const Value) Error!voi
     const slice = c.tree.tokenSlice(tokens[node]);
     const str_offset = try c.putString(slice);
 
-    const extra = @intCast(u32, c.extra.items.len);
+    const extra = @as(u32, @intCast(c.extra.items.len));
     try c.extra.append(c.gpa, val.getRt());
-    try c.extra.append(c.gpa, @intToEnum(Ref, str_offset));
+    try c.extra.append(c.gpa, @as(Ref, @enumFromInt(str_offset)));
     const unwrapped_ref = try c.addInst(.unwrap_tagged_or_null, .{
         .extra = .{
             .extra = extra,
-            .len = @intCast(u32, slice.len),
+            .len = @as(u32, @intCast(slice.len)),
         },
     }, null);
     try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_null, unwrapped_ref));
@@ -2734,7 +2734,7 @@ fn genTryUnwrapError(c: *Compiler, node: Node.Index, val: *const Value) Error!vo
     if (data[node].un == 0) {
         return c.reportErr("expected a destructuring", node);
     }
-    const jump_index = @intCast(u32, c.instructions.len);
+    const jump_index = @as(u32, @intCast(c.instructions.len));
     const unwrapped_ref = try c.addInst(.unwrap_error_or_jump, .{
         .jump_condition = .{
             .operand = val.getRt(),
@@ -2785,7 +2785,7 @@ fn genTryUnwrapTupleList(c: *Compiler, node: Node.Index, val: *const Value) Erro
     const items = c.tree.nodeItems(node, &buf);
     const ids = c.tree.nodes.items(.id);
 
-    const len_ref = try c.addBin(.check_len, val.getRt(), @intToEnum(Ref, items.len), null);
+    const len_ref = try c.addBin(.check_len, val.getRt(), @as(Ref, @enumFromInt(items.len)), null);
     try c.unwrap_jump_buf.append(c.gpa, try c.addJump(.jump_if_false, len_ref));
 
     for (items, 0..) |item, i| {
@@ -2794,7 +2794,7 @@ fn genTryUnwrapTupleList(c: *Compiler, node: Node.Index, val: *const Value) Erro
             continue;
         }
 
-        const index_ref = try c.makeRuntime(Value{ .int = @intCast(u32, i) });
+        const index_ref = try c.makeRuntime(Value{ .int = @as(u32, @intCast(i)) });
         const res_ref = try c.addBin(.get, container_ref, index_ref, item);
 
         try c.genTryUnwrap(item, &.{ .ref = res_ref });
@@ -2823,7 +2823,7 @@ fn genTryUnwrapMap(c: *Compiler, node: Node.Index, val: *const Value) Error!void
                 // `ident = value` is equal to `"ident" = value`
                 const str = c.tree.tokenSlice(maybe_ident);
                 key = try c.addInst(.str, .{ .str = .{
-                    .len = @intCast(u32, str.len),
+                    .len = @as(u32, @intCast(str.len)),
                     .offset = try c.putString(str),
                 } }, null);
             } else {
@@ -2839,7 +2839,7 @@ fn genTryUnwrapMap(c: *Compiler, node: Node.Index, val: *const Value) Error!void
             // `ident` is equal to `ident = "ident"`
             const str = c.tree.tokenSlice(maybe_ident);
             key = try c.addInst(.str, .{ .str = .{
-                .len = @intCast(u32, str.len),
+                .len = @as(u32, @intCast(str.len)),
                 .offset = try c.putString(str),
             } }, null);
         }
@@ -2853,7 +2853,7 @@ fn genTryUnwrapMap(c: *Compiler, node: Node.Index, val: *const Value) Error!void
 
 fn parseStr(c: *Compiler, tok: TokenIndex) ![]u8 {
     var slice = c.tree.tokenSlice(tok);
-    const start = @as(u32, 1) + @boolToInt(slice[0] == 'f');
+    const start = @as(u32, 1) + @intFromBool(slice[0] == 'f');
     slice = slice[start .. slice.len - 1];
     var buf = try c.arena.alloc(u8, slice.len);
     return buf[0..try c.parseStrExtra(tok, slice, buf)];
@@ -2884,7 +2884,7 @@ fn parseStrExtra(c: *Compiler, tok: TokenIndex, slice: []const u8, buf: []u8) !u
                     'u' => {
                         // validated by tokenizer
                         const unicode_slice = std.mem.sliceTo(slice[slice_i + 2 ..], '}');
-                        slice_i += 3 + @intCast(u32, unicode_slice.len);
+                        slice_i += 3 + @as(u32, @intCast(unicode_slice.len));
                         const unicode_code_point = std.fmt.parseInt(u21, unicode_slice, 16) catch {
                             const starts = c.tree.tokens.items(.start);
                             try c.errors.add(.{ .data = "unicode codepoint too large" }, c.tree.source, c.tree.path, starts[tok], .err);

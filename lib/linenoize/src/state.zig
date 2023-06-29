@@ -93,7 +93,7 @@ fn calculateStartOrEnd(
 
     var utf8 = (try std.unicode.Utf8View.init(buf)).iterator();
     while (utf8.nextCodepointSlice()) |codepoint| {
-        map.appendAssumeCapacity(@ptrToInt(codepoint.ptr) - @ptrToInt(buf.ptr));
+        map.appendAssumeCapacity(@intFromPtr(codepoint.ptr) - @intFromPtr(buf.ptr));
     }
 
     const codepoint_start = binarySearchBestEffort(

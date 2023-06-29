@@ -100,25 +100,25 @@ pub const Frame = struct {
     }
 
     pub fn newRef(f: *Frame, vm: *Vm, ref: Ref) !*?*Value {
-        const ref_int = @enumToInt(ref);
+        const ref_int = @intFromEnum(ref);
         if (ref_int < f.stack.items.len) {
-            return @ptrCast(*?*Value, &f.stack.items[ref_int]);
+            return @ptrCast(&f.stack.items[ref_int]);
         }
         try f.stack.ensureTotalCapacity(vm.gc.gpa, ref_int + 1);
         @memset(
-            @ptrCast([]?*Value, f.stack.items.ptr[f.stack.items.len .. ref_int + 1]),
+            @as([]?*Value, @ptrCast(f.stack.items.ptr[f.stack.items.len .. ref_int + 1])),
             null,
         );
         f.stack.items.len = ref_int + 1;
-        return @ptrCast(*?*Value, &f.stack.items[ref_int]);
+        return @ptrCast(&f.stack.items[ref_int]);
     }
 
     pub inline fn refAssert(f: *Frame, ref: Ref) **Value {
-        return &f.stack.items[@enumToInt(ref)];
+        return &f.stack.items[@intFromEnum(ref)];
     }
 
     pub fn val(f: *Frame, ref: Ref) *Value {
-        return f.stack.items[@enumToInt(ref)];
+        return f.stack.items[@intFromEnum(ref)];
     }
 
     pub inline fn valDupeSimple(f: *Frame, vm: *Vm, ref: Ref) !*Value {
@@ -403,7 +403,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                 const res = try f.newVal(vm, ref, .map);
                 res.* = .{ .map = .{} };
 
-                try res.map.ensureUnusedCapacity(vm.gc.gpa, @intCast(u32, items.len));
+                try res.map.ensureUnusedCapacity(vm.gc.gpa, @as(u32, @intCast(items.len)));
 
                 var map_i: u32 = 0;
                 while (map_i < items.len) : (map_i += 2) {
@@ -425,7 +425,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
             .build_tagged => {
                 const res = try f.newVal(vm, ref, .tagged);
                 const arg = try f.valDupeSimple(vm, mod.extra[data[inst].extra.extra]);
-                const str_offset = @enumToInt(mod.extra[data[inst].extra.extra + 1]);
+                const str_offset = @intFromEnum(mod.extra[data[inst].extra.extra + 1]);
 
                 const name = mod.strings[str_offset..][0..data[inst].extra.len];
                 res.* = .{ .tagged = .{
@@ -442,7 +442,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
             .build_func => {
                 const res = try f.newVal(vm, ref, .func);
                 const extra = mod.extra[data[inst].extra.extra..][0..data[inst].extra.len];
-                const captures_len = @enumToInt(extra[1]);
+                const captures_len = @intFromEnum(extra[1]);
                 const fn_captures = extra[2..][0..captures_len];
                 const fn_body = extra[captures_len + 2 ..];
 
@@ -457,7 +457,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                         .module = mod,
                         .captures_ptr = captures.ptr,
                         .extra_index = data[inst].extra.extra,
-                        .body_len = @intCast(u32, fn_body.len),
+                        .body_len = @as(u32, @intCast(fn_body.len)),
                     },
                 };
             },
@@ -527,7 +527,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
             },
             .load_global => {
                 const res = try f.newRef(vm, ref);
-                const ref_int = @enumToInt(data[inst].un);
+                const ref_int = @intFromEnum(data[inst].un);
                 if (ref_int > f.module_frame.stack.items.len)
                     return f.fatal(vm, "use of undefined variable");
                 res.* = f.module_frame.stack.items[ref_int];
@@ -539,7 +539,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                 res.* = val;
             },
             .load_capture => {
-                const index = @enumToInt(data[inst].un);
+                const index = @intFromEnum(data[inst].un);
                 const res = try f.newRef(vm, ref);
                 res.* = f.captures[index];
             },
@@ -669,7 +669,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                 const val = if (rhs > std.math.maxInt(u6))
                     0
                 else
-                    lhs << @intCast(u6, rhs);
+                    lhs << @as(u6, @intCast(rhs));
 
                 const res = try f.newVal(vm, ref, .int);
                 res.* = .{ .int = val };
@@ -685,7 +685,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                 const val = if (rhs > std.math.maxInt(u6))
                     if (lhs < 0) std.math.maxInt(i64) else @as(i64, 0)
                 else
-                    lhs << @intCast(u6, rhs);
+                    lhs << @as(u6, @intCast(rhs));
 
                 const res = try f.newVal(vm, ref, .int);
                 res.* = .{ .int = val };
@@ -845,7 +845,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                     .range => |r| {
                         const res = try f.newVal(vm, ref, .list);
                         res.* = .{ .list = .{} };
-                        try res.list.inner.ensureUnusedCapacity(vm.gc.gpa, @intCast(usize, r.count()));
+                        try res.list.inner.ensureUnusedCapacity(vm.gc.gpa, @as(usize, @intCast(r.count())));
 
                         var it = r.iterator();
                         while (it.next()) |some| {
@@ -879,7 +879,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
             },
             .unwrap_tagged => {
                 const operand = f.val(mod.extra[data[inst].extra.extra]);
-                const str_offset = @enumToInt(mod.extra[data[inst].extra.extra + 1]);
+                const str_offset = @intFromEnum(mod.extra[data[inst].extra.extra + 1]);
                 const name = mod.strings[str_offset..][0..data[inst].extra.len];
 
                 if (operand.* != .tagged) {
@@ -897,7 +897,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
             .unwrap_tagged_or_null => {
                 const res = try f.newRef(vm, ref);
                 const operand = f.val(mod.extra[data[inst].extra.extra]);
-                const str_offset = @enumToInt(mod.extra[data[inst].extra.extra + 1]);
+                const str_offset = @intFromEnum(mod.extra[data[inst].extra.extra + 1]);
                 const name = mod.strings[str_offset..][0..data[inst].extra.len];
 
                 if (operand.* == .tagged and mem.eql(u8, operand.tagged.name, name)) {
@@ -908,7 +908,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
             },
             .check_len => {
                 const container = f.val(data[inst].bin.lhs);
-                const len = @enumToInt(data[inst].bin.rhs);
+                const len = @intFromEnum(data[inst].bin.rhs);
 
                 const ok = switch (container.*) {
                     .list => |list| list.inner.items.len == len,
@@ -924,7 +924,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
             },
             .assert_len => {
                 const container = f.val(data[inst].bin.lhs);
-                const len = @enumToInt(data[inst].bin.rhs);
+                const len = @intFromEnum(data[inst].bin.rhs);
 
                 const actual_len = switch (container.*) {
                     .list => |list| list.inner.items.len,
@@ -950,7 +950,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
             },
             .spread_dest => {
                 const container = f.val(data[inst].bin.lhs);
-                const len = @enumToInt(data[inst].bin.rhs);
+                const len = @intFromEnum(data[inst].bin.rhs);
 
                 const items = switch (container.*) {
                     .list => |list| list.inner.items,
@@ -990,7 +990,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
             .get_int => {
                 const res = try f.newRef(vm, ref);
                 const container = f.val(data[inst].bin.lhs);
-                const index = Value{ .int = @enumToInt(data[inst].bin.rhs) };
+                const index = Value{ .int = @intFromEnum(data[inst].bin.rhs) };
 
                 container.get(f.ctx(vm), &index, res) catch |err| switch (err) {
                     error.Throw => continue,
@@ -1306,7 +1306,7 @@ pub fn run(vm: *Vm, f: *Frame) (Error || error{Suspended})!*Value {
                     try new_frame.stack.ensureUnusedCapacity(vm.gc.gpa, callee_args);
 
                     {
-                        const non_variadic_args = callee_args - @boolToInt(variadic);
+                        const non_variadic_args = callee_args - @intFromBool(variadic);
                         var var_args: *Value = undefined;
                         if (variadic) {
                             var_args = try vm.gc.alloc(.list);
@@ -1427,8 +1427,8 @@ const ErrHandlers = extern union {
                 .allocator = gpa,
             };
             defer {
-                e.long.capacity = @intCast(u32, arr_list.capacity);
-                e.long.len = @intCast(u32, arr_list.items.len);
+                e.long.capacity = @as(u32, @intCast(arr_list.capacity));
+                e.long.len = @as(u32, @intCast(arr_list.items.len));
                 e.long.ptr = arr_list.items.ptr;
             }
             try arr_list.append(new);
@@ -1439,8 +1439,8 @@ const ErrHandlers = extern union {
                 try arr_list.appendSlice(&e.short.arr);
                 try arr_list.append(new);
             }
-            e.long.capacity = @intCast(u32, arr_list.capacity);
-            e.long.len = @intCast(u32, arr_list.items.len);
+            e.long.capacity = @as(u32, @intCast(arr_list.capacity));
+            e.long.len = @as(u32, @intCast(arr_list.items.len));
             e.long.ptr = arr_list.items.ptr;
         } else {
             e.short.arr[e.short.len] = new;
@@ -1470,7 +1470,7 @@ inline fn needNum(a: *Value, b: *Value) bool {
 
 inline fn asNum(val: *Value) f64 {
     return switch (val.*) {
-        .int => |v| @intToFloat(f64, v),
+        .int => |v| @as(f64, @floatFromInt(v)),
         .num => |v| v,
         else => unreachable,
     };
