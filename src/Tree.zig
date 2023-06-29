@@ -380,7 +380,7 @@ pub fn lineDist(tree: Tree, a: Token.Index, b: Token.Index) u32 {
     const ids = tree.tokens.items(.id);
     var i = a;
     while (i < b) : (i += 1) {
-        count += @boolToInt(ids[i] == .nl);
+        count += @intFromBool(ids[i] == .nl);
     }
     return count;
 }
@@ -409,7 +409,7 @@ pub const Node = struct {
             args_start: u32,
 
             pub fn str(f: @This(), extra: []Index) []Token.Index {
-                return @ptrCast([]Token.Index, extra[f.fmt_start..f.args_start]);
+                return @ptrCast(extra[f.fmt_start..f.args_start]);
             }
 
             pub fn exprs(f: @This(), extra: []Index) []Index {

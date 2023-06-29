@@ -31,16 +31,16 @@ pub const Ref = enum(u32) {
     pub fn format(ref: Ref, _: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         var buf: [8]u8 = undefined;
         buf[0] = '%';
-        const end = std.fmt.formatIntBuf(buf[1..], @enumToInt(ref), 10, .lower, .{});
+        const end = std.fmt.formatIntBuf(buf[1..], @intFromEnum(ref), 10, .lower, .{});
         try std.fmt.formatBuf(buf[0 .. end + 1], options, writer);
     }
 };
 
 pub inline fn indexToRef(i: u64, params: u32) Ref {
-    return @intToEnum(Ref, i + params);
+    return @enumFromInt(i + params);
 }
 pub inline fn refToIndex(r: Ref, params: u32) u32 {
-    return @enumToInt(r) - params;
+    return @intFromEnum(r) - params;
 }
 
 /// All integers are little endian
@@ -341,7 +341,7 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
         if (ops[i] == .nop) continue;
         const ref = indexToRef(inst, params);
         if (ops[i].needsDebugInfo()) {
-            dumpLineCol(b, b.debug_info.lines.get(@intCast(u32, i)).?);
+            dumpLineCol(b, b.debug_info.lines.get(@intCast(i)).?);
         }
         std.debug.print("{d:4} ", .{inst});
         if (ops[i].hasResult()) {
@@ -383,10 +383,10 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
             },
             .build_func => {
                 const extra = b.extra[data[i].extra.extra..][0..data[i].extra.len];
-                const args = @enumToInt(extra[0]);
-                const captures_len = @enumToInt(extra[1]);
+                const args = @intFromEnum(extra[0]);
+                const captures_len = @intFromEnum(extra[1]);
                 const fn_captures = extra[2..][0..captures_len];
-                const fn_body = @ptrCast([]const u32, extra[2 + captures_len ..]);
+                const fn_body: []const u32 = @ptrCast(extra[2 + captures_len ..]);
                 std.debug.print("\n\nfn(args: {d}, captures: [", .{args});
                 dumpList(fn_captures);
                 std.debug.print("]) {{\n", .{});
@@ -399,7 +399,7 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
             },
             .build_tagged => {
                 const operand = b.extra[data[i].extra.extra];
-                const str_offset = @enumToInt(b.extra[data[i].extra.extra + 1]);
+                const str_offset = @intFromEnum(b.extra[data[i].extra.extra + 1]);
                 const str = b.strings[str_offset..][0..data[i].extra.len];
                 std.debug.print("@{s} = {}\n", .{ str, operand });
             },
@@ -421,7 +421,7 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
             .spread_dest,
             => {
                 const operand = data[i].bin.lhs;
-                const len = @enumToInt(data[i].bin.rhs);
+                const len = @intFromEnum(data[i].bin.rhs);
                 std.debug.print("{} {d}\n", .{ operand, len });
             },
             .load_global => std.debug.print("GLOBAL({})\n", .{data[i].un}),
@@ -429,7 +429,7 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
                 const load_inst = body[refToIndex(data[i].bin.lhs, params)];
                 std.debug.print("GLOBAL({}) = {}\n", .{ data[load_inst].un, data[i].bin.rhs });
             },
-            .load_capture => std.debug.print("CAPTURE({d})\n", .{@enumToInt(data[i].un)}),
+            .load_capture => std.debug.print("CAPTURE({d})\n", .{@intFromEnum(data[i].un)}),
             .copy,
             .move,
             .get,
@@ -454,7 +454,7 @@ pub fn dump(b: *Bytecode, body: []const u32, params: u32) void {
             .greater_than_equal,
             .in,
             => std.debug.print("{} {}\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
-            .get_int => std.debug.print("{} {}\n", .{ data[i].bin.lhs, @enumToInt(data[i].bin.rhs) }),
+            .get_int => std.debug.print("{} {}\n", .{ data[i].bin.lhs, @intFromEnum(data[i].bin.rhs) }),
             .append => std.debug.print("{}.append({})\n", .{ data[i].bin.lhs, data[i].bin.rhs }),
             .as, .is => std.debug.print("{} {s}\n", .{ data[i].bin_ty.operand, @tagName(data[i].bin_ty.ty) }),
             .ret,

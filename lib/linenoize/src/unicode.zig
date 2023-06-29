@@ -21,7 +21,7 @@ pub fn width(s: []const u8) usize {
             } else {
                 const wcw = wcwidth(codepoint);
                 if (wcw < 0) return 0;
-                result += @intCast(usize, wcw);
+                result += @intCast(wcw);
             }
         }
     }
