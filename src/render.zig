@@ -294,7 +294,7 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
         .fn_expr, .fn_expr_one => {
             var buf: [2]Node.Index = undefined;
             const items = tree.nodeItems(node, &buf);
-            const params = items[@boolToInt(items[0] == 0) .. items.len - 1];
+            const params = items[@intFromBool(items[0] == 0) .. items.len - 1];
             const body = items[items.len - 1];
             const r_paren = tree.prevToken(tree.firstToken(body));
             const maybe_ellipsis = tree.prevToken(r_paren);

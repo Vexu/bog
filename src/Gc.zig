@@ -96,12 +96,12 @@ const Page = struct {
 
     fn indexOf(page: *Page, value: *const Value) ?u32 {
         // is the value before this page
-        if (@ptrToInt(value) < @ptrToInt(&page.values[0])) return null;
+        if (@intFromPtr(value) < @intFromPtr(&page.values[0])) return null;
         // is the value after this page
-        if (@ptrToInt(value) > @ptrToInt(&page.values[page.values.len - 1])) return null;
+        if (@intFromPtr(value) > @intFromPtr(&page.values[page.values.len - 1])) return null;
 
         // value is in this page
-        return @intCast(u32, (@ptrToInt(value) - @ptrToInt(&page.values[0])) / @sizeOf(Value));
+        return @as(u32, @intCast((@intFromPtr(value) - @intFromPtr(&page.values[0])) / @sizeOf(Value)));
     }
 };
 
@@ -225,8 +225,8 @@ fn markGray(gc: *Gc) void {
 pub fn collect(gc: *Gc) usize {
     // mark roots as reachable
     if (gc.stack_protect_start != 0) {
-        var i = @intToPtr([*]*Value, gc.stack_protect_start);
-        while (@ptrToInt(i) > @frameAddress()) : (i -= 1) {
+        var i = @as([*]*Value, @ptrFromInt(gc.stack_protect_start));
+        while (@intFromPtr(i) > @frameAddress()) : (i -= 1) {
             gc.markVal(i[0]);
         }
     }
@@ -245,7 +245,7 @@ pub fn collect(gc: *Gc) usize {
     log.info("collected {d} out of {d} objects ({d:.2}%)", .{
         freed,
         gc.allocated,
-        (@intToFloat(f32, freed) / @intToFloat(f32, gc.allocated)) * 100,
+        (@as(f32, @floatFromInt(freed)) / @as(f32, @floatFromInt(gc.allocated))) * 100,
     });
     gc.allocated -= freed;
     return freed;
@@ -313,7 +313,7 @@ fn allocExtra(gc: *Gc, pages: *Page.List) !*Value {
     const freed = gc.collect();
 
     const threshold = 0.75;
-    const new_capacity = @intToFloat(f32, freed) / @intToFloat(f32, gc.allocated);
+    const new_capacity = @as(f32, @floatFromInt(freed)) / @as(f32, @floatFromInt(gc.allocated));
 
     if (new_capacity < threshold and pages.items.len != gc.page_limit) {
         log.info("collected {d}, allocating a new page", .{freed});

@@ -105,7 +105,7 @@ pub fn iterator(self: Map) Iterator {
     return .{
         .keys = slice.items(.key).ptr,
         .values = slice.items(.value).ptr,
-        .len = @intCast(u32, slice.len),
+        .len = @as(u32, @intCast(slice.len)),
     };
 }
 pub const Iterator = struct {
@@ -192,7 +192,7 @@ fn getOrPutAssumeCapacityAdapted(self: *Map, key: *const Value) GetOrPutResult {
                     .key_ptr = item_key,
                     .value_ptr = &slice.items(.value)[i],
                     .found_existing = true,
-                    .index = @intCast(u32, i),
+                    .index = @as(u32, @intCast(i)),
                 };
             }
         }
@@ -293,7 +293,7 @@ pub fn getIndex(self: Map, key: *const Value) ?u32 {
         const keys_array = slice.items(.key);
         for (keys_array, 0..) |*item_key, i| {
             if (hashes_array[i] == h and key.eql(item_key.*)) {
-                return @intCast(u32, i);
+                return @as(u32, @intCast(i));
             }
         }
         return null;
@@ -366,7 +366,7 @@ fn getOrPutInternal(self: *Map, key: *const Value, header: *IndexHeader, comptim
             const new_index = self.entries.addOneAssumeCapacity();
             indexes[slot] = .{
                 .distance_from_start_index = distance_from_start_index,
-                .entry_index = @intCast(I, new_index),
+                .entry_index = @as(I, @intCast(new_index)),
             };
 
             // update the hash if applicable
@@ -405,7 +405,7 @@ fn getOrPutInternal(self: *Map, key: *const Value, header: *IndexHeader, comptim
             const new_index = self.entries.addOneAssumeCapacity();
             hashes_array.ptr[new_index] = h;
             indexes[slot] = .{
-                .entry_index = @intCast(I, new_index),
+                .entry_index = @as(I, @intCast(new_index)),
                 .distance_from_start_index = distance_from_start_index,
             };
             distance_from_start_index = slot_data.distance_from_start_index;
@@ -493,7 +493,7 @@ fn insertAllEntriesIntoNewHeaderGeneric(self: *Map, header: *IndexHeader, compti
         const start_index = key;
         const end_index = start_index +% indexes.len;
         var index = start_index;
-        var entry_index = @intCast(I, i);
+        var entry_index = @as(I, @intCast(i));
         var distance_from_start_index: I = 0;
         while (index != end_index) : ({
             index +%= 1;
@@ -582,7 +582,7 @@ fn Index(comptime I: type) type {
 // /// length * the size of an Index(u32).  The index is 8 bytes (3 bits repr)
 // /// and max_usize + 1 is not representable, so we need to subtract out 4 bits.
 const max_representable_index_len = @bitSizeOf(u32) - 4;
-const max_bit_index = math.min(32, max_representable_index_len);
+const max_bit_index = @min(32, max_representable_index_len);
 const min_bit_index = 5;
 const max_capacity = (1 << max_bit_index) - 1;
 const index_capacities = blk: {
@@ -613,13 +613,14 @@ const IndexHeader = struct {
     fn constrainIndex(header: IndexHeader, i: u32) u32 {
         // This is an optimization for modulo of power of two integers;
         // it requires `indexes_len` to always be a power of two.
-        return @intCast(u32, i & header.mask());
+        return @as(u32, @intCast(i & header.mask()));
     }
 
     /// Returns the attached array of indexes.  I must match the type
     /// returned by capacityIndexType.
     fn indexes(header: *IndexHeader, comptime I: type) []Index(I) {
-        const start_ptr = @ptrCast([*]Index(I), @ptrCast([*]u8, header) + @sizeOf(IndexHeader));
+        const start_ptr = @as([*]Index(I), @ptrCast(@alignCast(@as([*]u8, @ptrCast(header)) + @sizeOf(IndexHeader))));
+
         return start_ptr[0..header.length()];
     }
 
@@ -632,15 +633,15 @@ const IndexHeader = struct {
         return index_capacities[self.bit_index];
     }
     fn length(self: IndexHeader) u32 {
-        return @as(u32, 1) << @intCast(math.Log2Int(u32), self.bit_index);
+        return @as(u32, 1) << @as(math.Log2Int(u32), @intCast(self.bit_index));
     }
     fn mask(self: IndexHeader) u32 {
-        return @intCast(u32, self.length() - 1);
+        return @as(u32, @intCast(self.length() - 1));
     }
 
     fn findBitIndex(desired_capacity: u32) !u8 {
         if (desired_capacity > max_capacity) return error.OutOfMemory;
-        var new_bit_index = @intCast(u8, std.math.log2_int_ceil(u32, desired_capacity));
+        var new_bit_index = @as(u8, @intCast(std.math.log2_int_ceil(u32, desired_capacity)));
         if (desired_capacity > index_capacities[new_bit_index]) new_bit_index += 1;
         if (new_bit_index < min_bit_index) new_bit_index = min_bit_index;
         assert(desired_capacity <= index_capacities[new_bit_index]);
@@ -650,12 +651,12 @@ const IndexHeader = struct {
     /// Allocates an index header, and fills the entryIndexes array with empty.
     /// The distance array contents are undefined.
     fn alloc(allocator: Allocator, new_bit_index: u8) !*IndexHeader {
-        const len = @as(usize, 1) << @intCast(math.Log2Int(usize), new_bit_index);
+        const len = @as(usize, 1) << @as(math.Log2Int(usize), @intCast(new_bit_index));
         const index_size = Map.capacityIndexSize(new_bit_index);
         const nbytes = @sizeOf(IndexHeader) + index_size * len;
         const bytes = try allocator.alignedAlloc(u8, @alignOf(IndexHeader), nbytes);
         @memset(bytes[@sizeOf(IndexHeader)..], 0xff);
-        const result = @ptrCast(*IndexHeader, bytes.ptr);
+        const result = @as(*IndexHeader, @ptrCast(bytes.ptr));
         result.* = .{
             .bit_index = new_bit_index,
         };
@@ -665,7 +666,7 @@ const IndexHeader = struct {
     /// Releases the memory for a header and its associated arrays.
     fn free(header: *IndexHeader, allocator: Allocator) void {
         const index_size = Map.capacityIndexSize(header.bit_index);
-        const ptr = @ptrCast([*]align(@alignOf(IndexHeader)) u8, header);
+        const ptr = @as([*]align(@alignOf(IndexHeader)) u8, @ptrCast(header));
         const slice = ptr[0 .. @sizeOf(IndexHeader) + header.length() * index_size];
         allocator.free(slice);
     }

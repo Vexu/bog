@@ -92,7 +92,7 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
     switch (res.*) {
         .int => |int| {
             if (int >= 0 and int < std.math.maxInt(u8)) {
-                process.exit(@intCast(u8, int));
+                process.exit(@as(u8, @intCast(int)));
             } else {
                 fatal("invalid exit code: {}", .{int});
             }

@@ -65,5 +65,5 @@ pub fn entries(ctx: Vm.Context, map: *const Value.Map) !*Value {
 
 /// Returns the amount of key value pairs in the map.
 pub fn size(map: *const Value.Map) !i64 {
-    return @intCast(i64, map.count());
+    return @as(i64, @intCast(map.count()));
 }

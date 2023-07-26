@@ -97,14 +97,14 @@ pub const Repl = struct {
         try repl.compiler.scopes.append(gpa, .{
             .symbol = .{
                 .name = "ans",
-                .ref = @intToEnum(bog.Bytecode.Ref, 0),
+                .ref = @as(bog.Bytecode.Ref, @enumFromInt(0)),
                 .mut = false,
                 .val = undefined,
             },
         });
         try repl.compiler.globals.append(gpa, .{
             .name = "ans",
-            .ref = @intToEnum(bog.Bytecode.Ref, 0),
+            .ref = @as(bog.Bytecode.Ref, @enumFromInt(0)),
             .mut = false,
             .val = undefined,
         });
