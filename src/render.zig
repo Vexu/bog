@@ -294,7 +294,7 @@ fn renderNode(tree: Tree, node: Node.Index, aiw: anytype, space: Space) @TypeOf(
         .fn_expr, .fn_expr_one => {
             var buf: [2]Node.Index = undefined;
             const items = tree.nodeItems(node, &buf);
-            const params = items[@boolToInt(items[0] == 0) .. items.len - 1];
+            const params = items[@intFromBool(items[0] == 0) .. items.len - 1];
             const body = items[items.len - 1];
             const r_paren = tree.prevToken(tree.firstToken(body));
             const maybe_ellipsis = tree.prevToken(r_paren);
@@ -694,7 +694,7 @@ fn AutoIndentingWriter(comptime UnderlyingWriter: type) type {
         /// Turns all one-shot indents into regular indents
         /// Returns number of indents that must now be manually popped
         pub fn lockOneShotIndent(self: *Self) usize {
-            var locked_count = self.indent_one_shot_count;
+            const locked_count = self.indent_one_shot_count;
             self.indent_one_shot_count = 0;
             return locked_count;
         }

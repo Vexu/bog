@@ -242,7 +242,7 @@ pub const Token = struct {
         keyword_while,
     };
 
-    pub const keywords = std.ComptimeStringMap(Id, .{
+    pub const keywords = std.StaticStringMap(Id).initComptime(.{
         .{ "and", .keyword_and },
         .{ "as", .keyword_as },
         .{ "async", .keyword_async },
@@ -390,7 +390,7 @@ pub fn tokenize(gpa: mem.Allocator, source: []const u8, path: []const u8, errors
     errdefer tokenizer.tokens.deinit(gpa);
 
     // estimate one token per 8 bytes to reduce allocation in the beginning
-    const estimated = @intCast(u32, source.len / 8);
+    const estimated: u32 = @intCast(source.len / 8);
     try tokenizer.tokens.ensureUnusedCapacity(gpa, estimated);
 
     while (true) {
@@ -464,7 +464,7 @@ pub const Tokenizer = struct {
             .{ .data = msg },
             self.it.bytes,
             self.path,
-            @truncate(u32, self.it.i - (unicode.utf8CodepointSequenceLength(c) catch unreachable)),
+            @truncate(self.it.i - (unicode.utf8CodepointSequenceLength(c) catch unreachable)),
             .err,
         );
         self.it.i = self.it.bytes.len;
@@ -472,7 +472,7 @@ pub const Tokenizer = struct {
     }
 
     fn getIndent(self: *Tokenizer) !?Token {
-        var start_index = self.it.i;
+        const start_index = self.it.i;
         var count: u8 = 0;
         // get all indentation characters
         while (self.it.nextCodepoint()) |c| switch (c) {
@@ -551,10 +551,10 @@ pub const Tokenizer = struct {
 
         // needed by the repl tokenizer
         self.indent_level = level;
-        return Token{
-            .id = @intToEnum(Token.Id, @enumToInt(Token.Id.indent_1) + (level - 1)),
-            .start = @truncate(u32, start_index),
-            .end = @truncate(u32, self.it.i),
+        return .{
+            .id = @enumFromInt(@intFromEnum(Token.Id.indent_1) + (level - 1)),
+            .start = @truncate(start_index),
+            .end = @truncate(self.it.i),
         };
     }
 
@@ -1243,10 +1243,10 @@ pub const Tokenizer = struct {
                 },
             }
         }
-        return Token{
+        return .{
             .id = res,
-            .start = @truncate(u32, start_index),
-            .end = @truncate(u32, self.it.i),
+            .start = @truncate(start_index),
+            .end = @truncate(self.it.i),
         };
     }
 };

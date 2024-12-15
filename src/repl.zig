@@ -5,7 +5,7 @@ const Allocator = std.mem.Allocator;
 const bog = @import("bog.zig");
 const Vm = bog.Vm;
 const Errors = bog.Errors;
-const linenoize = @import("linenoize");
+const linenoise = @import("linenoise");
 const builtin = @import("builtin");
 
 pub fn run(gpa: Allocator, in: File, out: File) !void {
@@ -17,7 +17,7 @@ pub fn run(gpa: Allocator, in: File, out: File) !void {
 
     repl.vm.gc.stack_protect_start = @frameAddress();
 
-    var frame_val = try repl.vm.gc.alloc(.frame);
+    const frame_val = try repl.vm.gc.alloc(.frame);
     frame_val.* = .{ .frame = &repl.frame };
     defer frame_val.* = .{ .int = 0 }; // clear frame
 
@@ -40,7 +40,7 @@ pub fn run(gpa: Allocator, in: File, out: File) !void {
 
 pub const Repl = struct {
     buffer: ArrayList(u8),
-    ln: linenoize.Linenoise,
+    ln: linenoise.Linenoise,
     tokenizer: bog.Tokenizer,
     parser: bog.Parser,
     tree: bog.Tree,
@@ -60,7 +60,7 @@ pub const Repl = struct {
         errdefer repl.buffer.deinit();
 
         if (builtin.os.tag != .windows) {
-            repl.ln = linenoize.Linenoise.init(gpa);
+            repl.ln = linenoise.Linenoise.init(gpa);
         }
 
         repl.tokenizer = .{
@@ -97,14 +97,14 @@ pub const Repl = struct {
         try repl.compiler.scopes.append(gpa, .{
             .symbol = .{
                 .name = "ans",
-                .ref = @intToEnum(bog.Bytecode.Ref, 0),
+                .ref = @enumFromInt(0),
                 .mut = false,
                 .val = undefined,
             },
         });
         try repl.compiler.globals.append(gpa, .{
             .name = "ans",
-            .ref = @intToEnum(bog.Bytecode.Ref, 0),
+            .ref = @enumFromInt(0),
             .mut = false,
             .val = undefined,
         });
@@ -162,7 +162,7 @@ pub const Repl = struct {
                     break some orelse return;
                 } else |err| switch (err) {
                     error.NeedInput => {},
-                    else => |e| return e,
+                    else => |e| return @as(@TypeOf(e)!void, e),
                 }
             }
 
@@ -180,17 +180,9 @@ pub const Repl = struct {
     }
 
     fn readLine(repl: *Repl, in: File, out: File, prompt: []const u8) !void {
-        if (builtin.os.tag == .windows) {
-            try out.writeAll(prompt);
-
-            const line = try in.reader().readUntilDelimiterAlloc(repl.buffer.allocator, '\n', 1024);
-            defer repl.buffer.allocator.free(line);
-
-            try repl.buffer.appendSlice(line);
-            try repl.buffer.append('\n');
-            return;
-        }
-        if (linenoize.linenoiseRaw(&repl.ln, in, out, prompt)) |maybe_line| {
+        _ = in;
+        _ = out;
+        if (repl.ln.linenoise(prompt)) |maybe_line| {
             const line = maybe_line orelse return error.EndOfStream;
             defer repl.ln.allocator.free(line);
 

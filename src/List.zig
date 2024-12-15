@@ -28,11 +28,11 @@ pub fn get(list: *const List, ctx: Vm.Context, index: *const Value, res: *?*Valu
         .int => {
             var i = index.int;
             if (i < 0)
-                i += @intCast(i64, list.inner.items.len);
+                i += @intCast(list.inner.items.len);
             if (i < 0 or i >= list.inner.items.len)
                 return ctx.throw("index out of bounds");
 
-            res.* = list.inner.items[@intCast(u32, i)];
+            res.* = list.inner.items[@intCast(i)];
         },
         .range => |r| {
             if (r.start < 0 or r.end > list.inner.items.len)
@@ -41,11 +41,11 @@ pub fn get(list: *const List, ctx: Vm.Context, index: *const Value, res: *?*Valu
             res.* = try ctx.vm.gc.alloc(.list);
             res.*.?.* = .{ .list = .{} };
             const res_list = &res.*.?.*.list;
-            try res_list.inner.ensureUnusedCapacity(ctx.vm.gc.gpa, @intCast(usize, r.count()));
+            try res_list.inner.ensureUnusedCapacity(ctx.vm.gc.gpa, @intCast(r.count()));
 
             var it = r.iterator();
             while (it.next()) |some| {
-                res_list.inner.appendAssumeCapacity(list.inner.items[@intCast(u32, some)]);
+                res_list.inner.appendAssumeCapacity(list.inner.items[@intCast(some)]);
             }
         },
         .str => |s| {
@@ -54,8 +54,8 @@ pub fn get(list: *const List, ctx: Vm.Context, index: *const Value, res: *?*Valu
             }
 
             if (mem.eql(u8, s.data, "len")) {
-                res.*.?.* = .{ .int = @intCast(i64, list.inner.items.len) };
-            } else inline for (@typeInfo(methods).Struct.decls) |method| {
+                res.*.?.* = .{ .int = @intCast(list.inner.items.len) };
+            } else inline for (@typeInfo(methods).@"struct".decls) |method| {
                 if (mem.eql(u8, s.data, method.name)) {
                     res.* = try Value.zigFnToBog(ctx.vm, @field(methods, method.name));
                     return;
@@ -79,11 +79,11 @@ pub fn set(list: *List, ctx: Vm.Context, index: *const Value, new_val: *Value) V
         .int => {
             var i = index.int;
             if (i < 0)
-                i += @intCast(i64, list.inner.items.len);
+                i += @intCast(list.inner.items.len);
             if (i < 0 or i >= list.inner.items.len)
                 return ctx.throw("index out of bounds");
 
-            list.inner.items[@intCast(u32, i)] = new_val;
+            list.inner.items[@intCast(i)] = new_val;
         },
         .range => |r| {
             if (r.start < 0 or r.end > list.inner.items.len)
@@ -91,7 +91,7 @@ pub fn set(list: *List, ctx: Vm.Context, index: *const Value, new_val: *Value) V
 
             var it = r.iterator();
             while (it.next()) |some| {
-                list.inner.items[@intCast(u32, some)] = new_val;
+                list.inner.items[@intCast(some)] = new_val;
             }
         },
         else => return ctx.throw("invalid index type"),

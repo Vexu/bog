@@ -88,8 +88,8 @@ pub fn get(str: *const String, ctx: Vm.Context, index: *const Value, res: *?*Val
             }
 
             if (mem.eql(u8, s.data, "len")) {
-                res.*.?.* = .{ .int = @intCast(i64, str.data.len) };
-            } else inline for (@typeInfo(methods).Struct.decls) |method| {
+                res.*.?.* = .{ .int = @intCast(str.data.len) };
+            } else inline for (@typeInfo(methods).@"struct".decls) |method| {
                 if (mem.eql(u8, s.data, method.name)) {
                     res.* = try Value.zigFnToBog(ctx.vm, @field(methods, method.name));
                     return;
@@ -169,7 +169,7 @@ pub const methods = struct {
                             if (args.t[arg_i].* != .int) {
                                 return ctx.throwFmt("'x' takes an integer as an argument, got '{s}'", .{args.t[arg_i].typeName()});
                             }
-                            try std.fmt.formatInt(args.t[arg_i].int, 16, @intToEnum(std.fmt.Case, @boolToInt(fmt[0] == 'X')), options, w);
+                            try std.fmt.formatInt(args.t[arg_i].int, 16, @enumFromInt(@intFromBool(fmt[0] == 'X')), options, w);
                         },
                         0 => if (args.t[arg_i].* == .str) {
                             try b.append(args.t[arg_i].str.data);

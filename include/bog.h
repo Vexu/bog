@@ -16,7 +16,6 @@ typedef enum bog_Error {
     BOG_ERROR_PARSE,
     BOG_ERROR_COMPILE,
     BOG_ERROR_RUNTIME,
-    BOG_ERROR_MALFORMED_BYTE_CODE,
     BOG_ERROR_NOT_A_MAP,
     BOG_ERROR_NO_SUCH_MEMBER,
     BOG_ERROR_NOT_A_FUNCTION,
@@ -36,10 +35,10 @@ bog_Error bog_Vm_addStd(bog_Vm *vm);
 bog_Error bog_Vm_addStdNoIo(bog_Vm *vm);
 
 // possible errors: BOG_ERROR_OUT_OF_MEMORY, BOG_ERROR_TOKENIZE, BOG_ERROR_PARSE, BOG_ERROR_COMPILE,
-//      BOG_ERROR_RUNTIME, BOG_ERROR_MALFORMED_BYTE_CODE
+//      BOG_ERROR_RUNTIME
 bog_Error bog_Vm_run(bog_Vm *vm, bog_Value **result, const char *source);
 
-// possible errors: BOG_ERROR_OUT_OF_MEMORY, BOG_ERROR_RUNTIME, BOG_ERROR_MALFORMED_BYTE_CODE,
+// possible errors: BOG_ERROR_OUT_OF_MEMORY, BOG_ERROR_RUNTIME,
 //      BOG_ERROR_NOT_A_MAP, BOG_ERROR_NO_SUCH_MEMBER, BOG_ERROR_NOT_A_FUNCTION,
 //      BOG_ERROR_INVALID_ARG_COUNT, BOG_ERROR_NATIVE_FUNCTIONS_UNSUPPORTED
 bog_Error bog_Vm_call(bog_Vm *vm, bog_Value **result, bog_Value *container, const char *func_name);

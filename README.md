@@ -137,7 +137,7 @@ try vm.addStd();
 
 const res = vm.run(source) catch |e| switch (e) {
     else => |err| return err,
-    error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
+    error.TokenizeError, error.ParseError, error.CompileError => {
         try vm.errors.render(source, out_stream);
         return error.RunningBogFailed;
     },
@@ -154,7 +154,7 @@ defer vm.deinit();
 
 const res = vm.run(source) catch |e| switch (e) {
     else => |err| return err,
-    error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
+    error.TokenizeError, error.ParseError, error.CompileError => {
         try vm.errors.render(source, out_stream);
         return error.RunningBogFailed;
     },
@@ -162,7 +162,7 @@ const res = vm.run(source) catch |e| switch (e) {
 
 const call_res = vm.call(res, "bogFunction", .{1, true}) catch |e| switch (e) {
     else => |err| return err,
-    error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
+    error.TokenizeError, error.ParseError, error.CompileError => {
         try vm.errors.render(source, out_stream);
         return error.CallingBogFunctionFailed;
     },
@@ -186,7 +186,7 @@ try vm.addPackage("my_lib", my_lib);
 
 const res = vm.run(source) catch |e| switch (e) {
     else => |err| return err,
-    error.TokenizeError, error.ParseError, error.CompileError, error.RuntimeError => {
+    error.TokenizeError, error.ParseError, error.CompileError => {
         try vm.errors.render(source, out_stream);
         return error.RunningBogFailed;
     },

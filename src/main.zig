@@ -1,7 +1,7 @@
 const std = @import("std");
 const process = std.process;
 const mem = std.mem;
-const bog = @import("bog.zig");
+const bog = @import("bog");
 const repl = bog.repl;
 
 const is_debug = @import("builtin").mode == .Debug;
@@ -92,7 +92,7 @@ fn run(gpa: std.mem.Allocator, args: [][]const u8) !void {
     switch (res.*) {
         .int => |int| {
             if (int >= 0 and int < std.math.maxInt(u8)) {
-                process.exit(@intCast(u8, int));
+                process.exit(@intCast(int));
             } else {
                 fatal("invalid exit code: {}", .{int});
             }
@@ -127,14 +127,14 @@ fn fmt(gpa: std.mem.Allocator, args: [][]const u8) !void {
 }
 
 const FmtError = std.mem.Allocator.Error || std.fs.File.OpenError || std.fs.File.Writer.Error ||
-    std.fs.Dir.OpenError || std.fs.File.GetSeekPosError || std.fs.IterableDir.Iterator.Error ||
+    std.fs.Dir.OpenError || std.fs.File.GetSeekPosError || std.fs.Dir.Iterator.Error ||
     std.fs.File.Reader.Error || error{EndOfStream};
 
 fn fmtFile(gpa: std.mem.Allocator, name: []const u8) FmtError!bool {
     const source = std.fs.cwd().readFileAlloc(gpa, name, 1024 * 1024) catch |e| switch (e) {
         error.OutOfMemory => return error.OutOfMemory,
         error.IsDir => {
-            var dir = std.fs.cwd().openIterableDir(name, .{}) catch |e2| {
+            var dir = std.fs.cwd().openDir(name, .{ .iterate = true }) catch |e2| {
                 try std.io.getStdErr().writer().print("unable to open '{s}': {}\n", .{ name, e2 });
                 return e2;
             };

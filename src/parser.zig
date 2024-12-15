@@ -14,7 +14,7 @@ pub fn parse(gpa: Allocator, source: []const u8, path: []const u8, errors: *bog.
     var tokens = try bog.tokenize(gpa, source, path, errors);
     errdefer tokens.deinit(gpa);
 
-    var parser = Parser{
+    var parser: Parser = .{
         .errors = errors,
         .source = source,
         .path = path,
@@ -44,7 +44,7 @@ pub fn parse(gpa: Allocator, source: []const u8, path: []const u8, errors: *bog.
         };
     }
 
-    return Tree{
+    return .{
         .root_nodes = try parser.node_buf.toOwnedSlice(),
         .tokens = tokens,
         .extra = try parser.extra.toOwnedSlice(),
@@ -102,7 +102,7 @@ pub const Parser = struct {
             .token = token,
             .data = .{ .un = op },
         });
-        return @intCast(Node.Index, index);
+        return @intCast(index);
     }
 
     fn addBin(p: *Parser, id: Node.Id, token: Token.Index, lhs: Node.Index, rhs: Node.Index) !Node.Index {
@@ -112,24 +112,24 @@ pub const Parser = struct {
             .token = token,
             .data = .{ .bin = .{ .lhs = lhs, .rhs = rhs } },
         });
-        return @intCast(Node.Index, index);
+        return @intCast(index);
     }
 
     fn addList(p: *Parser, id: Node.Id, token: Token.Index, nodes: []const Node.Index) Allocator.Error!Node.Index {
-        const start = @intCast(u32, p.extra.items.len);
+        const start: u32 = @intCast(p.extra.items.len);
         try p.extra.appendSlice(nodes);
 
         const index = p.nodes.len;
         try p.nodes.append(p.extra.allocator, .{
             .id = id,
             .token = token,
-            .data = .{ .range = .{ .start = start, .end = @intCast(u32, p.extra.items.len) } },
+            .data = .{ .range = .{ .start = start, .end = @intCast(p.extra.items.len) } },
         });
-        return @intCast(Node.Index, index);
+        return @intCast(index);
     }
 
     fn addCond(p: *Parser, id: Node.Id, token: Token.Index, cond: Node.Index, nodes: []const Node.Index) Allocator.Error!Node.Index {
-        const start = @intCast(u32, p.extra.items.len);
+        const start: u32 = @intCast(p.extra.items.len);
         try p.extra.appendSlice(nodes);
 
         const index = p.nodes.len;
@@ -138,7 +138,7 @@ pub const Parser = struct {
             .token = token,
             .data = .{ .cond = .{ .cond = cond, .extra = start } },
         });
-        return @intCast(Node.Index, index);
+        return @intCast(index);
     }
 
     /// decl : "let" primary_expr "=" block_or_expr
@@ -385,7 +385,7 @@ pub const Parser = struct {
     /// range_expr : bit_expr (":" bit_expr? (":" bit_expr)?)?
     fn rangeExpr(p: *Parser, skip_nl: SkipNl, level: u8) Error!Node.Index {
         const start = try p.bitExpr(skip_nl, level);
-        var colon_1 = p.eatToken(.colon, skip_nl) orelse return start;
+        const colon_1 = p.eatToken(.colon, skip_nl) orelse return start;
 
         var end: Node.Index = null_node;
         var colon_2 = p.eatToken(.colon, skip_nl);
@@ -608,9 +608,9 @@ pub const Parser = struct {
         const ops = [2][2]Node.Id{ .{ .call_expr_one, .call_expr }, .{ .async_call_expr_one, .async_call_expr } };
         return switch (args.len) {
             0 => unreachable, // we pass lhs as first
-            1 => try p.addBin(ops[@boolToInt(is_async)][0], tok, lhs, null_node),
-            2 => try p.addBin(ops[@boolToInt(is_async)][0], tok, lhs, args[1]),
-            else => try p.addList(ops[@boolToInt(is_async)][1], tok, args),
+            1 => try p.addBin(ops[@intFromBool(is_async)][0], tok, lhs, null_node),
+            2 => try p.addBin(ops[@intFromBool(is_async)][0], tok, lhs, args[1]),
+            else => try p.addList(ops[@intFromBool(is_async)][1], tok, args),
         };
     }
 
@@ -708,9 +708,9 @@ pub const Parser = struct {
         }
         try toks.append(try p.expectToken(.format_end, skip_nl));
 
-        const fmt_start = @intCast(u32, p.extra.items.len);
-        try p.extra.appendSlice(@ptrCast([]Node.Index, toks.items));
-        const args_start = @intCast(u32, p.extra.items.len);
+        const fmt_start: u32 = @intCast(p.extra.items.len);
+        try p.extra.appendSlice(@ptrCast(toks.items));
+        const args_start: u32 = @intCast(p.extra.items.len);
         try p.extra.appendSlice(p.node_buf.items[node_buf_top..]);
 
         const index = p.nodes.len;
@@ -719,7 +719,7 @@ pub const Parser = struct {
             .token = first,
             .data = .{ .format = .{ .fmt_start = fmt_start, .args_start = args_start } },
         });
-        return @intCast(Node.Index, index);
+        return @intCast(index);
     }
 
     /// initializer

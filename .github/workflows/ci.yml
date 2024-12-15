@@ -7,16 +7,16 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{matrix.os}}
     steps:
-      - uses: actions/checkout@v2.3.4
-      - uses: goto-bus-stop/setup-zig@v1.3.0
+      - uses: actions/checkout@v3
+      - uses: mlugg/setup-zig@v1
         with:
           version: master
       - run: zig build test
   fmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2.3.4
-      - uses: goto-bus-stop/setup-zig@v1.3.0
+      - uses: actions/checkout@v3
+      - uses: mlugg/setup-zig@v1
         with:
           version: master
       - run: zig fmt --check build.zig src

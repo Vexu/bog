@@ -5,10 +5,8 @@ const bog = @import("bog.zig");
 const Vm = bog.Vm;
 
 pub const Type = enum(u8) {
-    null,
     int,
     num,
-    bool,
     str,
     tuple,
     map,
@@ -31,29 +29,33 @@ pub const Type = enum(u8) {
 
     /// Result of ... operand, needs special handling in contexts where allowed.
     spread,
+
+    // always memoized
+    bool,
+    null,
 };
 
 pub const Value = union(Type) {
+    int: i64,
+    num: f64,
+    str: String,
     tuple: []*Value,
     map: Map,
     list: List,
     err: *Value,
-    int: i64,
-    num: f64,
     range: Range,
-    str: String,
     func: Func,
-    frame: *Vm.Frame,
-    native: Native,
-    native_val: NativeVal,
     tagged: struct {
         name: []const u8,
         value: *Value,
     },
+    frame: *Vm.Frame,
     iterator: Iterator,
+    native: Native,
+    native_val: NativeVal,
     spread: Spread,
 
-    /// always memoized
+    // always memoized
     bool: bool,
     null,
 
@@ -115,8 +117,7 @@ pub const Value = union(Type) {
                     const e_key = &map.keys()[iter.i.u].*;
                     const e_value = &map.values()[iter.i.u].*;
                     const t = res.*.?.tuple;
-                    // removing `const` on `Map` causes dependency loop??
-                    t[0] = @intToPtr(*Value, @ptrToInt(e_key));
+                    t[0] = @constCast(e_key);
                     t[1] = e_value;
                     iter.i.u += 1;
                 },
@@ -171,19 +172,19 @@ pub const Value = union(Type) {
         extra_index: u32,
 
         pub fn args(f: Func) u32 {
-            return @enumToInt(f.module.extra[f.extra_index]) & std.math.maxInt(u31);
+            return @intFromEnum(f.module.extra[f.extra_index]) & std.math.maxInt(u31);
         }
 
         pub fn variadic(f: Func) bool {
-            return (@enumToInt(f.module.extra[f.extra_index]) >> 31) != 0;
+            return (@intFromEnum(f.module.extra[f.extra_index]) >> 31) != 0;
         }
 
         pub fn captures(f: Func) []*Value {
-            return f.captures_ptr[0..@enumToInt(f.module.extra[f.extra_index + 1])];
+            return f.captures_ptr[0..@intFromEnum(f.module.extra[f.extra_index + 1])];
         }
 
         pub fn body(f: Func) []const u32 {
-            return @ptrCast([]const u32, f.module.extra[f.extra_index + 2 + @enumToInt(f.module.extra[f.extra_index + 1]) ..][0..f.body_len]);
+            return @ptrCast(f.module.extra[f.extra_index + 2 + @intFromEnum(f.module.extra[f.extra_index + 1]) ..][0..f.body_len]);
         }
     };
 
@@ -193,7 +194,7 @@ pub const Value = union(Type) {
         step: i64 = 1,
 
         pub fn count(r: Range) u64 {
-            return @intCast(u64, @divFloor(r.end - r.start - 1, r.step));
+            return @intCast(@divFloor(r.end - r.start - 1, r.step));
         }
 
         pub fn iterator(r: Range) Range.Iterator {
@@ -240,7 +241,7 @@ pub const Value = union(Type) {
             set: ?*const fn (*anyopaque, Vm.Context, index: *const Value, new_val: *Value) NativeError!void = null,
             contains: ?*const fn (*anyopaque, *const Value) bool = null,
 
-            pub fn get(comptime T: type) *const VTable {
+            pub fn make(comptime T: type) *const VTable {
                 return &struct {
                     const vtable = NativeVal.VTable{
                         .typeName = T.typeName,
@@ -258,11 +259,11 @@ pub const Value = union(Type) {
         };
 
         pub inline fn unwrap(ptr: *anyopaque, comptime T: type) *T {
-            return @ptrCast(*T, @alignCast(@alignOf(T), ptr));
+            return @ptrCast(@alignCast(ptr));
         }
 
         pub fn typeId(comptime _: type) usize {
-            return @ptrToInt(&struct {
+            return @intFromPtr(&struct {
                 var id: u8 = 0;
             }.id);
         }
@@ -407,18 +408,18 @@ pub const Value = union(Type) {
                 }
             },
         }
-        return @truncate(u32, hasher.final());
+        return @truncate(hasher.final());
     }
 
     pub fn eql(a: *const Value, b: *const Value) bool {
         switch (a.*) {
             .int => |i| return switch (b.*) {
                 .int => |b_val| i == b_val,
-                .num => |b_val| @intToFloat(f64, i) == b_val,
+                .num => |b_val| @as(f64, @floatFromInt(i)) == b_val,
                 else => false,
             },
             .num => |n| return switch (b.*) {
-                .int => |b_val| n == @intToFloat(f64, b_val),
+                .int => |b_val| n == @as(f64, @floatFromInt(b_val)),
                 .num => |b_val| n == b_val,
                 else => false,
             },
@@ -532,7 +533,7 @@ pub const Value = union(Type) {
                 try writer.print("frame@x{X}", .{f.body[0]});
             },
             .native => |n| {
-                try writer.print("native({})@0x{}", .{ n.arg_count, @ptrToInt(n.func) });
+                try writer.print("native({})@0x{}", .{ n.arg_count, @intFromPtr(n.func) });
             },
             .tagged => |t| {
                 try writer.print("@{s}", .{t.name});
@@ -556,11 +557,11 @@ pub const Value = union(Type) {
                 .int => {
                     var i = index.int;
                     if (i < 0)
-                        i += @intCast(i64, tuple.len);
+                        i += @intCast(tuple.len);
                     if (i < 0 or i >= tuple.len)
                         return ctx.throw("index out of bounds");
 
-                    res.* = tuple[@intCast(u32, i)];
+                    res.* = tuple[@intCast(i)];
                 },
                 .range => |r| {
                     if (r.start < 0 or r.end > tuple.len)
@@ -569,11 +570,11 @@ pub const Value = union(Type) {
                     res.* = try ctx.vm.gc.alloc(.list);
                     res.*.?.* = .{ .list = .{} };
                     const res_list = &res.*.?.*.list;
-                    try res_list.inner.ensureUnusedCapacity(ctx.vm.gc.gpa, @intCast(usize, r.count()));
+                    try res_list.inner.ensureUnusedCapacity(ctx.vm.gc.gpa, @intCast(r.count()));
 
                     var it = r.iterator();
                     while (it.next()) |some| {
-                        res_list.inner.appendAssumeCapacity(tuple[@intCast(u32, some)]);
+                        res_list.inner.appendAssumeCapacity(tuple[@intCast(some)]);
                     }
                 },
                 .str => |s| {
@@ -582,7 +583,7 @@ pub const Value = union(Type) {
                     }
 
                     if (mem.eql(u8, s.data, "len")) {
-                        res.*.?.* = .{ .int = @intCast(i64, tuple.len) };
+                        res.*.?.* = .{ .int = @intCast(tuple.len) };
                     } else {
                         return ctx.throw("no such property");
                     }
@@ -640,11 +641,11 @@ pub const Value = union(Type) {
                 .int => {
                     var i = index.int;
                     if (i < 0)
-                        i += @intCast(i64, tuple.len);
+                        i += @intCast(tuple.len);
                     if (i < 0 or i >= tuple.len)
                         return ctx.throw("index out of bounds");
 
-                    tuple[@intCast(u32, i)] = new_val;
+                    tuple[@intCast(i)] = new_val;
                 },
                 .range => |r| {
                     if (r.start < 0 or r.end > tuple.len)
@@ -652,7 +653,7 @@ pub const Value = union(Type) {
 
                     var it = r.iterator();
                     while (it.next()) |some| {
-                        tuple[@intCast(u32, some)] = new_val;
+                        tuple[@intCast(some)] = new_val;
                     }
                 },
                 else => return ctx.throw("invalid index type"),
@@ -711,7 +712,7 @@ pub const Value = union(Type) {
                 .int = switch (val.*) {
                     .int => unreachable,
                     .num => |num| std.math.lossyCast(i64, num),
-                    .bool => |b| @boolToInt(b),
+                    .bool => |b| @intFromBool(b),
                     .str => unreachable,
                     else => return ctx.throwFmt("cannot cast {s} to int", .{val.typeName()}),
                 },
@@ -719,8 +720,8 @@ pub const Value = union(Type) {
             .num => .{
                 .num = switch (val.*) {
                     .num => unreachable,
-                    .int => |int| @intToFloat(f64, int),
-                    .bool => |b| @intToFloat(f64, @boolToInt(b)),
+                    .int => |int| @floatFromInt(int),
+                    .bool => |b| @floatFromInt(@intFromBool(b)),
                     .str => unreachable,
                     else => return ctx.throwFmt("cannot cast {s} to num", .{val.typeName()}),
                 },
@@ -767,7 +768,7 @@ pub const Value = union(Type) {
         }
     }
 
-    pub fn iterator(val: *const Value, ctx: Vm.Context) NativeError!*Value {
+    pub fn iterate(val: *const Value, ctx: Vm.Context) NativeError!*Value {
         var start: ?i64 = null;
         switch (val.*) {
             .range => |r| start = r.start,
@@ -787,7 +788,7 @@ pub const Value = union(Type) {
 
     /// Converts Zig value to Bog value. Allocates copy in the gc.
     pub fn zigToBog(vm: *Vm, val: anytype) error{OutOfMemory}!*Value {
-        if (comptime std.meta.trait.hasFn("intoBog")(@TypeOf(val))) {
+        if (comptime std.meta.hasFn(@TypeOf(val), "intoBog")) {
             return try val.intoBog(vm);
         }
 
@@ -812,18 +813,12 @@ pub const Value = union(Type) {
                 return str;
             },
             type => switch (@typeInfo(val)) {
-                .Struct => |info| {
-                    comptime var pub_decls = 0;
-                    inline for (info.decls) |decl| {
-                        if (decl.is_pub) pub_decls += 1;
-                    }
-
+                .@"struct" => |info| {
                     const res = try vm.gc.alloc(.map);
                     res.* = .{ .map = .{} };
-                    try res.map.ensureTotalCapacity(vm.gc.gpa, pub_decls);
+                    try res.map.ensureTotalCapacity(vm.gc.gpa, info.decls.len);
 
                     inline for (info.decls) |decl| {
-                        if (!decl.is_pub) continue;
                         // skip common interfaces
                         if (comptime std.mem.eql(u8, decl.name, "intoBog")) continue;
                         if (comptime std.mem.eql(u8, decl.name, "fromBog")) continue;
@@ -832,7 +827,7 @@ pub const Value = union(Type) {
                         const key = try vm.gc.alloc(.str);
                         key.* = Value.string(decl.name);
 
-                        const value = if (@typeInfo(@TypeOf(@field(val, decl.name))) == .Fn)
+                        const value = if (@typeInfo(@TypeOf(@field(val, decl.name))) == .@"fn")
                             try zigFnToBog(vm, @field(val, decl.name))
                         else
                             try zigToBog(vm, @field(val, decl.name));
@@ -844,16 +839,16 @@ pub const Value = union(Type) {
                 else => @compileError("unsupported type: " ++ @typeName(val)),
             },
             else => switch (@typeInfo(@TypeOf(val))) {
-                .Pointer => |info| {
+                .pointer => |info| {
                     if (info.size == .Slice) @compileError("unsupported type: " ++ @typeName(val));
                     const int = try vm.gc.alloc(.int);
                     int.* = .{
-                        .int = @bitCast(isize, @ptrToInt(val)),
+                        .int = @bitCast(@intFromPtr(val)),
                     };
                     return int;
                 },
-                .Fn => @compileError("use zigFnToBog"),
-                .ComptimeInt, .Int => {
+                .@"fn" => @compileError("use zigFnToBog"),
+                .comptime_int, .int => {
                     const int = try vm.gc.alloc(.int);
                     int.* = .{
                         // try to implicit cast the value
@@ -861,7 +856,7 @@ pub const Value = union(Type) {
                     };
                     return int;
                 },
-                .ComptimeFloat, .Float => {
+                .comptime_float, .float => {
                     const num = try vm.gc.alloc(.num);
                     num.* = .{
                         // try to implicit cast the value
@@ -869,7 +864,7 @@ pub const Value = union(Type) {
                     };
                     return num;
                 },
-                .ErrorUnion => if (val) |some| {
+                .error_union => if (val) |some| {
                     return zigToBog(vm, some);
                 } else |e| {
                     // wrap error string
@@ -879,7 +874,7 @@ pub const Value = union(Type) {
                     err.* = .{ .err = str };
                     return err;
                 },
-                .Enum => {
+                .@"enum" => {
                     const tag = try vm.gc.alloc(.tagged);
                     tag.* = .{
                         .tagged = .{
@@ -889,7 +884,7 @@ pub const Value = union(Type) {
                     };
                     return tag;
                 },
-                .Optional => if (val) |some| {
+                .optional => if (val) |some| {
                     return zigToBog(vm, some);
                 } else {
                     return Value.Null;
@@ -900,7 +895,7 @@ pub const Value = union(Type) {
     }
 
     pub fn zigFnToBog(vm: *Vm, comptime func: anytype) error{OutOfMemory}!*Value {
-        const Fn = @typeInfo(@TypeOf(func)).Fn;
+        const Fn = @typeInfo(@TypeOf(func)).@"fn";
         if (Fn.is_generic) @compileError("cannot wrap a generic function");
 
         @setEvalBranchQuota(Fn.params.len * 1000);
@@ -925,11 +920,11 @@ pub const Value = union(Type) {
 
                         args[i] = ctx;
                         vm_passed = true;
-                    } else if (@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T")) {
+                    } else if (@typeInfo(ArgT) == .@"struct" and @hasDecl(ArgT, "__bog_This_T")) {
                         if (i != 0) @compileError("Value.This must be the first parameter");
                         args[i] = ArgT{ .t = try ctx.this.bogToZig(ArgT.__bog_This_T, ctx) };
                         this_passed = true;
-                    } else if (@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_Variadic_T")) {
+                    } else if (@typeInfo(ArgT) == .@"struct" and @hasDecl(ArgT, "__bog_Variadic_T")) {
                         variadic = true;
                         const args_tuple_size = bog_args.len - bog_arg_i;
                         const args_tuple = try ctx.vm.gc.gpa.alloc(ArgT.__bog_Variadic_T, args_tuple_size);
@@ -947,11 +942,11 @@ pub const Value = union(Type) {
                 const res = @call(.auto, func, args);
                 if (variadic) ctx.vm.gc.gpa.free(args[args.len - 1].t);
                 switch (@typeInfo(@TypeOf(res))) {
-                    .ErrorSet => switch (@as(anyerror, res)) {
+                    .error_set => switch (@as(anyerror, res)) {
                         error.FatalError, error.Throw => |e| return e,
                         else => |e| return ctx.throw(@errorName(e)),
                     },
-                    .ErrorUnion => if (res) |val| {
+                    .error_union => if (res) |val| {
                         return Value.zigToBog(ctx.vm, val);
                     } else |err| switch (@as(anyerror, err)) {
                         error.FatalError, error.Throw => |e| return e,
@@ -967,9 +962,9 @@ pub const Value = union(Type) {
         comptime var variadic = false;
         comptime for (Fn.params) |arg| {
             const ArgT = arg.type.?;
-            if (@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_Variadic_T")) {
+            if (@typeInfo(ArgT) == .@"struct" and @hasDecl(ArgT, "__bog_Variadic_T")) {
                 variadic = true;
-            } else if (ArgT != Vm.Context and !(@typeInfo(ArgT) == .Struct and @hasDecl(ArgT, "__bog_This_T"))) {
+            } else if (ArgT != Vm.Context and !(@typeInfo(ArgT) == .@"struct" and @hasDecl(ArgT, "__bog_This_T"))) {
                 bog_arg_count += 1;
             }
         };
@@ -988,7 +983,7 @@ pub const Value = union(Type) {
     /// Converts Bog value to Zig value. Returned string is invalidated
     /// on next garbage collection.
     pub fn bogToZig(val: *Value, comptime T: type, ctx: Vm.Context) NativeError!T {
-        if (comptime std.meta.trait.hasFn("fromBog")(T)) {
+        if (comptime std.meta.hasFn(T, "fromBog")) {
             return try T.fromBog(val, ctx);
         }
 
@@ -1031,29 +1026,29 @@ pub const Value = union(Type) {
                 }
             },
             else => switch (@typeInfo(T)) {
-                .Int => switch (val.*) {
+                .int => switch (val.*) {
                     .int => |int| {
                         if (int < std.math.minInt(T) or int > std.math.maxInt(T))
                             return ctx.throw("cannot fit int in desired type");
-                        return @intCast(T, int);
+                        return @intCast(int);
                     },
                     .num => |num| std.math.lossyCast(T, num),
                     else => return ctx.throw("expected int"),
                 },
-                .Float => |info| switch (info.bits) {
+                .float => |info| switch (info.bits) {
                     32 => switch (val.*) {
-                        .num => |num| @floatCast(f32, num),
-                        .int => |int| @intToFloat(f32, int),
+                        .num => |num| @floatCast(num),
+                        .int => |int| @floatFromInt(int),
                         else => return ctx.throw("expected num"),
                     },
                     64 => switch (val.*) {
                         .num => |num| num,
-                        .int => |int| @intToFloat(f64, int),
+                        .int => |int| @floatFromInt(int),
                         else => return ctx.throw("expected num"),
                     },
                     else => @compileError("unsupported float"),
                 },
-                .Enum => {
+                .@"enum" => {
                     if (val.* != .tagged)
                         return ctx.throw("expected tag");
                     const e = std.meta.stringToEnum(T, val.tagged.name) orelse
@@ -1062,7 +1057,7 @@ pub const Value = union(Type) {
                         return ctx.throw("expected no value");
                     return e;
                 },
-                .Pointer => |info| {
+                .pointer => |info| {
                     if (val.* != .native_val or NativeVal.typeId(info.child) != val.native_val.type_id)
                         return ctx.throw("expected a " ++ @typeName(info.child));
                     return NativeVal.unwrap(val.native_val.ptr, info.child);
@@ -1072,46 +1067,46 @@ pub const Value = union(Type) {
         };
     }
 
-    pub fn jsonStringify(val: *const Value, options: std.json.StringifyOptions, writer: anytype) @TypeOf(writer).Error!void {
+    pub fn jsonStringify(val: *const Value, writer: anytype) @TypeOf(writer.*).Error!void {
         switch (val.*) {
-            .null => try writer.writeAll("null"),
+            .null => try writer.print("null", .{}),
             .tuple => |t| {
-                try writer.writeByte('[');
-                for (t, 0..) |e, i| {
-                    if (i != 0) try writer.writeByte(',');
-                    try e.jsonStringify(options, writer);
+                try writer.beginArray();
+                for (t) |e| {
+                    try e.jsonStringify(writer);
                 }
-                try writer.writeByte(']');
+                try writer.endArray();
             },
             .list => |*l| {
-                try writer.writeByte('[');
-                for (l.inner.items, 0..) |e, i| {
-                    if (i != 0) try writer.writeByte(',');
-                    try e.jsonStringify(options, writer);
+                try writer.beginArray();
+                for (l.inner.items) |e| {
+                    try e.jsonStringify(writer);
                 }
-                try writer.writeByte(']');
+                try writer.endArray();
             },
             .map => |*m| {
-                try writer.writeByte('{');
-                var i: usize = 0;
+                try writer.beginObject();
                 var iter = m.iterator();
-                while (iter.next()) |entry| : (i += 1) {
-                    if (i != 0)
-                        try writer.writeAll(", ");
+                while (iter.next()) |entry| {
+                    try writer.beginObjectFieldRaw();
+                    try entry.key_ptr.*.jsonStringify(writer);
+                    writer.endObjectFieldRaw();
 
-                    try entry.key_ptr.*.jsonStringify(options, writer);
-                    try writer.writeAll(":");
-                    try entry.value_ptr.*.jsonStringify(options, writer);
+                    try entry.value_ptr.*.jsonStringify(writer);
                 }
-                try writer.writeByte('}');
+                try writer.endObject();
             },
 
             .int,
             .num,
             .bool,
-            => try val.dump(writer, 0),
+            => {
+                try writer.beginWriteRaw();
+                try val.dump(writer.stream, 0);
+                writer.endWriteRaw();
+            },
             .str => |s| {
-                try writer.print("\"{}\"", .{std.zig.fmtEscapes(s.data)});
+                try writer.write(s.data);
             },
             .native,
             .func,
@@ -1121,9 +1116,11 @@ pub const Value = union(Type) {
             .tagged,
             .native_val,
             => {
-                try writer.writeByte('\"');
-                try val.dump(writer, 0);
-                try writer.writeByte('\"');
+                try writer.beginWriteRaw();
+                try writer.stream.writeByte('\"');
+                try val.dump(writer.stream, 0);
+                try writer.stream.writeByte('\"');
+                writer.endWriteRaw();
             },
             .iterator, .spread => unreachable,
         }
@@ -1140,11 +1137,11 @@ fn testDump(val: Value, expected: []const u8) !void {
 }
 
 test "dump int/num" {
-    var int = Value{
+    const int = Value{
         .int = 2,
     };
     try testDump(int, "2");
-    var num = Value{
+    const num = Value{
         .num = 2.5,
     };
     try testDump(num, "2.5");
@@ -1154,7 +1151,7 @@ test "dump error" {
     var int = Value{
         .int = 2,
     };
-    var err = Value{
+    const err = Value{
         .err = &int,
     };
     try testDump(err, "error(2)");

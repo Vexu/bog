@@ -7,7 +7,7 @@ pub fn open(ctx: Vm.Context, path: []const u8) !*Value {
     // TODO take options as parameters
     const res = try ctx.vm.gc.alloc(.native_val);
     res.* = .{ .native_val = .{
-        .vtable = Value.NativeVal.VTable.get(File),
+        .vtable = Value.NativeVal.VTable.make(File),
         .type_id = Value.NativeVal.typeId(File),
         .ptr = try ctx.vm.gc.gpa.create(File),
     } };
@@ -37,7 +37,7 @@ const File = struct {
                     res.* = try ctx.vm.gc.alloc(.int);
                 }
 
-                inline for (@typeInfo(methods).Struct.decls) |method| {
+                inline for (@typeInfo(methods).@"struct".decls) |method| {
                     if (std.mem.eql(u8, s.data, method.name)) {
                         res.* = try Value.zigFnToBog(ctx.vm, @field(methods, method.name));
                         return;
