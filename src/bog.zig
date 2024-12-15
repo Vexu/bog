@@ -105,37 +105,38 @@ pub const Errors = struct {
     }
 
     pub fn render(self: *Errors, writer: anytype) !void {
-        const term_util = @import("term_util.zig");
+        // TODO should be an arg
+        const tty = zig_std.io.tty.detectConfig(zig_std.io.getStdErr());
         const gpa = self.arena.child_allocator;
         for (self.list.items) |*e| {
             const prefix = if (zig_std.fs.path.dirname(e.path) == null and e.path[0] != '<') "." ++ zig_std.fs.path.sep_str else "";
             switch (e.kind) {
                 .err => {
-                    try term_util.setColor(.white, writer);
+                    try tty.setColor(writer, .white);
                     try writer.print("{s}{s}:{d}:{d}: ", .{ prefix, e.path, e.line_num, e.col_num });
-                    try term_util.setColor(.red, writer);
+                    try tty.setColor(writer, .red);
                     try writer.writeAll("error: ");
-                    try term_util.setColor(.white, writer);
+                    try tty.setColor(writer, .white);
                 },
                 .note => {
-                    try term_util.setColor(.white, writer);
+                    try tty.setColor(writer, .white);
                     try writer.print("{s}{s}:{d}:{d}: ", .{ prefix, e.path, e.line_num, e.col_num });
-                    try term_util.setColor(.cyan, writer);
+                    try tty.setColor(writer, .cyan);
                     try writer.writeAll("note: ");
-                    try term_util.setColor(.white, writer);
+                    try tty.setColor(writer, .white);
                 },
                 .trace => {
                     try writer.print("{s}{s}:{d}:{d}: ", .{ prefix, e.path, e.line_num, e.col_num });
                 },
             }
             try writer.print("{s}\n", .{e.msg.data});
-            try term_util.setColor(.reset, writer);
+            try tty.setColor(writer, .reset);
 
             try writer.print("{s}\n", .{e.line});
             try writer.writeByteNTimes(' ', e.col_num - 1);
-            if (e.kind != .trace) try term_util.setColor(.green, writer);
+            if (e.kind != .trace) try tty.setColor(writer, .green);
             try writer.writeAll("^\n");
-            try term_util.setColor(.reset, writer);
+            try tty.setColor(writer, .reset);
             e.msg.deinit(gpa);
         }
         self.list.items.len = 0;
